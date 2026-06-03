@@ -57,7 +57,9 @@ Rather than a standalone spike, these validations are embedded into the first We
 
 ### V1: SendMessage Timing Assertion
 
-In the first jslib round-trip: log `Time.frameCount` in C# before the DllImport call and inside the SendMessage handler. If they differ, we know delivery is deferred and add a queue. This is a `Debug.Assert`, not a separate project.
+Critical detail: the test must exercise an *async* JS path, not a synchronous one. If jslib calls `SendMessage` directly inside a DllImport handler, it's trivially synchronous and tells us nothing about the case we actually care about.
+
+The real test: C# calls jslib, jslib schedules a microtask (`Promise.resolve().then(() => SendMessage(...))` or `setTimeout(() => SendMessage(...), 0)`), C# logs `Time.frameCount` before the DllImport and the handler logs it on receipt. If the values match, delivery is synchronous from async callbacks too — our assumption holds. If they differ, SendMessage queues to the next frame and we need a one-frame queue layer.
 
 ### V2: Awaitable + DllImport Continuation
 
@@ -99,10 +101,10 @@ The `id:payload` packing in SendMessage is dictated by the single-string constra
 
 ### File Layout
 
-The repo root *is* the UPM package — `package.json` at the top level, customers install via UPM git URL with no subfolder path.
+The repo root *is* the UPM package (id: `io.elevenlabs.agents`, starting version 0.1.0) — `package.json` at the top level, customers install via UPM git URL with no subfolder path.
 
 ```
-package.json                       — UPM package manifest
+package.json                       — UPM package manifest (io.elevenlabs.agents, 0.1.0)
 Runtime/
   ElevenLabs.Agents.WebGL.asmdef  — assembly definition (WebGL + Editor for testing)
   WebGL/
@@ -113,6 +115,7 @@ Runtime/
     BridgeIdGenerator.cs          — Monotonic int ID generation
     BridgeMessageParser.cs        — "id:payload" string parsing
     BridgeException.cs            — JS-originated error type
+    BridgeLog.cs                  — Tagged logger ([ElevenLabs Bridge] prefix)
     ElevenLabsBridgeNative.cs     — DllImport declarations + non-WebGL throwing stubs
 Plugins/
   WebGL/
@@ -135,6 +138,8 @@ namespace ElevenLabs.WebGL
 {
     public sealed class WebGLBridge : MonoBehaviour
     {
+        // Single source of truth for the GameObject name. Pushed to the jslib at startup
+        // via EL_SetBridgeName so both sides agree without duplicating the string literal.
         internal const string GameObjectName = "__ElevenLabsBridge__";
         private static WebGLBridge _instance;
 
@@ -150,16 +155,19 @@ namespace ElevenLabs.WebGL
                     DontDestroyOnLoad(go);
                     go.hideFlags = HideFlags.HideAndDontSave;
                     _instance = go.AddComponent<WebGLBridge>();
+                    // Tell the jslib side the GameObject name once; all SendMessage callers read it from there.
+                    ElevenLabsBridgeNative.EL_SetBridgeName(GameObjectName);
                 }
                 return _instance;
             }
         }
 
-        // SendMessage targets — public instance methods
+        // SendMessage targets — public instance methods.
+        // Status discriminator is split into two methods on the registry to avoid nullable-as-discriminator smell.
         public void OnPromiseSettled(string message) {
             var (id, status, payload) = BridgeMessageParser.ParseIdStatusPayload(message);
-            BridgePromiseRegistry.Settle(id, status == "ok" ? payload : null,
-                                               status == "err" ? payload : null);
+            if (status == "ok") BridgePromiseRegistry.SetResult(id, payload);
+            else                BridgePromiseRegistry.SetError(id, payload);
         }
 
         public void OnObserverEvent(string message) {
@@ -185,6 +193,31 @@ namespace ElevenLabs.WebGL
 }
 ```
 
+On the jslib side, the bridge name is stored in a `$`-prefixed global set once at startup:
+
+```javascript
+mergeInto(LibraryManager.library, {
+    $EL_BridgeName: '',
+    EL_SetBridgeName__deps: ['$EL_BridgeName'],
+    EL_SetBridgeName: function(namePtr) {
+        _EL_BridgeName = UTF8ToString(namePtr);
+    },
+    // All other jslib functions reference _EL_BridgeName instead of a literal:
+    //   SendMessage(_EL_BridgeName, 'OnPromiseSettled', ...);
+});
+```
+
+### Shared registry rule: first-wins, lookup-by-ID
+
+All three primitives use the same registry pattern: a `Dictionary` keyed by ID (or tool name for requests), with operations that look up by key and atomically remove before touching the stored state. WebGL is single-threaded so there's no true thread race, but re-entrancy is possible — a handler can trigger another bridge operation that loops back into the same registry, or a `Dispose`/`Cancel`/`Reject` can interleave with an in-flight dispatch.
+
+The rule: every operation looks up by ID, removes the entry, then acts on the removed state. If the lookup misses, the operation no-ops silently. This avoids `AwaitableCompletionSource` double-completion errors, prevents double-dispose, and makes "stale" signals from JS harmless after the C# side has already moved on.
+
+This applies to:
+- Promise settle vs cancel vs bridge destroy
+- Observer dispatch vs dispose vs bridge destroy
+- Request handler completion vs reject (no handler / bridge destroyed)
+
 ### Primitive 1: Promise-as-Task
 
 The primitive is JSON-library-agnostic. It returns a raw payload string; consumers (typically generated façade code) hand it a deserializer. Lets each consumer pick the serializer that fits its data shape, and keeps the primitive reusable beyond this SDK.
@@ -195,7 +228,19 @@ The primitive is JSON-library-agnostic. It returns a raw payload string; consume
 // Raw primitive — returns the payload string from JS.
 public static Awaitable<string> Call(
     Action<int> jsCall,
-    CancellationToken ct = default);
+    CancellationToken ct = default)
+{
+    var acs = new AwaitableCompletionSource<string>();
+    int id = BridgePromiseRegistry.Register(acs);
+
+    // Cancellation: remove the entry and cancel the ACS. If JS later settles, the
+    // registry lookup misses and the result is dropped. Stored CTR disposed on settle.
+    var ctr = ct.Register(() => BridgePromiseRegistry.Cancel(id));
+    acs.Awaitable.GetAwaiter().OnCompleted(() => ctr.Dispose());
+
+    jsCall(id);
+    return acs.Awaitable;
+}
 
 // Convenience overload with a deserialization hook.
 public static async Awaitable<T> Call<T>(
@@ -217,9 +262,7 @@ var session = await BridgePromise.Call(
     JsonConvert.DeserializeObject<SessionInfo>);
 ```
 
-**Registry:** `Dictionary<int, AwaitableCompletionSource<string>>` mapping ID → completion source. On settle: remove entry, call `SetResult(payload)` on success or `SetException(new BridgeException(error))` on failure. Cancellation: when the consumer's `CancellationToken` fires, the primitive removes the entry and calls `SetCanceled()`. The JS side may still settle later — the registry lookup misses and the result is silently dropped.
-
-**Race rule (first-wins).** On every transition (settle / cancel) the registry atomically removes the entry by ID before calling into the completion source. If two transitions race (e.g. JS settles in the same microtask the consumer's cancellation fires), only the one that successfully removed the entry calls into the ACS — the other finds no entry and no-ops. This avoids the `AwaitableCompletionSource` double-completion error and keeps semantics deterministic.
+**Registry:** `Dictionary<int, AwaitableCompletionSource<string>>` mapping ID → completion source. Two settle methods (`SetResult(id, payload)` and `SetError(id, errorMsg)`) and one cancel (`Cancel(id)`) — no null-as-discriminator. Each method atomically removes the entry by ID before touching the ACS. If JS settles after cancellation (or the bridge is destroyed mid-flight), the registry lookup misses and the call is silently dropped. The CTR is disposed when the Awaitable completes, so cancellation registrations don't outlive the operation.
 
 **JS side:** jslib function receives `promiseId`, starts async work, on settle calls `SendMessage('__ElevenLabsBridge__', 'OnPromiseSettled', promiseId + ':ok:' + resultJson)` or `':err:' + errMsg`. Every jslib function wraps its body in `try { ... } catch(e) { SendMessage(..., ':err:' + e.message) }`. The JS side serializes (`JSON.stringify` or whatever the generated jslib chooses); the C# side returns that string verbatim to the consumer for deserialization.
 
@@ -286,26 +329,55 @@ BridgeRequestHandler.Register<WeatherArgs, WeatherResult>(
 
 **Registry:** `Dictionary<string, Func<string, Awaitable<string>>>` keyed by tool name. All handlers are async — there's no sync fast-path since results go back over the network anyway. On request: look up handler by tool name, `await` it, then call `EL_ResolveRequest(id, result)` or `EL_RejectRequest(id, error)`. If no handler is registered for the tool name, reject with `"No handler registered for tool: <name>"`.
 
-**JS side:** `$EL_CreateRequest(toolName, payload)` returns a `Promise`. It generates a request ID, stores `resolve`/`reject` in `$EL_PendingRequests[id]`, and fires `SendMessage`. When C# calls `EL_ResolveRequest` or `EL_RejectRequest`, the stored resolve/reject is invoked, settling the Promise. The JS SDK (`@elevenlabs/client`) calls `$EL_CreateRequest` when it needs a client tool result.
+**JS side:** `$EL_CreateRequest(toolName, payload)` returns a `Promise`. It generates a request ID, stores `resolve`/`reject` in `$EL_PendingRequests[id]`, and fires `SendMessage`. When C# calls `EL_ResolveRequest` or `EL_RejectRequest`, the stored resolve/reject is invoked, settling the Promise.
+
+**How external JS reaches `$EL_CreateRequest`.** The `$`-prefix in `mergeInto` makes it a library dependency — only callable from other jslib functions, not from external JS like `@elevenlabs/client`. The primitive layer doesn't define how external JS triggers a request; that's a consumer concern. The likely pattern: the generated jslib for a specific consumer exposes a wrapper that bridges from the external JS API into `$EL_CreateRequest`, or the consumer exposes `$EL_CreateRequest` on `Module` via a small init function. Out of scope for the primitives plan.
 
 ### Error Handling Pattern
 
-Every jslib function follows this template:
+Every jslib function that starts async work follows this template (defined once in the foundation phase, applied uniformly across all primitive jslib functions):
 
 ```javascript
+EL_SomeFunction__deps: ['$EL_BridgeName', '$EL_Log'],
 EL_SomeFunction: function(promiseId, argPtr) {
     try {
         var arg = UTF8ToString(argPtr);
         // ... actual work ...
     } catch(e) {
-        console.error('[ElevenLabs Bridge] EL_SomeFunction error:', e);
-        SendMessage('__ElevenLabsBridge__', 'OnPromiseSettled',
+        _EL_Log('error', 'EL_SomeFunction', e);
+        SendMessage(_EL_BridgeName, 'OnPromiseSettled',
             promiseId + ':err:' + (e.message || String(e)));
     }
 }
 ```
 
-Every jslib function that starts async work has a `promiseId` — errors are always routed back through the same settlement path. C# side: `BridgeException` wraps JS error messages, surfaced as a thrown exception when the consumer `await`s the bridge call.
+Errors are always routed back through the same settlement path so the consumer's `await` throws — no separate error channel. C# side: `BridgeException` wraps JS error messages.
+
+### Tagged Logging
+
+Both sides log through a single tagged helper to keep the format consistent and make filtering in browser DevTools easy:
+
+```csharp
+// BridgeLog.cs — C# side
+internal static class BridgeLog {
+    private const string Prefix = "[ElevenLabs Bridge]";
+    public static void Info(string msg) => Debug.Log($"{Prefix} {msg}");
+    public static void Warn(string msg) => Debug.LogWarning($"{Prefix} {msg}");
+    public static void Error(string msg) => Debug.LogError($"{Prefix} {msg}");
+}
+```
+
+```javascript
+// ElevenLabsBridge.jslib — JS side
+$EL_Log: function(level, scope, msg) {
+    var line = '[ElevenLabs Bridge] ' + scope + ': ' + msg;
+    if (level === 'error') console.error(line);
+    else if (level === 'warn') console.warn(line);
+    else console.log(line);
+},
+```
+
+All bridge code logs through these helpers — never `Debug.Log` or `console.log` directly.
 
 ---
 
@@ -358,12 +430,14 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 - **Minimum Unity version:** 2023.1+ (Unity 6 LTS). Enables `Awaitable`/`AwaitableCompletionSource<T>` with zero external dependencies. Resolves RFC open question #5.
 - **Async primitive:** `Awaitable`/`AwaitableCompletionSource<T>`. Consumers who want UniTask can wrap via `ToUniTask()`.
-- **JS→C# delivery:** `SendMessage` for v0.1. `dynCall` deferred until profiling shows need. The registry/dispatch layer is delivery-mechanism-agnostic.
+- **JS→C# delivery:** `SendMessage` for v0.1. Migration to `dynCall` is pre-pegged to the v0.3 audio path (48 kHz PCM frames make it essentially mandatory at that rate), not a "profile and decide." The registry/dispatch layer is delivery-mechanism-agnostic so the swap is local. See [webgl-js-to-csharp-callbacks.md](./webgl-js-to-csharp-callbacks.md) for the detailed comparison.
 - **SendMessage timing:** Assumed synchronous. Lightweight assertion in first WebGL build to confirm.
 
 ## Still Open
 
 1. **Payload size threshold**: At what point do we switch from inline `id:payload` strings to heap-pointer retrieval? Proposed: always inline for v0.1 (control plane only), add binary path in v0.3 for audio.
+2. **`.jspre` file**: An Emscripten pre-include that injects JS into the `Module` before the WASM runtime starts. Useful for pre-runtime setup like hooking `Module.onRuntimeInitialized`, bundling third-party JS that must be available before any jslib call, or defining cross-jslib globals. Not needed for the primitives themselves (shared state lives fine inside `mergeInto` via `$`-prefixed entries). Likely needed when bundling `@elevenlabs/client` — that's a consumer concern, addressed there.
+3. **`EL_CancelPromise` jslib hook**: v0.1 cancellation just discards the C# completion source and lets JS settle into the void (registry miss). The JS-side work keeps running (network requests aren't aborted, etc.). A future `EL_CancelPromise(id)` would let C# tell JS to abort. Worth it once `@elevenlabs/client` supports cancellation upstream; until then, the C# side reflects cancellation correctly even if the JS work continues.
 
 ---
 
@@ -371,47 +445,51 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 ### Phase 1: Foundation
 
-- [ ] Set up UPM package at repo root: `package.json`, `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
+- [ ] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
 - [ ] Assembly definitions (`Runtime` targeting WebGL + Editor for testability; `Tests/Editor` referencing Runtime)
-- [ ] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnRequest` as stubbed `Debug.Log` handlers — each primitive's phase wires its real handler
+- [ ] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnRequest` as stubbed `BridgeLog.Info` handlers — each primitive's phase wires its real handler
 - [ ] Implement `BridgeIdGenerator.cs` (monotonic int)
 - [ ] Implement `BridgeMessageParser.cs` (id:payload, id:status:payload, id:type:payload variants)
+- [ ] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
 - [ ] Create `BridgeException.cs`
-- [ ] Create `ElevenLabsBridgeNative.cs` with DllImport declarations under `#if UNITY_WEBGL && !UNITY_EDITOR`, throwing `PlatformNotSupportedException` stubs otherwise
-- [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate
-- [ ] Edit-mode unit tests for ID generator and message parser
+- [ ] Create `ElevenLabsBridgeNative.cs` with DllImport declarations under `#if UNITY_WEBGL && !UNITY_EDITOR`, throwing `PlatformNotSupportedException` stubs otherwise. Include `EL_SetBridgeName(string)` for the startup name handshake
+- [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
+- [ ] Edit-mode unit tests for ID generator, message parser, and `BridgeLog`
 - [ ] **Set up Unity Test Runner in CI** (`-batchmode -nographics -runTests`) — includes Unity license activation on the runner; often the slowest single setup task
 - [ ] Set up Vitest for JS tests
+- [ ] XML doc comments on all public types and members created in this phase
 
 ### Phase 2: Promise-as-Task
 
-- [ ] Implement `BridgePromiseRegistry` (register `AwaitableCompletionSource<string>`, settle, remove, `CancelAll`)
-- [ ] Implement `BridgePromise.Call(jsCall, ct)` returning `Awaitable<string>` with `CancellationToken` support
+- [ ] Implement `BridgePromiseRegistry` with `Register`, `SetResult`, `SetError`, `Cancel`, `CancelAll` (atomic lookup-by-ID-then-remove; no nullable discriminators)
+- [ ] Implement `BridgePromise.Call(jsCall, ct)` returning `Awaitable<string>` with `CancellationToken` registration that disposes on completion
 - [ ] Implement `BridgePromise.Call<T>(jsCall, deserialize, ct)` convenience overload
-- [ ] Implement `WebGLBridge.OnPromiseSettled` handler with message parsing
-- [ ] Try/catch wrapper template for all jslib functions, routing errors through `OnPromiseSettled` with the promise ID
-- [ ] Edit-mode tests: register → settle → completion source resolved, settle removes entry, double-settle no-op, error path raises `BridgeException`, cancellation removes entry and stale settle is ignored
+- [ ] Wire `WebGLBridge.OnPromiseSettled` (replacing the Phase 1 stub) to dispatch to `SetResult` / `SetError`
+- [ ] Edit-mode tests: register → SetResult → completion source resolved; SetError raises `BridgeException`; cancellation removes entry and stale SetResult is ignored (first-wins); double-settle no-op
 - [ ] Vitest tests: jslib promise wrapper calls `SendMessage` with correct format on resolve and reject
+- [ ] XML doc comments on `BridgePromise`, `BridgeException`, registry public surface
 
 ### Phase 3: Observer
 
-- [ ] Implement `BridgeObserverRegistry` (register, dispatch, unregister, `DisposeAll`)
+- [ ] Implement `BridgeObserverRegistry` (register, dispatch, unregister, `DisposeAll`; same lookup-by-ID-then-remove rule)
 - [ ] Implement `BridgeObserverHandle : IDisposable` (removes from registry only — JS-side teardown is the caller's responsibility)
 - [ ] Implement `BridgeObserver.Register(handler)` and `Register<T>(deserialize, handler)` public API
-- [ ] Implement `WebGLBridge.OnObserverEvent` handler
+- [ ] Wire `WebGLBridge.OnObserverEvent` (replacing the Phase 1 stub)
 - [ ] jslib `EL_RegisterObserver` / `EL_DisposeObserver` lifecycle + `$EL_Observers` store
 - [ ] Edit-mode tests: register → dispatch → handler invoked, dispose unregisters, dispatch after dispose is no-op
 - [ ] Vitest tests: observer registration stores unsubscribe, events fire `SendMessage`, dispose calls unsubscribe
+- [ ] XML doc comments on `BridgeObserver`, `BridgeObserverHandle`
 
 ### Phase 4: JS-Initiated Promise
 
 - [ ] Implement `BridgeRequestRegistry` (single `Dictionary<string, Func<string, Awaitable<string>>>`, `RejectAll`)
 - [ ] Implement `BridgeRequestHandler.Register(toolName, handler)` and typed `Register<TArgs, TResult>(...)` overload
-- [ ] Implement `WebGLBridge.OnRequest` handler with async dispatch + resolve/reject call back into jslib
+- [ ] Wire `WebGLBridge.OnRequest` (replacing the Phase 1 stub) with async dispatch + resolve/reject call back into jslib
 - [ ] Reject with clear error when no handler is registered for the tool name
 - [ ] jslib `$EL_CreateRequest` helper, `EL_ResolveRequest` / `EL_RejectRequest` DllImport targets, `$EL_PendingRequests` store
 - [ ] Edit-mode tests: register → request → handler invoked, async handler awaited, errors routed to reject, missing handler routed to reject
 - [ ] Vitest tests: `$EL_CreateRequest` returns Promise that settles on resolve/reject from C#
+- [ ] XML doc comments on `BridgeRequestHandler`
 
 ### Phase 5: WebGL Smoke Test
 
