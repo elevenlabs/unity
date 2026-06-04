@@ -104,3 +104,6 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# JS tooling (Bridge~ is Unity-ignored via ~ suffix, but node_modules must be excluded from git)
+Bridge~/node_modules/
