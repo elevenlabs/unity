@@ -101,10 +101,13 @@ The `id:payload` packing in SendMessage is dictated by the single-string constra
 
 ### File Layout
 
-The repo root *is* the UPM package (id: `io.elevenlabs.agents`, starting version 0.1.0) — `package.json` at the top level, customers install via UPM git URL with no subfolder path.
+The repo root *is* the UPM package (id: `io.elevenlabs.agents`, starting version 0.1.0) — `package.json` at the top level, customers install via UPM git URL with no subfolder path. The root `package.json` is kept pure (UPM-only fields, no `devDependencies`); JS dev tooling lives under `Bridge~/` which Unity ignores by virtue of the `~` suffix.
 
 ```
-package.json                       — UPM package manifest (io.elevenlabs.agents, 0.1.0)
+package.json                       — UPM package manifest (io.elevenlabs.agents, 0.1.0) — pure, no devDeps
+.editorconfig                      — shared C# (and JS) formatting rules
+.config/
+  dotnet-tools.json                — dotnet tool manifest (CSharpier, dotnet format) — Unity ignores dotted dirs
 Runtime/
   ElevenLabs.Agents.WebGL.asmdef  — assembly definition (WebGL + Editor for testing)
   WebGL/
@@ -119,7 +122,7 @@ Runtime/
     ElevenLabsBridgeNative.cs     — DllImport declarations + non-WebGL throwing stubs
 Plugins/
   WebGL/
-    ElevenLabsBridge.jslib        — JS side of all three primitives
+    ElevenLabsBridge.jslib        — JS side of all three primitives (consumed by Unity's WebGL build pipeline)
 Tests/
   Editor/
     ElevenLabs.Agents.WebGL.Tests.asmdef
@@ -127,7 +130,25 @@ Tests/
     BridgeObserverTests.cs
     BridgeRequestTests.cs
     BridgeMessageParserTests.cs
+Bridge~/                         — Unity ignores `~`-suffixed dirs; all JS dev tooling lives here
+  package.json                     — pnpm workspace; Prettier, ESLint (or Biome), Vitest, Playwright
+  pnpm-lock.yaml
+  vitest.config.ts
+  tests/                           — Vitest tests that load and exercise ../Plugins/WebGL/ElevenLabsBridge.jslib
+  src/                             — reserved for future TS codegen scripts (RFC's WebGL codegen pipeline)
 ```
+
+### Tooling
+
+Philosophy: defaults everywhere, no custom rules. Goal is consistency, not opinions. If a tool has a "recommended" preset, that's what we use.
+
+- **C# formatting**: **CSharpier** — zero-config by design, that's the entire point. No `.csharpierrc`. Installed via `.config/dotnet-tools.json`.
+- **C# analyzer fixes**: **dotnet format** — uses `.editorconfig` for whitespace basics (indent, EOL, charset, trim trailing whitespace, insert final newline) and applies Unity + .NET SDK analyzer fixes. No custom analyzer rules.
+- **C# static analysis**: Unity's bundled UNT analyzers + .NET SDK's CA analyzers — both come automatically. Nothing to install or configure.
+- **JS formatting**: **Prettier** with an empty `.prettierrc` (use all defaults).
+- **JS linting**: **ESLint** with `@eslint/js` recommended preset (flat config). No custom rules.
+- **JS tests**: **Vitest** with the Playwright provider for browser mode.
+- All JS tools are pnpm-managed inside `Bridge~/`. `.config/` and `Bridge~/` are both invisible to Unity (dotted dirs and `~`-suffix dirs are ignored), so nothing tooling-related leaks to consumers.
 
 **Editor / non-WebGL behavior.** The primitives are WebGL-only. `ElevenLabsBridgeNative` declares real `DllImport`s under `#if UNITY_WEBGL && !UNITY_EDITOR` and throwing stubs (`throw new PlatformNotSupportedException("WebGL bridge is not available outside WebGL builds")`) otherwise. This means calling `BridgePromise.Call(...)` in the Editor or on native platforms surfaces a clear error instead of returning an `Awaitable` that never completes. Conversation consumers compile-time-gate on `UNITY_WEBGL` to pick between the bridged and native implementations (per the RFC).
 
@@ -432,6 +453,8 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 - **Async primitive:** `Awaitable`/`AwaitableCompletionSource<T>`. Consumers who want UniTask can wrap via `ToUniTask()`.
 - **JS→C# delivery:** `SendMessage` for v0.1. Migration to `dynCall` is pre-pegged to the v0.3 audio path (48 kHz PCM frames make it essentially mandatory at that rate), not a "profile and decide." The registry/dispatch layer is delivery-mechanism-agnostic so the swap is local. See [webgl-js-to-csharp-callbacks.md](./webgl-js-to-csharp-callbacks.md) for the detailed comparison.
 - **SendMessage timing:** Assumed synchronous. Lightweight assertion in first WebGL build to confirm.
+- **Tooling layout:** Root `package.json` stays UPM-only. C# tooling (CSharpier + dotnet format) via `.config/dotnet-tools.json`. JS tooling (Prettier + ESLint + Vitest) inside `Bridge~/` with its own pnpm-managed `package.json`. Unity ignores both `~`-suffixed and dotted directories, so nothing tooling-related leaks to consumers.
+- **Tooling philosophy:** Recommended defaults across all tools. CSharpier is zero-config by design; Prettier uses empty config; ESLint uses `@eslint/js` recommended preset; `.editorconfig` covers only the universals (indent/EOL/charset/final newline). No custom rules at v0.1.
 
 ## Still Open
 
@@ -445,7 +468,10 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 ### Phase 1: Foundation
 
-- [ ] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
+- [ ] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`, UPM-only fields), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
+- [ ] Set up `.editorconfig` at repo root (C# + JS shared rules)
+- [ ] Set up `.config/dotnet-tools.json` with **CSharpier** (formatter) and **dotnet format** (analyzer fixes) pinned; `dotnet tool restore` brings both in
+- [ ] Set up `Bridge~/` directory with pnpm-managed `package.json`; install Prettier (empty `.prettierrc`), ESLint with `@eslint/js` recommended preset (flat config), and Vitest — Unity ignores it via the `~` suffix, keeping the shipped package clean
 - [ ] Assembly definitions (`Runtime` targeting WebGL + Editor for testability; `Tests/Editor` referencing Runtime)
 - [ ] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnRequest` as stubbed `BridgeLog.Info` handlers — each primitive's phase wires its real handler
 - [ ] Implement `BridgeIdGenerator.cs` (monotonic int)
@@ -456,7 +482,6 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 - [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
 - [ ] Edit-mode unit tests for ID generator, message parser, and `BridgeLog`
 - [ ] **Set up Unity Test Runner in CI** (`-batchmode -nographics -runTests`) — includes Unity license activation on the runner; often the slowest single setup task
-- [ ] Set up Vitest for JS tests
 - [ ] XML doc comments on all public types and members created in this phase
 
 ### Phase 2: Promise-as-Task
