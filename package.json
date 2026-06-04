@@ -1,0 +1,19 @@
+{
+  "name": "io.elevenlabs.agents",
+  "version": "0.1.0",
+  "displayName": "ElevenLabs Agents",
+  "description": "ElevenLabs voice agent integration for Unity WebGL.",
+  "unity": "2023.1",
+  "author": {
+    "name": "ElevenLabs",
+    "url": "https://elevenlabs.io"
+  },
+  "keywords": [
+    "elevenlabs",
+    "voice",
+    "ai",
+    "agents",
+    "webgl"
+  ],
+  "dependencies": {}
+}

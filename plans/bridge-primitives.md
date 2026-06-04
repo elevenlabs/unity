@@ -468,7 +468,7 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 ### Phase 1: Foundation
 
-- [ ] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`, UPM-only fields), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
+- [x] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`, UPM-only fields), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
 - [ ] Set up `.editorconfig` at repo root (C# + JS shared rules)
 - [ ] Set up `.config/dotnet-tools.json` with **CSharpier** (formatter) and **dotnet format** (analyzer fixes) pinned; `dotnet tool restore` brings both in
 - [ ] Set up `Bridge~/` directory with pnpm-managed `package.json`; install Prettier (empty `.prettierrc`), ESLint with `@eslint/js` recommended preset (flat config), and Vitest — Unity ignores it via the `~` suffix, keeping the shipped package clean
