@@ -483,8 +483,8 @@ Each implementation task below is paired with its Edit Mode unit tests. Tests ar
 - [ ] Edit Mode tests for `BridgeMessageParser`: each variant, colons in payload, empty payload, Unicode
 - [x] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
 - [x] Create `BridgeException.cs`
-- [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
-- [ ] Vitest tests for the jslib skeleton: `$EL_Log` formats output correctly; `EL_SetBridgeName` stores the name
+- [x] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
+- [x] Vitest tests for the jslib skeleton: `$EL_Log` formats output correctly; `EL_SetBridgeName` stores the name
 - [ ] XML doc comments on all public types and members created in this phase
 
 ### Phase 2: Promise-as-Task
