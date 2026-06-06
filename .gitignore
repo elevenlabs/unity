@@ -107,3 +107,6 @@ InitTestScene*.unity*
 
 # JS tooling (Bridge~ is Unity-ignored via ~ suffix, but node_modules must be excluded from git)
 Bridge~/node_modules/
+
+# Allow project-level Claude context despite global gitignore rules
+!.claude/CLAUDE.md
