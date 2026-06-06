@@ -468,20 +468,23 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 ### Phase 1: Foundation
 
+Each implementation task below is paired with its Edit Mode unit tests. Tests are written alongside the implementation and verified once the host project is in place.
+
 - [x] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`, UPM-only fields), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
 - [x] Set up `.editorconfig` at repo root (C# + JS shared rules)
 - [x] Set up `.config/dotnet-tools.json` with **CSharpier** (formatter) and **dotnet format** (analyzer fixes) pinned; `dotnet tool restore` brings both in
 - [x] Set up `Bridge~/` directory with pnpm-managed `package.json`; install Prettier (empty `.prettierrc`), ESLint with `@eslint/js` recommended preset (flat config), and Vitest — Unity ignores it via the `~` suffix, keeping the shipped package clean
 - [x] Assembly definitions (`Runtime` targeting WebGL + Editor for testability; `Tests/Editor` referencing Runtime)
+- [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner; often the slowest single setup task. Do this early so tests written below can actually be run
 - [x] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnHandlerInvoked` as stubbed `BridgeLog.Info` handlers — each primitive's phase wires its real handler
 - [x] Implement `BridgeIdGenerator.cs` (monotonic int)
+- [ ] Edit Mode tests for `BridgeIdGenerator`: IDs are unique, strictly increasing, and not zero
 - [x] Implement `BridgeMessageParser.cs` (id:payload, id:status:payload, id:type:payload variants)
+- [ ] Edit Mode tests for `BridgeMessageParser`: each variant, colons in payload, empty payload, Unicode
 - [x] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
 - [x] Create `BridgeException.cs`
-- [x] Create `ElevenLabsBridgeNative.cs` with DllImport declarations under `#if UNITY_WEBGL && !UNITY_EDITOR`, throwing `PlatformNotSupportedException` stubs otherwise. Include `EL_SetBridgeName(string)` for the startup name handshake
 - [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
-- [ ] Edit-mode unit tests for ID generator, message parser, and `BridgeLog`
-- [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner; often the slowest single setup task
+- [ ] Vitest tests for the jslib skeleton: `$EL_Log` formats output correctly; `EL_SetBridgeName` stores the name
 - [ ] XML doc comments on all public types and members created in this phase
 
 ### Phase 2: Promise-as-Task
