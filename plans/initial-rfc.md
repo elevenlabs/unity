@@ -12,7 +12,7 @@
 - **Hybrid implementation:** two `Conversation` implementations behind one public C# API - a native C# implementation on desktop/mobile/XR, a thin façade over `@elevenlabs/client` on WebGL. Selected at compile time. WebGL gets WebRTC for free via the bridged implementation.
 - **WebSocket-first on native.** The Agents WebSocket protocol is feature-complete; native WebRTC is a future second transport inside the native implementation, behind an internal `IAgentTransport` abstraction.
 - **No LiveKit dependency in Unity.** Considered and rejected on platform coverage and packaging grounds; this also preserves strategic flexibility as we evolve our transport story across SDKs.
-- **WebGL bridge built from three small generic primitives:** Promise-as-Task (C#→JS one-shot), an observer primitive (JS→C# streams), and JS-initiated promises (for client tools). All share a signal-then-retrieve shape; all reusable beyond this SDK.
+- **WebGL bridge built from three small generic primitives:** Promise-as-Task (C#→JS one-shot), an observer primitive (JS→C# streams), and handler invocation (JS calling registered C# async handlers, e.g. for client tools). All share a signal-then-retrieve shape; all reusable beyond this SDK.
 - **Audio routing has two modes.** Default (Web Audio on WebGL, `AudioSource` on native) gives you a working voice agent with zero bridge latency on the audio path. Opt-in Unity-routed mode wires agent voice through a Unity `AudioSource` for spatial audio and in-game positioning.
 - **Code generation** for protocol DTOs (OpenAPI → C#) and WebGL façade (`@elevenlabs/client` `.d.ts` → C#), using custom TypeScript generators. Generated output committed with a CI freshness gate. Pattern intended for broader SDK adoption.
 - **Distribution:** UPM via git URL at launch, scoped registry once mature.
@@ -42,7 +42,7 @@ ElevenLabs.Agents.Native (compiled on desktop/mobile/XR)
 
 ElevenLabs.Agents.WebGL (compiled on WebGL)
   ├── WebGLBridgedConversation  (façade over @elevenlabs/client)
-  └── Bridge                    (Promise-as-Task, observer, JS-initiated promise)
+  └── Bridge                    (Promise-as-Task, observer, handler invocation)
 
 ElevenLabs.Agents.Audio (shared internal interfaces)
   └── Default and Unity-routed playback paths
@@ -69,7 +69,7 @@ Three small primitives, all sharing the same registry-and-signal shape, handle e
 
 **Observer** (JS→C# streams, e.g. conversation events). C# registers a handler with the bridge against an observer ID, then passes that ID into whatever JS-side source emits events (a `Conversation`, a clipboard listener, etc.). The JS source pushes payloads into a per-observer queue and signals via `SendMessage('Bridge', 'OnObserverEvent', "{observerId}:{seq}")`. The Bridge retrieves payloads via synchronous getter and dispatches to the registered handler on Unity's main thread. The primitive is intentionally generic - conversation-specific dispatch (routing by event type tag in the payload) lives in the conversation consumer, not the bridge.
 
-**JS-initiated promise** (JS→C# request awaiting a result, e.g. client tools). JS fires `SendMessage('Bridge', 'OnToolInvocation', "{invocationId}:{toolName}:{argsJson}")` and holds a Promise open. C# dispatches to the registered tool handler, then synchronously calls back into jslib with `ResolveToolInvocation(invocationId, resultJson)` or `RejectToolInvocation(invocationId, errorJson)`, which settles the held Promise. Binary payloads (where needed, e.g. PCM frames in Unity-routed audio) use [emscripten heap pointers via `_malloc` / `HEAPU8`](https://docs.unity3d.com/Manual/web-interacting-browser-js.html) rather than JSON, passed across SendMessage as `ptr,length` strings.
+**Handler invocation** (JS→C# call to a registered async handler awaiting a result, e.g. client tools). JS fires `SendMessage('Bridge', 'OnHandlerInvoked', "{invocationId}:{handlerName}:{argsJson}")` and holds a Promise open. C# dispatches to the registered handler, then synchronously calls back into jslib with `EL_ResolveInvocation(invocationId, resultJson)` or `EL_RejectInvocation(invocationId, errorJson)`, which settles the held Promise. Binary payloads (where needed, e.g. PCM frames in Unity-routed audio) use [emscripten heap pointers via `_malloc` / `HEAPU8`](https://docs.unity3d.com/Manual/web-interacting-browser-js.html) rather than JSON, passed across SendMessage as `ptr,length` strings.
 
 All three primitives are domain-agnostic, thoroughly unit-testable, and reusable for any future Unity WebGL surfaces we build (MediaSession, future Web APIs, or other JS SDK concepts / features we’d want to bridge).
 

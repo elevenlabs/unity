@@ -50,8 +50,9 @@ namespace ElevenLabs.WebGL
         public void OnObserverEvent(string message) =>
             BridgeLog.Info($"OnObserverEvent: {message}");
 
-        /// <summary>Called by JS via SendMessage when JS initiates a C# handler request.</summary>
-        public void OnRequest(string message) => BridgeLog.Info($"OnRequest: {message}");
+        /// <summary>Called by JS via SendMessage when JS invokes a registered C# async handler.</summary>
+        public void OnHandlerInvoked(string message) =>
+            BridgeLog.Info($"OnHandlerInvoked: {message}");
 
         private void OnDestroy()
         {
