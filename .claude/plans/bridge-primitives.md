@@ -481,7 +481,7 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 - [ ] Create `ElevenLabsBridgeNative.cs` with DllImport declarations under `#if UNITY_WEBGL && !UNITY_EDITOR`, throwing `PlatformNotSupportedException` stubs otherwise. Include `EL_SetBridgeName(string)` for the startup name handshake
 - [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
 - [ ] Edit-mode unit tests for ID generator, message parser, and `BridgeLog`
-- [ ] **Set up Unity Test Runner in CI** (`-batchmode -nographics -runTests`) — includes Unity license activation on the runner; often the slowest single setup task
+- [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner; often the slowest single setup task
 - [ ] XML doc comments on all public types and members created in this phase
 
 ### Phase 2: Promise-as-Task
@@ -544,7 +544,7 @@ Turn the smoke test scene into an automated suite. Vitest browser mode loads the
 
 The bridge primitives are complete when:
 
-- All three primitives have unit tests passing in Unity Test Runner (Edit Mode), executed headlessly in CI
+- All three primitives have unit tests passing in Unity Test Runner (Edit Mode), runnable locally and executed headlessly in CI
 - jslib JavaScript code has Vitest tests passing in CI
 - A clean IL2CPP WebGL build succeeds with no warnings
 - The Vitest browser-mode integration suite passes on Chrome, Firefox, and Safari in CI

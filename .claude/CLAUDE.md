@@ -28,8 +28,8 @@ cd Bridge~ && pnpm run test           # Vitest
 
 ## What cannot be verified without Unity
 
-- **C# compilation** — no `.csproj`/`.sln` at the root; Unity generates its own project files when it opens the package. Compilation errors only surface inside Unity or CI.
-- **Unity Test Runner** — Edit Mode tests require a full Unity installation (`-batchmode -nographics -runTests`). CI setup is a Phase 1 task still pending.
+- **C# compilation** — no `.csproj`/`.sln` at the root; Unity generates its own project files when it opens the package. Compilation errors only surface inside Unity (locally or in CI).
+- **Unity Test Runner** — Edit Mode tests require a full Unity installation (`-batchmode -nographics -runTests`). Setting up a host project to enable local builds and test runs (and eventually CI) is a Phase 1 task still pending.
 
 ## Project plans
 
