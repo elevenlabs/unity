@@ -476,9 +476,9 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 - [x] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnHandlerInvoked` as stubbed `BridgeLog.Info` handlers — each primitive's phase wires its real handler
 - [x] Implement `BridgeIdGenerator.cs` (monotonic int)
 - [x] Implement `BridgeMessageParser.cs` (id:payload, id:status:payload, id:type:payload variants)
-- [ ] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
-- [ ] Create `BridgeException.cs`
-- [ ] Create `ElevenLabsBridgeNative.cs` with DllImport declarations under `#if UNITY_WEBGL && !UNITY_EDITOR`, throwing `PlatformNotSupportedException` stubs otherwise. Include `EL_SetBridgeName(string)` for the startup name handshake
+- [x] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
+- [x] Create `BridgeException.cs`
+- [x] Create `ElevenLabsBridgeNative.cs` with DllImport declarations under `#if UNITY_WEBGL && !UNITY_EDITOR`, throwing `PlatformNotSupportedException` stubs otherwise. Include `EL_SetBridgeName(string)` for the startup name handshake
 - [ ] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
 - [ ] Edit-mode unit tests for ID generator, message parser, and `BridgeLog`
 - [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner; often the slowest single setup task
