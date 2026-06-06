@@ -27,11 +27,16 @@ If there are no remaining unchecked tasks, run `sleep 600` and then stop — thi
 
 - One task per iteration — finish and commit before stopping
 - No placeholder code — full, working implementations only
-- Run `<insert build command when it's known>` after making changes and fix any TypeScript errors before proceeding
-- Run `<insert lint command when it's known>` before committing and fix any lint or formatting errors
-- Run affected test files individually for fast feedback during development:
-  `<insert test command for individual files when it's known>`
-- Before committing, run the full suite: `<insert test command when it's known>`
+- After making changes, fix any formatting errors:
+  - C#: `dotnet csharpier format .`
+  - JS/TS: `cd Bridge~ && pnpm run format`
+- Before committing, verify formatting and lint:
+  - C#: `dotnet csharpier check .`
+  - JS/TS: `cd Bridge~ && pnpm run format:check && pnpm run lint`
+- Run affected JS test files individually for fast feedback during development:
+  `cd Bridge~ && pnpm run test -- <path-to-test-file>`
+- Before committing, run the full JS test suite: `cd Bridge~ && pnpm run test`
+- C# compilation and Unity Test Runner require a host Unity project (not yet set up — pending Phase 1)
 - All tests must pass before committing
 - Commit with a descriptive message (e.g., `feat: add state parser`)
 - Do not skip or reorder tasks — they have dependencies
