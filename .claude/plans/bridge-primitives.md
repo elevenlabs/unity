@@ -474,7 +474,7 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 - [x] Set up `Bridge~/` directory with pnpm-managed `package.json`; install Prettier (empty `.prettierrc`), ESLint with `@eslint/js` recommended preset (flat config), and Vitest — Unity ignores it via the `~` suffix, keeping the shipped package clean
 - [x] Assembly definitions (`Runtime` targeting WebGL + Editor for testability; `Tests/Editor` referencing Runtime)
 - [x] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnHandlerInvoked` as stubbed `BridgeLog.Info` handlers — each primitive's phase wires its real handler
-- [ ] Implement `BridgeIdGenerator.cs` (monotonic int)
+- [x] Implement `BridgeIdGenerator.cs` (monotonic int)
 - [ ] Implement `BridgeMessageParser.cs` (id:payload, id:status:payload, id:type:payload variants)
 - [ ] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
 - [ ] Create `BridgeException.cs`
