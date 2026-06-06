@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(**/*.cs)",
+            "command": "dotnet csharpier format . 2>/dev/null || true",
+            "statusMessage": "Formatting C#..."
+          },
+          {
+            "type": "command",
+            "if": "Edit(Bridge~/**)",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; (cd Bridge~ && npx prettier --write \"$f\"); } 2>/dev/null || true",
+            "statusMessage": "Formatting JS/TS..."
+          }
+        ]
+      }
+    ]
+  }
+}
