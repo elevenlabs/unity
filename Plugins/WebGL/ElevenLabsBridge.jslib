@@ -22,16 +22,42 @@ mergeInto(LibraryManager.library, {
     else console.log(line);
   },
 
+  // Internal helper that routes a JS Promise result back to C# via SendMessage.
+  // Call this from any jslib function after starting async work. Synchronous
+  // errors in the setup code must still be caught in the caller's try/catch.
+  $EL_CallPromise__deps: ["$EL_BridgeName", "$EL_Log"],
+  $EL_CallPromise: function (promiseId, promise) {
+    promise.then(
+      function (result) {
+        var payload = result == null ? "" : String(result);
+        SendMessage(
+          _EL_BridgeName,
+          "OnPromiseSettled",
+          promiseId + ":ok:" + payload,
+        );
+      },
+      function (e) {
+        var msg = e && e.message ? e.message : String(e);
+        _EL_Log("error", "EL_CallPromise", msg);
+        SendMessage(
+          _EL_BridgeName,
+          "OnPromiseSettled",
+          promiseId + ":err:" + msg,
+        );
+      },
+    );
+  },
+
   // ── Cross-cutting error-handling template ─────────────────────────────────
-  // Every jslib function that starts async work MUST wrap its body in this
-  // try/catch so errors are routed back through the same settlement channel
-  // and the consumer's `await` throws instead of silently hanging.
+  // Every jslib function that starts async work MUST follow this pattern.
+  // $EL_CallPromise routes the Promise result; the try/catch catches sync errors.
   //
-  // EL_SomeFunction__deps: ["$EL_BridgeName", "$EL_Log"],
+  // EL_SomeFunction__deps: ["$EL_BridgeName", "$EL_Log", "$EL_CallPromise"],
   // EL_SomeFunction: function (promiseId, argPtr) {
   //   try {
   //     var arg = UTF8ToString(argPtr);
-  //     // ... actual async work ...
+  //     var promise = someAsyncWork(arg); // must return a Promise
+  //     _EL_CallPromise(promiseId, promise);
   //   } catch (e) {
   //     _EL_Log("error", "EL_SomeFunction", e.message || String(e));
   //     SendMessage(

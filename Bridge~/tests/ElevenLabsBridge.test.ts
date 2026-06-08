@@ -23,7 +23,9 @@ type UnityGlobals = {
     source: Record<string, unknown>,
   ) => void;
   UTF8ToString: (ptr: number) => string;
+  SendMessage: (gameObject: string, method: string, value: string) => void;
   _EL_BridgeName: string;
+  _EL_Log: (level: string, scope: string, msg: string) => void;
 };
 
 type JslibLibrary = {
@@ -31,11 +33,17 @@ type JslibLibrary = {
   EL_SetBridgeName__deps: string[];
   EL_SetBridgeName: (namePtr: number) => void;
   $EL_Log: (level: string, scope: string, msg: string) => void;
+  $EL_CallPromise__deps: string[];
+  $EL_CallPromise: (promiseId: number, promise: Promise<unknown>) => void;
 };
 
 function loadJslib({
   utf8ToString = (ptr: number) => `string_at_${ptr}`,
-}: { utf8ToString?: (ptr: number) => string } = {}): JslibLibrary {
+  sendMessage = vi.fn(),
+}: {
+  utf8ToString?: (ptr: number) => string;
+  sendMessage?: (gameObject: string, method: string, value: string) => void;
+} = {}): JslibLibrary {
   const library: Record<string, unknown> = {};
   const g = globalThis as unknown as UnityGlobals;
   g.LibraryManager = { library };
@@ -46,11 +54,16 @@ function loadJslib({
     Object.assign(target, source);
   };
   g.UTF8ToString = utf8ToString;
+  g.SendMessage = sendMessage;
   g._EL_BridgeName = "";
 
   // Execute the jslib outside any module scope so implicit global assignments
   // (e.g. `_EL_BridgeName = UTF8ToString(ptr)`) reach globalThis.
   new Function(jslibSource)(); // eslint-disable-line no-new-func
+
+  // Simulate Unity's dependency hoisting: $-prefixed entries that other
+  // functions declare as deps become _-prefixed globals at build time.
+  g._EL_Log = (library as unknown as JslibLibrary).$EL_Log;
 
   return library as unknown as JslibLibrary;
 }
@@ -139,5 +152,101 @@ describe("$EL_Log", () => {
     expect(log).toHaveBeenCalledWith(
       "[ElevenLabs Bridge] EL_SetBridgeName: payload with: colons",
     );
+  });
+});
+
+describe("$EL_CallPromise", () => {
+  it("declares $EL_BridgeName and $EL_Log as dependencies", () => {
+    const lib = loadJslib();
+    expect(lib["$EL_CallPromise__deps"]).toContain("$EL_BridgeName");
+    expect(lib["$EL_CallPromise__deps"]).toContain("$EL_Log");
+  });
+
+  it("calls SendMessage with id:ok:payload when the promise resolves", async () => {
+    const sendMessage = vi.fn();
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage,
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_CallPromise(42, Promise.resolve('{"answer":1}'));
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "__ElevenLabsBridge__",
+      "OnPromiseSettled",
+      '42:ok:{"answer":1}',
+    );
+  });
+
+  it("calls SendMessage with id:err:message when the promise rejects with an Error", async () => {
+    const sendMessage = vi.fn();
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage,
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_CallPromise(7, Promise.reject(new Error("network timeout")));
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "__ElevenLabsBridge__",
+      "OnPromiseSettled",
+      "7:err:network timeout",
+    );
+  });
+
+  it("calls SendMessage with id:err:string when the promise rejects with a plain string", async () => {
+    const sendMessage = vi.fn();
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage,
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_CallPromise(3, Promise.reject("bad input"));
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "__ElevenLabsBridge__",
+      "OnPromiseSettled",
+      "3:err:bad input",
+    );
+  });
+
+  it("treats null resolve value as empty payload", async () => {
+    const sendMessage = vi.fn();
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage,
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_CallPromise(1, Promise.resolve(null));
+    await Promise.resolve();
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "__ElevenLabsBridge__",
+      "OnPromiseSettled",
+      "1:ok:",
+    );
+  });
+
+  it("logs an error via _EL_Log when the promise rejects", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_CallPromise(5, Promise.reject(new Error("oops")));
+    await Promise.resolve();
+
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("[ElevenLabs Bridge]"),
+    );
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("oops"));
   });
 });

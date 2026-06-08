@@ -489,8 +489,8 @@ These tasks require only Node.js + pnpm. Verified with `pnpm run test` and `pnpm
 
 #### Promise-as-Task — JS half
 
-- [ ] jslib promise wrapper: `EL_CallPromise` (or equivalent) follows the try/catch template, calls `SendMessage` with `id:ok:payload` on resolve and `id:err:message` on reject
-- [ ] Vitest tests: jslib promise wrapper calls `SendMessage` with correct format on resolve and on reject
+- [x] jslib promise wrapper: `EL_CallPromise` (or equivalent) follows the try/catch template, calls `SendMessage` with `id:ok:payload` on resolve and `id:err:message` on reject
+- [x] Vitest tests: jslib promise wrapper calls `SendMessage` with correct format on resolve and on reject
 
 #### Observer — JS half
 
