@@ -16,6 +16,11 @@ const jslibSource = readFileSync(
 // global assignments like `_EL_BridgeName = ...` land on globalThis — matching
 // how Unity injects shared state from $-prefixed entries at build time.
 
+type PendingInvocation = {
+  resolve: (value: string) => void;
+  reject: (reason: Error) => void;
+};
+
 type UnityGlobals = {
   LibraryManager: { library: Record<string, unknown> };
   mergeInto: (
@@ -27,6 +32,8 @@ type UnityGlobals = {
   _EL_BridgeName: string;
   _EL_Log: (level: string, scope: string, msg: string) => void;
   _EL_Observers: Record<number, () => void>;
+  _EL_PendingInvocations: Record<number, PendingInvocation>;
+  _EL_InvocationCounter: number;
 };
 
 type JslibLibrary = {
@@ -43,6 +50,17 @@ type JslibLibrary = {
   $EL_FireObserverEvent: (observerId: number, payload: string) => void;
   EL_DisposeObserver__deps: string[];
   EL_DisposeObserver: (observerId: number) => void;
+  $EL_PendingInvocations: Record<number, PendingInvocation>;
+  $EL_InvocationCounter: number;
+  $EL_CreateInvocation__deps: string[];
+  $EL_CreateInvocation: (
+    handlerName: string,
+    payload: string,
+  ) => Promise<string>;
+  EL_ResolveInvocation__deps: string[];
+  EL_ResolveInvocation: (invocationId: number, resultPtr: number) => void;
+  EL_RejectInvocation__deps: string[];
+  EL_RejectInvocation: (invocationId: number, errorPtr: number) => void;
 };
 
 function loadJslib({
@@ -74,6 +92,8 @@ function loadJslib({
   const lib = library as unknown as JslibLibrary;
   g._EL_Log = lib.$EL_Log;
   g._EL_Observers = lib.$EL_Observers;
+  g._EL_PendingInvocations = lib.$EL_PendingInvocations;
+  g._EL_InvocationCounter = lib.$EL_InvocationCounter;
 
   return lib;
 }
@@ -323,5 +343,159 @@ describe("Observer lifecycle", () => {
     expect(lib["$EL_FireObserverEvent__deps"]).toContain("$EL_BridgeName");
     expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Observers");
     expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Log");
+  });
+});
+
+describe("Handler Invocation lifecycle", () => {
+  it("$EL_CreateInvocation fires SendMessage with id:handlerName:payload format", () => {
+    const sendMessage = vi.fn();
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage,
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_CreateInvocation("tool:get_weather", '{"location":"London"}');
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "__ElevenLabsBridge__",
+      "OnHandlerInvoked",
+      expect.stringMatching(/^\d+:tool:get_weather:\{"location":"London"\}$/),
+    );
+  });
+
+  it("$EL_CreateInvocation stores resolve and reject in $EL_PendingInvocations", () => {
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage: vi.fn(),
+    });
+    lib.EL_SetBridgeName(0);
+    const g = globalThis as unknown as UnityGlobals;
+
+    lib.$EL_CreateInvocation("handler:a", "{}");
+
+    const ids = Object.keys(g._EL_PendingInvocations).map(Number);
+    expect(ids).toHaveLength(1);
+    expect(g._EL_PendingInvocations[ids[0]]).toMatchObject({
+      resolve: expect.any(Function),
+      reject: expect.any(Function),
+    });
+  });
+
+  it("returned Promise resolves with the decoded string when EL_ResolveInvocation is called", async () => {
+    const messages: string[] = [];
+    const lib = loadJslib({
+      utf8ToString: (ptr: number) =>
+        ptr === 0 ? "__ElevenLabsBridge__" : `decoded:${ptr}`,
+      sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
+    });
+    lib.EL_SetBridgeName(0);
+
+    const promise = lib.$EL_CreateInvocation("tool:get_weather", "{}");
+    const id = parseInt(messages[0].split(":")[0]);
+    lib.EL_ResolveInvocation(id, 42);
+
+    await expect(promise).resolves.toBe("decoded:42");
+  });
+
+  it("returned Promise rejects with an Error when EL_RejectInvocation is called", async () => {
+    const messages: string[] = [];
+    const lib = loadJslib({
+      utf8ToString: (ptr: number) =>
+        ptr === 0 ? "__ElevenLabsBridge__" : `error msg ${ptr}`,
+      sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
+    });
+    lib.EL_SetBridgeName(0);
+
+    const promise = lib.$EL_CreateInvocation("tool:get_weather", "{}");
+    const id = parseInt(messages[0].split(":")[0]);
+    lib.EL_RejectInvocation(id, 99);
+
+    await expect(promise).rejects.toThrow("error msg 99");
+  });
+
+  it("EL_ResolveInvocation removes the entry from $EL_PendingInvocations", async () => {
+    const messages: string[] = [];
+    const lib = loadJslib({
+      utf8ToString: (ptr: number) =>
+        ptr === 0 ? "__ElevenLabsBridge__" : "result",
+      sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
+    });
+    lib.EL_SetBridgeName(0);
+    const g = globalThis as unknown as UnityGlobals;
+
+    lib.$EL_CreateInvocation("handler:a", "{}");
+    const id = parseInt(messages[0].split(":")[0]);
+    lib.EL_ResolveInvocation(id, 0);
+
+    expect(g._EL_PendingInvocations[id]).toBeUndefined();
+  });
+
+  it("EL_ResolveInvocation is a no-op for unknown IDs", () => {
+    const lib = loadJslib({
+      utf8ToString: () => "result",
+      sendMessage: vi.fn(),
+    });
+    expect(() => lib.EL_ResolveInvocation(999, 0)).not.toThrow();
+  });
+
+  it("EL_RejectInvocation is a no-op for unknown IDs", () => {
+    const lib = loadJslib({
+      utf8ToString: () => "error",
+      sendMessage: vi.fn(),
+    });
+    expect(() => lib.EL_RejectInvocation(999, 0)).not.toThrow();
+  });
+
+  it("double resolve is safe — entry removed after first call, second is no-op", async () => {
+    const messages: string[] = [];
+    const lib = loadJslib({
+      utf8ToString: (ptr: number) =>
+        ptr === 0 ? "__ElevenLabsBridge__" : "result",
+      sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
+    });
+    lib.EL_SetBridgeName(0);
+
+    const promise = lib.$EL_CreateInvocation("handler:a", "{}");
+    const id = parseInt(messages[0].split(":")[0]);
+    lib.EL_ResolveInvocation(id, 1); // ptr=1 → "result"
+    lib.EL_ResolveInvocation(id, 1); // second call: entry already removed, no-op
+
+    await expect(promise).resolves.toBe("result");
+  });
+
+  it("concurrent invocations receive unique monotonically increasing IDs", () => {
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage: vi.fn(),
+    });
+    lib.EL_SetBridgeName(0);
+    const g = globalThis as unknown as UnityGlobals;
+
+    lib.$EL_CreateInvocation("handler:a", "{}");
+    lib.$EL_CreateInvocation("handler:b", "{}");
+
+    const ids = Object.keys(g._EL_PendingInvocations).map(Number);
+    expect(ids).toHaveLength(2);
+    expect(ids[1]).toBeGreaterThan(ids[0]);
+  });
+
+  it("declares correct deps for all handler invocation entries", () => {
+    const lib = loadJslib();
+    expect(lib["$EL_CreateInvocation__deps"]).toContain("$EL_BridgeName");
+    expect(lib["$EL_CreateInvocation__deps"]).toContain(
+      "$EL_PendingInvocations",
+    );
+    expect(lib["$EL_CreateInvocation__deps"]).toContain(
+      "$EL_InvocationCounter",
+    );
+    expect(lib["EL_ResolveInvocation__deps"]).toContain(
+      "$EL_PendingInvocations",
+    );
+    expect(lib["EL_ResolveInvocation__deps"]).toContain("$EL_Log");
+    expect(lib["EL_RejectInvocation__deps"]).toContain(
+      "$EL_PendingInvocations",
+    );
+    expect(lib["EL_RejectInvocation__deps"]).toContain("$EL_Log");
   });
 });

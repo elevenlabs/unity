@@ -89,6 +89,70 @@ mergeInto(LibraryManager.library, {
     }
   },
 
+  // ── Handler Invocation primitive ──────────────────────────────────────────
+  // Maps invocation ID (int) → { resolve, reject } for in-flight C# handler calls.
+  $EL_PendingInvocations: {},
+
+  // Monotonic counter for JS-side invocation ID generation.
+  $EL_InvocationCounter: 0,
+
+  // Creates a handler invocation: fires SendMessage to C# with the handler name
+  // and payload, stores Promise resolvers keyed by the generated ID, and returns
+  // the Promise. Consumer jslib code awaits this to get the C# handler response.
+  // handlerName: JS string identifying the registered C# handler.
+  // payload: JS string (typically JSON) passed to the C# handler.
+  $EL_CreateInvocation__deps: [
+    "$EL_BridgeName",
+    "$EL_PendingInvocations",
+    "$EL_InvocationCounter",
+  ],
+  $EL_CreateInvocation: function (handlerName, payload) {
+    var id = ++_EL_InvocationCounter;
+    var promise = new Promise(function (resolve, reject) {
+      _EL_PendingInvocations[id] = { resolve: resolve, reject: reject };
+    });
+    SendMessage(
+      _EL_BridgeName,
+      "OnHandlerInvoked",
+      id + ":" + handlerName + ":" + payload,
+    );
+    return promise;
+  },
+
+  // Called from C# DllImport when the registered handler completes successfully.
+  // Resolves the Promise stored for invocationId and removes the entry.
+  // No-op if the ID is not found (handles stale signals safely).
+  EL_ResolveInvocation__deps: ["$EL_PendingInvocations", "$EL_Log"],
+  EL_ResolveInvocation: function (invocationId, resultPtr) {
+    try {
+      var entry = _EL_PendingInvocations[invocationId];
+      if (!entry) {
+        return;
+      }
+      delete _EL_PendingInvocations[invocationId];
+      entry.resolve(UTF8ToString(resultPtr));
+    } catch (e) {
+      _EL_Log("error", "EL_ResolveInvocation", e.message || String(e));
+    }
+  },
+
+  // Called from C# DllImport when the handler fails or no handler is registered.
+  // Rejects the stored Promise and removes the entry.
+  // No-op if the ID is not found.
+  EL_RejectInvocation__deps: ["$EL_PendingInvocations", "$EL_Log"],
+  EL_RejectInvocation: function (invocationId, errorPtr) {
+    try {
+      var entry = _EL_PendingInvocations[invocationId];
+      if (!entry) {
+        return;
+      }
+      delete _EL_PendingInvocations[invocationId];
+      entry.reject(new Error(UTF8ToString(errorPtr)));
+    } catch (e) {
+      _EL_Log("error", "EL_RejectInvocation", e.message || String(e));
+    }
+  },
+
   // ── Cross-cutting error-handling template ─────────────────────────────────
   // Every jslib function that starts async work MUST follow this pattern.
   // $EL_CallPromise routes the Promise result; the try/catch catches sync errors.

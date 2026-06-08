@@ -499,8 +499,8 @@ These tasks require only Node.js + pnpm. Verified with `pnpm run test` and `pnpm
 
 #### Handler Invocation — JS half
 
-- [ ] jslib `$EL_CreateInvocation` helper, `EL_ResolveInvocation` / `EL_RejectInvocation` DllImport targets, `$EL_PendingInvocations` store
-- [ ] Vitest tests: `$EL_CreateInvocation` returns a Promise that settles when C# calls resolve or reject
+- [x] jslib `$EL_CreateInvocation` helper, `EL_ResolveInvocation` / `EL_RejectInvocation` DllImport targets, `$EL_PendingInvocations` store
+- [x] Vitest tests: `$EL_CreateInvocation` returns a Promise that settles when C# calls resolve or reject
 
 ---
 
