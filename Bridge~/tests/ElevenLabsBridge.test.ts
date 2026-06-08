@@ -26,6 +26,7 @@ type UnityGlobals = {
   SendMessage: (gameObject: string, method: string, value: string) => void;
   _EL_BridgeName: string;
   _EL_Log: (level: string, scope: string, msg: string) => void;
+  _EL_Observers: Record<number, () => void>;
 };
 
 type JslibLibrary = {
@@ -35,6 +36,13 @@ type JslibLibrary = {
   $EL_Log: (level: string, scope: string, msg: string) => void;
   $EL_CallPromise__deps: string[];
   $EL_CallPromise: (promiseId: number, promise: Promise<unknown>) => void;
+  $EL_Observers: Record<number, () => void>;
+  $EL_RegisterObserver__deps: string[];
+  $EL_RegisterObserver: (observerId: number, unsubscribe: () => void) => void;
+  $EL_FireObserverEvent__deps: string[];
+  $EL_FireObserverEvent: (observerId: number, payload: string) => void;
+  EL_DisposeObserver__deps: string[];
+  EL_DisposeObserver: (observerId: number) => void;
 };
 
 function loadJslib({
@@ -63,9 +71,11 @@ function loadJslib({
 
   // Simulate Unity's dependency hoisting: $-prefixed entries that other
   // functions declare as deps become _-prefixed globals at build time.
-  g._EL_Log = (library as unknown as JslibLibrary).$EL_Log;
+  const lib = library as unknown as JslibLibrary;
+  g._EL_Log = lib.$EL_Log;
+  g._EL_Observers = lib.$EL_Observers;
 
-  return library as unknown as JslibLibrary;
+  return lib;
 }
 
 beforeEach(() => {
@@ -248,5 +258,70 @@ describe("$EL_CallPromise", () => {
       expect.stringContaining("[ElevenLabs Bridge]"),
     );
     expect(error).toHaveBeenCalledWith(expect.stringContaining("oops"));
+  });
+});
+
+describe("Observer lifecycle", () => {
+  it("$EL_RegisterObserver stores the unsubscribe function keyed by observer ID", () => {
+    const lib = loadJslib();
+    const g = globalThis as unknown as UnityGlobals;
+    const unsubscribe = vi.fn();
+
+    lib.$EL_RegisterObserver(42, unsubscribe);
+
+    expect(g._EL_Observers[42]).toBe(unsubscribe);
+  });
+
+  it("$EL_FireObserverEvent calls SendMessage with id:payload format", () => {
+    const sendMessage = vi.fn();
+    const lib = loadJslib({
+      utf8ToString: () => "__ElevenLabsBridge__",
+      sendMessage,
+    });
+    lib.EL_SetBridgeName(0);
+
+    lib.$EL_FireObserverEvent(7, '{"type":"agent_response"}');
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "__ElevenLabsBridge__",
+      "OnObserverEvent",
+      '7:{"type":"agent_response"}',
+    );
+  });
+
+  it("EL_DisposeObserver calls the stored unsubscribe and removes the entry", () => {
+    const lib = loadJslib();
+    const g = globalThis as unknown as UnityGlobals;
+    const unsubscribe = vi.fn();
+
+    lib.$EL_RegisterObserver(42, unsubscribe);
+    lib.EL_DisposeObserver(42);
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(g._EL_Observers[42]).toBeUndefined();
+  });
+
+  it("EL_DisposeObserver is a no-op when the observer ID is unknown", () => {
+    const lib = loadJslib();
+    expect(() => lib.EL_DisposeObserver(999)).not.toThrow();
+  });
+
+  it("double dispose is safe — unsubscribe called only once", () => {
+    const lib = loadJslib();
+    const unsubscribe = vi.fn();
+
+    lib.$EL_RegisterObserver(1, unsubscribe);
+    lib.EL_DisposeObserver(1);
+    lib.EL_DisposeObserver(1);
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("$EL_RegisterObserver and $EL_FireObserverEvent are declared with correct deps", () => {
+    const lib = loadJslib();
+    expect(lib["$EL_RegisterObserver__deps"]).toContain("$EL_Observers");
+    expect(lib["$EL_FireObserverEvent__deps"]).toContain("$EL_BridgeName");
+    expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Observers");
+    expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Log");
   });
 });

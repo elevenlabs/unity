@@ -494,8 +494,8 @@ These tasks require only Node.js + pnpm. Verified with `pnpm run test` and `pnpm
 
 #### Observer — JS half
 
-- [ ] jslib `EL_RegisterObserver` / `EL_DisposeObserver` lifecycle + `$EL_Observers` store (keyed by observer ID; stores unsubscribe function)
-- [ ] Vitest tests: observer registration stores unsubscribe, events fire `SendMessage` with correct format, dispose calls unsubscribe
+- [x] jslib `EL_RegisterObserver` / `EL_DisposeObserver` lifecycle + `$EL_Observers` store (keyed by observer ID; stores unsubscribe function)
+- [x] Vitest tests: observer registration stores unsubscribe, events fire `SendMessage` with correct format, dispose calls unsubscribe
 
 #### Handler Invocation — JS half
 
