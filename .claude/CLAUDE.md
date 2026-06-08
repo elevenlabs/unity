@@ -23,6 +23,7 @@ dotnet csharpier format .
 ```bash
 cd Bridge~ && pnpm run format:check   # Prettier
 cd Bridge~ && pnpm run lint           # ESLint
+cd Bridge~ && pnpm run typecheck      # TypeScript (tsc --noEmit per project)
 cd Bridge~ && pnpm run test           # Vitest
 ```
 

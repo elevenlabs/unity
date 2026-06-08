@@ -7,6 +7,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.src.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -17,8 +18,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@types/emscripten": "^1.41.5",
+    "@types/node": "^25.9.2",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
+    "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   }
 }

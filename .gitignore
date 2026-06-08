@@ -107,6 +107,8 @@ InitTestScene*.unity*
 
 # JS tooling (Bridge~ is Unity-ignored via ~ suffix, but node_modules must be excluded from git)
 Bridge~/node_modules/
+# TypeScript composite build cache; only created when running tsc --build without --noEmit
+Bridge~/.ts-cache/
 
 # Allow project-level Claude context despite global gitignore rules
 !.claude/CLAUDE.md

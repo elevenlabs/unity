@@ -10,15 +10,24 @@ importers:
       "@eslint/js":
         specifier: ^9.0.0
         version: 9.39.4
+      "@types/emscripten":
+        specifier: ^1.41.5
+        version: 1.41.5
+      "@types/node":
+        specifier: ^25.9.2
+        version: 25.9.2
       eslint:
         specifier: ^9.0.0
         version: 9.39.4
       prettier:
         specifier: ^3.0.0
         version: 3.8.3
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
       vitest:
         specifier: ^3.0.0
-        version: 3.2.6
+        version: 3.2.6(@types/node@25.9.2)
 
 packages:
   "@esbuild/aix-ppc64@0.27.7":
@@ -573,6 +582,12 @@ packages:
         integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==,
       }
 
+  "@types/emscripten@1.41.5":
+    resolution:
+      {
+        integrity: sha512-cMQm7pxu6BxtHyqJ7mQZ2kXWV5SLmugybFdHCBbJ5eHzOo6VhBckEgAT3//rP5FwPHNPeEiq4SmQ5ucBwsOo4Q==,
+      }
+
   "@types/estree@1.0.9":
     resolution:
       {
@@ -583,6 +598,12 @@ packages:
     resolution:
       {
         integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==,
+      }
+
+  "@types/node@25.9.2":
+    resolution:
+      {
+        integrity: sha512-G05zqtJhcDLb8uslf5EjCxXg9G1KQxiV8OS0R26IC//Eoyitzqe8z37I7cqvnZlrlSfgocQRfSn/AHBZJJFyGw==,
       }
 
   "@vitest/expect@3.2.6":
@@ -1318,6 +1339,20 @@ packages:
       }
     engines: { node: ">= 0.8.0" }
 
+  typescript@6.0.3:
+    resolution:
+      {
+        integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==,
+      }
+    engines: { node: ">=14.17" }
+    hasBin: true
+
+  undici-types@7.24.6:
+    resolution:
+      {
+        integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==,
+      }
+
   uri-js@4.4.1:
     resolution:
       {
@@ -1661,9 +1696,15 @@ snapshots:
 
   "@types/deep-eql@4.0.2": {}
 
+  "@types/emscripten@1.41.5": {}
+
   "@types/estree@1.0.9": {}
 
   "@types/json-schema@7.0.15": {}
+
+  "@types/node@25.9.2":
+    dependencies:
+      undici-types: 7.24.6
 
   "@vitest/expect@3.2.6":
     dependencies:
@@ -1673,13 +1714,13 @@ snapshots:
       chai: 5.3.3
       tinyrainbow: 2.0.0
 
-  "@vitest/mocker@3.2.6(vite@7.3.5)":
+  "@vitest/mocker@3.2.6(vite@7.3.5(@types/node@25.9.2))":
     dependencies:
       "@vitest/spy": 3.2.6
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.5
+      vite: 7.3.5(@types/node@25.9.2)
 
   "@vitest/pretty-format@3.2.6":
     dependencies:
@@ -2099,17 +2140,21 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
 
+  typescript@6.0.3: {}
+
+  undici-types@7.24.6: {}
+
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
 
-  vite-node@3.2.4:
+  vite-node@3.2.4(@types/node@25.9.2):
     dependencies:
       cac: 6.7.14
       debug: 4.4.3
       es-module-lexer: 1.7.0
       pathe: 2.0.3
-      vite: 7.3.5
+      vite: 7.3.5(@types/node@25.9.2)
     transitivePeerDependencies:
       - "@types/node"
       - jiti
@@ -2124,7 +2169,7 @@ snapshots:
       - tsx
       - yaml
 
-  vite@7.3.5:
+  vite@7.3.5(@types/node@25.9.2):
     dependencies:
       esbuild: 0.27.7
       fdir: 6.5.0(picomatch@4.0.4)
@@ -2133,13 +2178,14 @@ snapshots:
       rollup: 4.61.1
       tinyglobby: 0.2.17
     optionalDependencies:
+      "@types/node": 25.9.2
       fsevents: 2.3.3
 
-  vitest@3.2.6:
+  vitest@3.2.6(@types/node@25.9.2):
     dependencies:
       "@types/chai": 5.2.3
       "@vitest/expect": 3.2.6
-      "@vitest/mocker": 3.2.6(vite@7.3.5)
+      "@vitest/mocker": 3.2.6(vite@7.3.5(@types/node@25.9.2))
       "@vitest/pretty-format": 3.2.6
       "@vitest/runner": 3.2.6
       "@vitest/snapshot": 3.2.6
@@ -2157,9 +2203,11 @@ snapshots:
       tinyglobby: 0.2.17
       tinypool: 1.1.1
       tinyrainbow: 2.0.0
-      vite: 7.3.5
-      vite-node: 3.2.4
+      vite: 7.3.5(@types/node@25.9.2)
+      vite-node: 3.2.4(@types/node@25.9.2)
       why-is-node-running: 2.3.0
+    optionalDependencies:
+      "@types/node": 25.9.2
     transitivePeerDependencies:
       - jiti
       - less

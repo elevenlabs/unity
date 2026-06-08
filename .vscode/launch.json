@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Run Bridge~ Tests",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["run", "test"],
+      "cwd": "${workspaceFolder}/Bridge~",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Watch Bridge~ Tests",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["run", "test:watch"],
+      "cwd": "${workspaceFolder}/Bridge~",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    }
+  ]
+}
