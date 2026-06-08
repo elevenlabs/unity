@@ -1,5 +1,5 @@
 ---
-agent: claude -p --dangerously-skip-permissions --model claude-sonnet-4-6
+agent: claude -p --permission-mode auto --model claude-sonnet-4-6
 commands:
   - name: git-log
     run: git log --oneline -10
@@ -29,13 +29,13 @@ If there are no remaining unchecked tasks, run `sleep 600` and then stop — thi
 - No placeholder code — full, working implementations only
 - After making changes, fix any formatting errors:
   - C#: `dotnet csharpier format .`
-  - JS/TS: `cd Bridge~ && pnpm run format`
+  - JS/TS: `pnpm --dir Bridge~ run format`
 - Before committing, verify formatting and lint:
   - C#: `dotnet csharpier check .`
-  - JS/TS: `cd Bridge~ && pnpm run format:check && pnpm run lint`
+  - JS/TS: `pnpm --dir Bridge~ run format:check` then `pnpm --dir Bridge~ run lint`
 - Run affected JS test files individually for fast feedback during development:
-  `cd Bridge~ && pnpm run test -- <path-to-test-file>`
-- Before committing, run the full JS test suite: `cd Bridge~ && pnpm run test`
+  `pnpm --dir Bridge~ run test -- <path-to-test-file>`
+- Before committing, run the full JS test suite: `pnpm --dir Bridge~ run test`
 - C# compilation and Unity Test Runner require a host Unity project (not yet set up — pending Phase 1)
 - All tests must pass before committing
 - Commit with a descriptive message (e.g., `feat: add state parser`)
