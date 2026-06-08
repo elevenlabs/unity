@@ -8,7 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "composite": true,
-    "outDir": ".ts-cache/tests"
+    "outDir": "dist/tests"
   },
   "include": ["tests/**/*.ts"],
   "references": [{ "path": "./tsconfig.src.json" }]

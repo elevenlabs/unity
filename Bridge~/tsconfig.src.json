@@ -8,7 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "composite": true,
-    "outDir": ".ts-cache/src"
+    "outDir": "dist/src"
   },
   "include": ["vitest.config.ts", "src/**/*.ts"]
 }
