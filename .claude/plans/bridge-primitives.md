@@ -466,60 +466,83 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 ## Tasks
 
-### Phase 1: Foundation
-
-Each implementation task below is paired with its Edit Mode unit tests. Tests are written alongside the implementation and verified once the host project is in place.
+### Phase 1: Foundation — completed items
 
 - [x] Set up UPM package at repo root: `package.json` (`io.elevenlabs.agents`, version `0.1.0`, UPM-only fields), `Runtime/`, `Editor/`, `Tests/`, `Plugins/` layout
 - [x] Set up `.editorconfig` at repo root (C# + JS shared rules)
 - [x] Set up `.config/dotnet-tools.json` with **CSharpier** (formatter) and **dotnet format** (analyzer fixes) pinned; `dotnet tool restore` brings both in
 - [x] Set up `Bridge~/` directory with pnpm-managed `package.json`; install Prettier (empty `.prettierrc`), ESLint with `@eslint/js` recommended preset (flat config), and Vitest — Unity ignores it via the `~` suffix, keeping the shipped package clean
 - [x] Assembly definitions (`Runtime` targeting WebGL + Editor for testability; `Tests/Editor` referencing Runtime)
-- [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner; often the slowest single setup task. Do this early so tests written below can actually be run
 - [x] Create `WebGLBridge.cs` MonoBehaviour singleton with `[RuntimeInitializeOnLoadMethod(BeforeSceneLoad)]` auto-create + `DontDestroyOnLoad`. Wire `OnPromiseSettled` / `OnObserverEvent` / `OnHandlerInvoked` as stubbed `BridgeLog.Info` handlers — each primitive's phase wires its real handler
 - [x] Implement `BridgeIdGenerator.cs` (monotonic int)
-- [ ] Edit Mode tests for `BridgeIdGenerator`: IDs are unique, strictly increasing, and not zero
 - [x] Implement `BridgeMessageParser.cs` (id:payload, id:status:payload, id:type:payload variants)
-- [ ] Edit Mode tests for `BridgeMessageParser`: each variant, colons in payload, empty payload, Unicode
 - [x] Implement `BridgeLog.cs` (tagged `[ElevenLabs Bridge]` prefix; Info/Warn/Error)
 - [x] Create `BridgeException.cs`
 - [x] Create `ElevenLabsBridge.jslib` skeleton with `mergeInto(LibraryManager.library, {...})` boilerplate, including: `$EL_BridgeName` global + `EL_SetBridgeName` setter, `$EL_Log` helper, and the cross-cutting try/catch wrapper template documented inline so every primitive's jslib function follows it
 - [x] Vitest tests for the jslib skeleton: `$EL_Log` formats output correctly; `EL_SetBridgeName` stores the name
-- [ ] XML doc comments on all public types and members created in this phase
 
-### Phase 2: Promise-as-Task
+---
+
+### Without Unity — JS only
+
+These tasks require only Node.js + pnpm. Verified with `pnpm run test` and `pnpm run typecheck`. No Unity installation required.
+
+#### Promise-as-Task — JS half
+
+- [ ] jslib promise wrapper: `EL_CallPromise` (or equivalent) follows the try/catch template, calls `SendMessage` with `id:ok:payload` on resolve and `id:err:message` on reject
+- [ ] Vitest tests: jslib promise wrapper calls `SendMessage` with correct format on resolve and on reject
+
+#### Observer — JS half
+
+- [ ] jslib `EL_RegisterObserver` / `EL_DisposeObserver` lifecycle + `$EL_Observers` store (keyed by observer ID; stores unsubscribe function)
+- [ ] Vitest tests: observer registration stores unsubscribe, events fire `SendMessage` with correct format, dispose calls unsubscribe
+
+#### Handler Invocation — JS half
+
+- [ ] jslib `$EL_CreateInvocation` helper, `EL_ResolveInvocation` / `EL_RejectInvocation` DllImport targets, `$EL_PendingInvocations` store
+- [ ] Vitest tests: `$EL_CreateInvocation` returns a Promise that settles when C# calls resolve or reject
+
+---
+
+### Requires Unity License
+
+Everything below needs a Unity installation for C# compilation, the Test Runner, or a WebGL build. The host project task is the first dependency — it unblocks all compilation and Edit Mode testing.
+
+#### Phase 1 — Foundation (remaining)
+
+- [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner
+- [ ] Edit Mode tests for `BridgeIdGenerator`: IDs are unique, strictly increasing, and not zero
+- [ ] Edit Mode tests for `BridgeMessageParser`: each variant, colons in payload, empty payload, Unicode
+- [ ] XML doc comments on all public types and members in this phase
+
+#### Phase 2 — Promise-as-Task (C# half)
 
 - [ ] Implement `BridgePromiseRegistry` with `Register`, `SetResult`, `SetError`, `Cancel`, `CancelAll` (atomic lookup-by-ID-then-remove; no nullable discriminators)
 - [ ] Implement `BridgePromise.Call(jsCall, ct)` returning `Awaitable<string>` with `CancellationToken` registration that disposes on completion
 - [ ] Implement `BridgePromise.Call<T>(jsCall, deserialize, ct)` convenience overload
 - [ ] Wire `WebGLBridge.OnPromiseSettled` (replacing the Phase 1 stub) to dispatch to `SetResult` / `SetError`
 - [ ] Edit-mode tests: register → SetResult → completion source resolved; SetError raises `BridgeException`; cancellation removes entry and stale SetResult is ignored (first-wins); double-settle no-op
-- [ ] Vitest tests: jslib promise wrapper calls `SendMessage` with correct format on resolve and reject
 - [ ] XML doc comments on `BridgePromise`, `BridgeException`, registry public surface
 
-### Phase 3: Observer
+#### Phase 3 — Observer (C# half)
 
 - [ ] Implement `BridgeObserverRegistry` (register, dispatch, unregister, `DisposeAll`; same lookup-by-ID-then-remove rule)
 - [ ] Implement `BridgeObserverHandle : IDisposable` (removes from registry only — JS-side teardown is the caller's responsibility)
 - [ ] Implement `BridgeObserver.Register(handler)` and `Register<T>(deserialize, handler)` public API
 - [ ] Wire `WebGLBridge.OnObserverEvent` (replacing the Phase 1 stub)
-- [ ] jslib `EL_RegisterObserver` / `EL_DisposeObserver` lifecycle + `$EL_Observers` store
 - [ ] Edit-mode tests: register → dispatch → handler invoked, dispose unregisters, dispatch after dispose is no-op
-- [ ] Vitest tests: observer registration stores unsubscribe, events fire `SendMessage`, dispose calls unsubscribe
 - [ ] XML doc comments on `BridgeObserver`, `BridgeObserverHandle`
 
-### Phase 4: Handler Invocation
+#### Phase 4 — Handler Invocation (C# half)
 
 - [ ] Implement `BridgeHandlerRegistry` (single `Dictionary<string, Func<string, Awaitable<string>>>`, `RejectAll`)
 - [ ] Implement `BridgeHandler.Register(handlerName, handler)` and typed `Register<TArgs, TResult>(...)` overload
 - [ ] Wire `WebGLBridge.OnHandlerInvoked` (replacing the Phase 1 stub) with async dispatch + resolve/reject call back into jslib
 - [ ] Reject with clear error when no handler is registered for the name
-- [ ] jslib `$EL_CreateInvocation` helper, `EL_ResolveInvocation` / `EL_RejectInvocation` DllImport targets, `$EL_PendingInvocations` store
 - [ ] Edit-mode tests: register → invocation → handler invoked, async handler awaited, errors routed to reject, missing handler routed to reject
-- [ ] Vitest tests: `$EL_CreateInvocation` returns Promise that settles on resolve/reject from C#
 - [ ] XML doc comments on `BridgeHandler`
 
-### Phase 5: WebGL Smoke Test
+#### Phase 5 — WebGL Smoke Test
 
 Build a minimal Unity scene that exercises each primitive once, run it in a real browser, eyeball the console for the validation assertions. This is the moment of truth for the architecture — synchronous SendMessage and Awaitable+DllImport assumptions either hold or they don't.
 
@@ -531,7 +554,7 @@ Build a minimal Unity scene that exercises each primitive once, run it in a real
 - [ ] Confirm clean IL2CPP WebGL build (no warnings, no missing symbols)
 - [ ] Manual run in Chrome and at least one of Firefox/Safari, confirm validation assertions pass
 
-### Phase 6: Automated Integration Tests
+#### Phase 6 — Automated Integration Tests
 
 Turn the smoke test scene into an automated suite. Vitest browser mode loads the WebGL build, drives it via the JS bridge, asserts on the results.
 
