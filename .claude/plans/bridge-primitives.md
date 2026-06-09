@@ -135,7 +135,7 @@ Bridge~/                         — Unity ignores `~`-suffixed dirs; all JS dev
   pnpm-lock.yaml
   vitest.config.ts
   build/
-    bundle-jslib.mjs               — shared Rolldown script: TS entry → mergeInto-wrapped .jslib
+    bundle-jslib.ts               — shared Rolldown script: TS entry → mergeInto-wrapped .jslib
   src/
     primitives/                    — TS sources for the primitives jslib (bundled to Plugins/WebGL/ElevenLabsBridge.jslib)
       bridge-name.ts
@@ -516,14 +516,14 @@ The current jslib uses two names that read awkwardly. Rename before any new cons
 
 The primitives are small but the next consumer (Conversation adapter) needs a bundler anyway to ship `@elevenlabs/client`. Move the primitives to the same toolchain so both layers share one path.
 
-- [ ] Add `rolldown` to `Bridge~/devDependencies`. The TS source never references jslib system calls (`mergeInto`, `LibraryManager`) directly — those are added by the build script as a banner/footer wrapper — so we only need ambient types for the runtime globals Unity injects.
-- [ ] Add `Bridge~/src/primitives/globals.d.ts`: a small file declaring Unity-injected globals not covered by `@types/emscripten`. Covers `SendMessage` (Unity-specific) plus the hoisted `_EL_*` globals (`_EL_BridgeName`, `_EL_Observers`, `_EL_PendingInvocations`, `_EL_InvocationCounter`, `_EL_Log`) that Unity creates from our `$EL_*` exports at build time. There is no published `@types/unity-jslib` package — this is the established pattern (~15 lines).
-- [ ] Author `Bridge~/build/bundle-jslib.mjs` — takes a TS entry path and an output `.jslib` path, runs Rolldown bundling with `format: "iife"` exposing a single `library` global, then writes `mergeInto(LibraryManager.library, library);` as a footer. Reused by the Conversation adapter later.
-- [ ] Create `Bridge~/src/primitives/` with the primitives split into one file per concern: `bridge-name.ts`, `log.ts`, `call-promise.ts`, `observer.ts`, `handler.ts`. Each file uses **named exports** for its `$EL_*` / `EL_*` entries and `__deps` companions (e.g. `export const $EL_Observers: Record<number, () => void> = {}; export const $EL_RegisterObserver__deps = ["$EL_Observers"]; export function $EL_RegisterObserver(id: number, unsub: () => void) { … }`). Functions use the `function` keyword (Emscripten's jslib parser does not accept arrow functions as mergeInto values).
-- [ ] `Bridge~/src/primitives/index.ts` aggregates via namespace imports and a spread: `import * as bridgeName from "./bridge-name"; … export const library = { ...bridgeName, ...log, ...callPromise, ...observer, ...handler };`. Helpers that shouldn't ship in the jslib stay non-exported in their owning module.
-- [ ] Add `pnpm run build:primitives` to emit `Plugins/WebGL/ElevenLabsBridge.jslib`. Commit the generated file.
-- [ ] Update `Bridge~/tests/ElevenLabsBridge.test.ts` to import `library` from `src/primitives/index` directly, dropping the `readFileSync` + `new Function` indirection. Per-test setup keeps mirroring `$EL_*` keys onto `_EL_*` globals as it does today. Behaviour assertions unchanged.
-- [ ] Add a CI freshness check: `pnpm run build:primitives && git diff --exit-code Plugins/WebGL/ElevenLabsBridge.jslib`. Wire into the verification commands in `CLAUDE.md`.
+- [x] Add `rolldown` to `Bridge~/devDependencies`. The TS source never references jslib system calls (`mergeInto`, `LibraryManager`) directly — those are added by the build script as a banner/footer wrapper — so we only need ambient types for the runtime globals Unity injects.
+- [x] Add `Bridge~/src/primitives/globals.d.ts`: a small file declaring Unity-injected globals not covered by `@types/emscripten`. Covers `SendMessage` (Unity-specific) plus the hoisted `_EL_*` globals (`_EL_BridgeName`, `_EL_Observers`, `_EL_PendingInvocations`, `_EL_InvocationCounter`, `_EL_Log`) that Unity creates from our `$EL_*` exports at build time. `UTF8ToString` is already declared globally by `@types/emscripten`, so it's not redeclared.
+- [x] Author `Bridge~/build/bundle-jslib.ts` — takes a TS entry path and an output `.jslib` path, runs Rolldown bundling with `format: "iife"` exposing a single `library` global, then writes `mergeInto(LibraryManager.library, library);` as a footer. Reused by the Conversation adapter later.
+- [x] Create `Bridge~/src/primitives/` with the primitives split into one file per concern: `bridge-name.ts`, `log.ts`, `call-promise.ts`, `observer.ts`, `handler.ts`. Each file uses **named exports** for its `$EL_*` / `EL_*` entries and `__deps` companions. Functions use the `function` keyword (Emscripten's jslib parser does not accept arrow functions as mergeInto values).
+- [x] `Bridge~/src/primitives/index.ts` aggregates via namespace imports and a spread, then exposes the aggregated object via `export default` (matched to Rolldown's `exports: "default"` so the IIFE evaluates directly to the library, producing `var library = ...;` cleanly).
+- [x] Add `pnpm run build:primitives` to emit `Plugins/WebGL/ElevenLabsBridge.jslib`. Commit the generated file.
+- [x] Update `Bridge~/tests/ElevenLabsBridge.test.ts` to import `library` from `src/primitives/index` directly, dropping the `readFileSync` + `new Function` indirection. Per-test setup keeps mirroring `$EL_*` keys onto `_EL_*` globals as it does today. Since the library is a module-level singleton, mutable entries (`$EL_Observers`, `$EL_PendingInvocations`) are cleared in `beforeEach`. Behaviour assertions unchanged.
+- [x] Add a `verify:primitives` script: `pnpm run build:primitives && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsBridge.jslib`. Documented in `.claude/CLAUDE.md`; CI hookup waits on the Unity-CI workflow.
 
 #### Promise-as-Task — JS half
 

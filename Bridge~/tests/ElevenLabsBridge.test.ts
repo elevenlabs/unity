@@ -1,20 +1,13 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import library from "../src/primitives/index";
 
-const jslibSource = readFileSync(
-  join(__dirname, "../../Plugins/WebGL/ElevenLabsBridge.jslib"),
-  "utf-8",
-);
-
-// The jslib uses Unity-injected globals (mergeInto, LibraryManager, UTF8ToString,
-// _EL_BridgeName). new Function executes in sloppy (non-strict) mode, so implicit
-// global assignments like `_EL_BridgeName = ...` land on globalThis — matching
-// how Unity injects shared state from $-prefixed entries at build time.
+// Unity hoists $-prefixed mergeInto entries into globals prefixed with _ at
+// build time. The tests simulate that hoisting by copying the live $EL_*
+// values from `library` onto matching _EL_* globals before each test. Because
+// the imported `library` is a module-level singleton, shared mutable entries
+// (`$EL_Observers`, `$EL_PendingInvocations`) must be cleared between tests
+// rather than re-instantiated.
 
 type PendingInvocation = {
   resolve: (value: string) => void;
@@ -22,11 +15,6 @@ type PendingInvocation = {
 };
 
 type UnityGlobals = {
-  LibraryManager: { library: Record<string, unknown> };
-  mergeInto: (
-    target: Record<string, unknown>,
-    source: Record<string, unknown>,
-  ) => void;
   UTF8ToString: (ptr: number) => string;
   SendMessage: (gameObject: string, method: string, value: string) => void;
   _EL_BridgeName: string;
@@ -36,66 +24,32 @@ type UnityGlobals = {
   _EL_InvocationCounter: number;
 };
 
-type JslibLibrary = {
-  $EL_BridgeName: string;
-  EL_SetBridgeName__deps: string[];
-  EL_SetBridgeName: (namePtr: number) => void;
-  $EL_Log: (level: string, scope: string, msg: string) => void;
-  $EL_CallPromise__deps: string[];
-  $EL_CallPromise: (promiseId: number, promise: Promise<unknown>) => void;
-  $EL_Observers: Record<number, () => void>;
-  $EL_RegisterObserver__deps: string[];
-  $EL_RegisterObserver: (observerId: number, unsubscribe: () => void) => void;
-  $EL_EmitEvent__deps: string[];
-  $EL_EmitEvent: (observerId: number, payload: string) => void;
-  EL_DisposeObserver__deps: string[];
-  EL_DisposeObserver: (observerId: number) => void;
-  $EL_PendingInvocations: Record<number, PendingInvocation>;
-  $EL_InvocationCounter: number;
-  $EL_InvokeHandler__deps: string[];
-  $EL_InvokeHandler: (handlerName: string, payload: string) => Promise<string>;
-  EL_ResolveInvocation__deps: string[];
-  EL_ResolveInvocation: (invocationId: number, resultPtr: number) => void;
-  EL_RejectInvocation__deps: string[];
-  EL_RejectInvocation: (invocationId: number, errorPtr: number) => void;
-};
-
-function loadJslib({
+function setupGlobals({
   utf8ToString = (ptr: number) => `string_at_${ptr}`,
   sendMessage = vi.fn(),
 }: {
   utf8ToString?: (ptr: number) => string;
   sendMessage?: (gameObject: string, method: string, value: string) => void;
-} = {}): JslibLibrary {
-  const library: Record<string, unknown> = {};
+} = {}): typeof library {
   const g = globalThis as unknown as UnityGlobals;
-  g.LibraryManager = { library };
-  g.mergeInto = (
-    target: Record<string, unknown>,
-    source: Record<string, unknown>,
-  ) => {
-    Object.assign(target, source);
-  };
   g.UTF8ToString = utf8ToString;
   g.SendMessage = sendMessage;
   g._EL_BridgeName = "";
-
-  // Execute the jslib outside any module scope so implicit global assignments
-  // (e.g. `_EL_BridgeName = UTF8ToString(ptr)`) reach globalThis.
-  new Function(jslibSource)(); // eslint-disable-line no-new-func
-
-  // Simulate Unity's dependency hoisting: $-prefixed entries that other
-  // functions declare as deps become _-prefixed globals at build time.
-  const lib = library as unknown as JslibLibrary;
-  g._EL_Log = lib.$EL_Log;
-  g._EL_Observers = lib.$EL_Observers;
-  g._EL_PendingInvocations = lib.$EL_PendingInvocations;
-  g._EL_InvocationCounter = lib.$EL_InvocationCounter;
-
-  return lib;
+  g._EL_Log = library.$EL_Log;
+  g._EL_Observers = library.$EL_Observers;
+  g._EL_PendingInvocations = library.$EL_PendingInvocations;
+  g._EL_InvocationCounter = 0;
+  return library;
 }
 
 beforeEach(() => {
+  // Reset the shared mutable state on the singleton library object.
+  for (const key of Object.keys(library.$EL_Observers)) {
+    delete library.$EL_Observers[Number(key)];
+  }
+  for (const key of Object.keys(library.$EL_PendingInvocations)) {
+    delete library.$EL_PendingInvocations[Number(key)];
+  }
   (globalThis as unknown as UnityGlobals)._EL_BridgeName = "";
 });
 
@@ -106,7 +60,7 @@ afterEach(() => {
 describe("EL_SetBridgeName", () => {
   it("decodes the pointer via UTF8ToString", () => {
     const utf8ToString = vi.fn(() => "__ElevenLabsBridge__");
-    const lib = loadJslib({ utf8ToString });
+    const lib = setupGlobals({ utf8ToString });
 
     lib.EL_SetBridgeName(42);
 
@@ -114,9 +68,8 @@ describe("EL_SetBridgeName", () => {
   });
 
   it("stores the decoded name in _EL_BridgeName", () => {
-    const lib = loadJslib({ utf8ToString: () => "__ElevenLabsBridge__" });
+    const lib = setupGlobals({ utf8ToString: () => "__ElevenLabsBridge__" });
     const g = globalThis as unknown as UnityGlobals;
-    g._EL_BridgeName = "";
 
     lib.EL_SetBridgeName(42);
 
@@ -124,15 +77,14 @@ describe("EL_SetBridgeName", () => {
   });
 
   it("declares $EL_BridgeName as a dependency", () => {
-    const lib = loadJslib();
-    expect(lib["EL_SetBridgeName__deps"]).toContain("$EL_BridgeName");
+    expect(library.EL_SetBridgeName__deps).toContain("$EL_BridgeName");
   });
 });
 
 describe("$EL_Log", () => {
   it('routes info-level messages to console.log with "[ElevenLabs Bridge]" prefix', () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const lib = loadJslib();
+    const lib = setupGlobals();
 
     lib.$EL_Log("info", "MyScope", "hello world");
 
@@ -143,7 +95,7 @@ describe("$EL_Log", () => {
 
   it("routes warn-level messages to console.warn", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const lib = loadJslib();
+    const lib = setupGlobals();
 
     lib.$EL_Log("warn", "MyScope", "a warning");
 
@@ -152,7 +104,7 @@ describe("$EL_Log", () => {
 
   it("routes error-level messages to console.error", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const lib = loadJslib();
+    const lib = setupGlobals();
 
     lib.$EL_Log("error", "MyScope", "something failed");
 
@@ -163,7 +115,7 @@ describe("$EL_Log", () => {
 
   it("falls back to console.log for unrecognised levels", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const lib = loadJslib();
+    const lib = setupGlobals();
 
     lib.$EL_Log("debug", "MyScope", "debug info");
 
@@ -172,7 +124,7 @@ describe("$EL_Log", () => {
 
   it("includes scope and message verbatim in the formatted line", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const lib = loadJslib();
+    const lib = setupGlobals();
 
     lib.$EL_Log("info", "EL_SetBridgeName", "payload with: colons");
 
@@ -184,14 +136,13 @@ describe("$EL_Log", () => {
 
 describe("$EL_CallPromise", () => {
   it("declares $EL_BridgeName and $EL_Log as dependencies", () => {
-    const lib = loadJslib();
-    expect(lib["$EL_CallPromise__deps"]).toContain("$EL_BridgeName");
-    expect(lib["$EL_CallPromise__deps"]).toContain("$EL_Log");
+    expect(library.$EL_CallPromise__deps).toContain("$EL_BridgeName");
+    expect(library.$EL_CallPromise__deps).toContain("$EL_Log");
   });
 
   it("calls SendMessage with id:ok:payload when the promise resolves", async () => {
     const sendMessage = vi.fn();
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage,
     });
@@ -209,7 +160,7 @@ describe("$EL_CallPromise", () => {
 
   it("calls SendMessage with id:err:message when the promise rejects with an Error", async () => {
     const sendMessage = vi.fn();
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage,
     });
@@ -227,7 +178,7 @@ describe("$EL_CallPromise", () => {
 
   it("calls SendMessage with id:err:string when the promise rejects with a plain string", async () => {
     const sendMessage = vi.fn();
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage,
     });
@@ -245,7 +196,7 @@ describe("$EL_CallPromise", () => {
 
   it("treats null resolve value as empty payload", async () => {
     const sendMessage = vi.fn();
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage,
     });
@@ -263,7 +214,7 @@ describe("$EL_CallPromise", () => {
 
   it("logs an error via _EL_Log when the promise rejects", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
     });
     lib.EL_SetBridgeName(0);
@@ -280,7 +231,7 @@ describe("$EL_CallPromise", () => {
 
 describe("Observer lifecycle", () => {
   it("$EL_RegisterObserver stores the unsubscribe function keyed by observer ID", () => {
-    const lib = loadJslib();
+    const lib = setupGlobals();
     const g = globalThis as unknown as UnityGlobals;
     const unsubscribe = vi.fn();
 
@@ -291,7 +242,7 @@ describe("Observer lifecycle", () => {
 
   it("$EL_EmitEvent calls SendMessage with id:payload format", () => {
     const sendMessage = vi.fn();
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage,
     });
@@ -307,7 +258,7 @@ describe("Observer lifecycle", () => {
   });
 
   it("EL_DisposeObserver calls the stored unsubscribe and removes the entry", () => {
-    const lib = loadJslib();
+    const lib = setupGlobals();
     const g = globalThis as unknown as UnityGlobals;
     const unsubscribe = vi.fn();
 
@@ -319,12 +270,12 @@ describe("Observer lifecycle", () => {
   });
 
   it("EL_DisposeObserver is a no-op when the observer ID is unknown", () => {
-    const lib = loadJslib();
+    const lib = setupGlobals();
     expect(() => lib.EL_DisposeObserver(999)).not.toThrow();
   });
 
   it("double dispose is safe — unsubscribe called only once", () => {
-    const lib = loadJslib();
+    const lib = setupGlobals();
     const unsubscribe = vi.fn();
 
     lib.$EL_RegisterObserver(1, unsubscribe);
@@ -335,18 +286,17 @@ describe("Observer lifecycle", () => {
   });
 
   it("$EL_RegisterObserver and $EL_EmitEvent are declared with correct deps", () => {
-    const lib = loadJslib();
-    expect(lib["$EL_RegisterObserver__deps"]).toContain("$EL_Observers");
-    expect(lib["$EL_EmitEvent__deps"]).toContain("$EL_BridgeName");
-    expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Observers");
-    expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Log");
+    expect(library.$EL_RegisterObserver__deps).toContain("$EL_Observers");
+    expect(library.$EL_EmitEvent__deps).toContain("$EL_BridgeName");
+    expect(library.EL_DisposeObserver__deps).toContain("$EL_Observers");
+    expect(library.EL_DisposeObserver__deps).toContain("$EL_Log");
   });
 });
 
 describe("Handler Invocation lifecycle", () => {
   it("$EL_InvokeHandler fires SendMessage with id:handlerName:payload format", () => {
     const sendMessage = vi.fn();
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage,
     });
@@ -362,7 +312,7 @@ describe("Handler Invocation lifecycle", () => {
   });
 
   it("$EL_InvokeHandler stores resolve and reject in $EL_PendingInvocations", () => {
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage: vi.fn(),
     });
@@ -381,7 +331,7 @@ describe("Handler Invocation lifecycle", () => {
 
   it("returned Promise resolves with the decoded string when EL_ResolveInvocation is called", async () => {
     const messages: string[] = [];
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: (ptr: number) =>
         ptr === 0 ? "__ElevenLabsBridge__" : `decoded:${ptr}`,
       sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
@@ -397,7 +347,7 @@ describe("Handler Invocation lifecycle", () => {
 
   it("returned Promise rejects with an Error when EL_RejectInvocation is called", async () => {
     const messages: string[] = [];
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: (ptr: number) =>
         ptr === 0 ? "__ElevenLabsBridge__" : `error msg ${ptr}`,
       sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
@@ -411,9 +361,9 @@ describe("Handler Invocation lifecycle", () => {
     await expect(promise).rejects.toThrow("error msg 99");
   });
 
-  it("EL_ResolveInvocation removes the entry from $EL_PendingInvocations", async () => {
+  it("EL_ResolveInvocation removes the entry from $EL_PendingInvocations", () => {
     const messages: string[] = [];
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: (ptr: number) =>
         ptr === 0 ? "__ElevenLabsBridge__" : "result",
       sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
@@ -429,7 +379,7 @@ describe("Handler Invocation lifecycle", () => {
   });
 
   it("EL_ResolveInvocation is a no-op for unknown IDs", () => {
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "result",
       sendMessage: vi.fn(),
     });
@@ -437,7 +387,7 @@ describe("Handler Invocation lifecycle", () => {
   });
 
   it("EL_RejectInvocation is a no-op for unknown IDs", () => {
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "error",
       sendMessage: vi.fn(),
     });
@@ -446,7 +396,7 @@ describe("Handler Invocation lifecycle", () => {
 
   it("double resolve is safe — entry removed after first call, second is no-op", async () => {
     const messages: string[] = [];
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: (ptr: number) =>
         ptr === 0 ? "__ElevenLabsBridge__" : "result",
       sendMessage: vi.fn((_go, _method, msg: string) => messages.push(msg)),
@@ -462,7 +412,7 @@ describe("Handler Invocation lifecycle", () => {
   });
 
   it("concurrent invocations receive unique monotonically increasing IDs", () => {
-    const lib = loadJslib({
+    const lib = setupGlobals({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage: vi.fn(),
     });
@@ -478,17 +428,16 @@ describe("Handler Invocation lifecycle", () => {
   });
 
   it("declares correct deps for all handler invocation entries", () => {
-    const lib = loadJslib();
-    expect(lib["$EL_InvokeHandler__deps"]).toContain("$EL_BridgeName");
-    expect(lib["$EL_InvokeHandler__deps"]).toContain("$EL_PendingInvocations");
-    expect(lib["$EL_InvokeHandler__deps"]).toContain("$EL_InvocationCounter");
-    expect(lib["EL_ResolveInvocation__deps"]).toContain(
+    expect(library.$EL_InvokeHandler__deps).toContain("$EL_BridgeName");
+    expect(library.$EL_InvokeHandler__deps).toContain("$EL_PendingInvocations");
+    expect(library.$EL_InvokeHandler__deps).toContain("$EL_InvocationCounter");
+    expect(library.EL_ResolveInvocation__deps).toContain(
       "$EL_PendingInvocations",
     );
-    expect(lib["EL_ResolveInvocation__deps"]).toContain("$EL_Log");
-    expect(lib["EL_RejectInvocation__deps"]).toContain(
+    expect(library.EL_ResolveInvocation__deps).toContain("$EL_Log");
+    expect(library.EL_RejectInvocation__deps).toContain(
       "$EL_PendingInvocations",
     );
-    expect(lib["EL_RejectInvocation__deps"]).toContain("$EL_Log");
+    expect(library.EL_RejectInvocation__deps).toContain("$EL_Log");
   });
 });

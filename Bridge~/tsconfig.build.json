@@ -4,9 +4,9 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
-    "types": ["node", "vitest/globals", "emscripten"],
+    "types": ["node"],
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["tests/**/*.ts", "src/**/*.ts"]
+  "include": ["build/**/*.ts"]
 }

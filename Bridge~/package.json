@@ -7,9 +7,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.src.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
+    "typecheck": "tsc -p tsconfig.src.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.build.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:primitives": "node build/bundle-jslib.ts src/primitives/index.ts ../Plugins/WebGL/ElevenLabsBridge.jslib",
+    "verify:primitives": "pnpm run build:primitives && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsBridge.jslib"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -21,7 +23,9 @@
     "@types/emscripten": "^1.41.5",
     "@types/node": "^25.9.2",
     "eslint": "^9.0.0",
+    "globals": "^17.6.0",
     "prettier": "^3.0.0",
+    "rolldown": "^1.1.0",
     "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   }
