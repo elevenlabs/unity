@@ -131,12 +131,24 @@ Tests/
     BridgeHandlerTests.cs
     BridgeMessageParserTests.cs
 Bridge~/                         — Unity ignores `~`-suffixed dirs; all JS dev tooling lives here
-  package.json                     — pnpm workspace; Prettier, ESLint (or Biome), Vitest, Playwright
+  package.json                     — pnpm workspace; Prettier, ESLint, Vitest, Playwright, Rolldown
   pnpm-lock.yaml
   vitest.config.ts
-  tests/                           — Vitest tests that load and exercise ../Plugins/WebGL/ElevenLabsBridge.jslib
-  src/                             — reserved for future TS codegen scripts (RFC's WebGL codegen pipeline)
+  build/
+    bundle-jslib.mjs               — shared Rolldown script: TS entry → mergeInto-wrapped .jslib
+  src/
+    primitives/                    — TS sources for the primitives jslib (bundled to Plugins/WebGL/ElevenLabsBridge.jslib)
+      bridge-name.ts
+      log.ts
+      call-promise.ts
+      observer.ts
+      handler.ts
+      index.ts                     — namespace-imports each module and exports a single `library` object via spread
+      globals.d.ts                 — ambient declarations for Unity-injected runtime globals not in @types/emscripten
+  tests/                           — Vitest tests that import from src/primitives directly
 ```
+
+The `.jslib` file under `Plugins/WebGL/` is generated output, committed to git so Unity builds don't need Node, and verified fresh in CI (`pnpm run build:primitives` followed by `git diff --exit-code`).
 
 ### Tooling
 
@@ -148,6 +160,7 @@ Philosophy: defaults everywhere, no custom rules. Goal is consistency, not opini
 - **JS formatting**: **Prettier** with an empty `.prettierrc` (use all defaults).
 - **JS linting**: **ESLint** with `@eslint/js` recommended preset (flat config). No custom rules.
 - **JS tests**: **Vitest** with the Playwright provider for browser mode.
+- **JS bundling**: **Rolldown** via a small script under `Bridge~/build/`. Takes a TS entry point and emits a `.jslib` file: minimal banner + `mergeInto(LibraryManager.library, { … bundled output … });`. Used for both the primitives and the (separate) Conversation adapter.
 - All JS tools are pnpm-managed inside `Bridge~/`. `.config/` and `Bridge~/` are both invisible to Unity (dotted dirs and `~`-suffix dirs are ignored), so nothing tooling-related leaks to consumers.
 
 **Editor / non-WebGL behavior.** The primitives are WebGL-only. `ElevenLabsBridgeNative` declares real `DllImport`s under `#if UNITY_WEBGL && !UNITY_EDITOR` and throwing stubs (`throw new PlatformNotSupportedException("WebGL bridge is not available outside WebGL builds")`) otherwise. This means calling `BridgePromise.Call(...)` in the Editor or on native platforms surfaces a clear error instead of returning an `Awaitable` that never completes. Conversation consumers compile-time-gate on `UNITY_WEBGL` to pick between the bridged and native implementations (per the RFC).
@@ -350,9 +363,11 @@ BridgeHandler.Register<WeatherArgs, WeatherResult>(
 
 **Registry:** `Dictionary<string, Func<string, Awaitable<string>>>` keyed by handler name. All handlers are async — there's no sync fast-path since results go back over the network anyway. On invocation: look up handler by name, `await` it, then call `EL_ResolveInvocation(id, result)` or `EL_RejectInvocation(id, error)`. If no handler is registered for the name, reject with `"No handler registered: <name>"`.
 
-**JS side:** `$EL_CreateInvocation(handlerName, payload)` returns a `Promise`. It generates an invocation ID, stores `resolve`/`reject` in `$EL_PendingInvocations[id]`, and fires `SendMessage`. When C# calls `EL_ResolveInvocation` or `EL_RejectInvocation`, the stored resolve/reject is invoked, settling the Promise.
+**JS side:** `$EL_InvokeHandler(handlerName, payload)` returns a `Promise`. It generates an invocation ID, stores `resolve`/`reject` in `$EL_PendingInvocations[id]`, and fires `SendMessage`. When C# calls `EL_ResolveInvocation` or `EL_RejectInvocation`, the stored resolve/reject is invoked, settling the Promise.
 
-**How external JS reaches `$EL_CreateInvocation`.** The `$`-prefix in `mergeInto` makes it a library dependency — only callable from other jslib functions, not from external JS like `@elevenlabs/client`. The primitive layer doesn't define how external JS triggers an invocation; that's a consumer concern. The likely pattern: the generated jslib for a specific consumer exposes a wrapper that bridges from the external JS API into `$EL_CreateInvocation`, or the consumer exposes `$EL_CreateInvocation` on `Module` via a small init function. Out of scope for the primitives plan.
+**How external JS reaches `$EL_InvokeHandler`.** The `$`-prefix in `mergeInto` makes it a library dependency — only callable from other jslib functions, not from external JS like `@elevenlabs/client`. The primitive layer doesn't define how external JS triggers an invocation; that's a consumer concern. The likely pattern: a consumer jslib (e.g. the Conversation adapter) imports the helper and exposes a wrapper that bridges from the external JS API into `$EL_InvokeHandler`. Out of scope for the primitives plan.
+
+**Observer event emission helper.** Observer event delivery from a consumer jslib goes through `$EL_EmitEvent(observerId, payload)`, a `$`-prefixed helper that calls `SendMessage(_EL_BridgeName, 'OnObserverEvent', observerId + ':' + payload)`. Same constraint as above — consumer jslibs depend on it via `__deps`. (The C# side's `WebGLBridge.OnObserverEvent` keeps the `Observer` qualifier to disambiguate from its sibling handlers `OnPromiseSettled` and `OnHandlerInvoked`.)
 
 ### Error Handling Pattern
 
@@ -455,6 +470,8 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 - **SendMessage timing:** Assumed synchronous. Lightweight assertion in first WebGL build to confirm.
 - **Tooling layout:** Root `package.json` stays UPM-only. C# tooling (CSharpier + dotnet format) via `.config/dotnet-tools.json`. JS tooling (Prettier + ESLint + Vitest) inside `Bridge~/` with its own pnpm-managed `package.json`. Unity ignores both `~`-suffixed and dotted directories, so nothing tooling-related leaks to consumers.
 - **Tooling philosophy:** Recommended defaults across all tools. CSharpier is zero-config by design; Prettier uses empty config; ESLint uses `@eslint/js` recommended preset; `.editorconfig` covers only the universals (indent/EOL/charset/final newline). No custom rules at v0.1.
+- **JS source-of-truth:** TypeScript modules under `Bridge~/src/primitives/`, bundled to `Plugins/WebGL/ElevenLabsBridge.jslib` via Rolldown. The generated `.jslib` is committed (Unity builds don't need Node) and verified fresh in CI. Same toolchain is reused for the Conversation adapter.
+- **Primitive naming:** JS-side helpers live in the `EL_` namespace and avoid redundant qualifiers — `$EL_EmitEvent` and `$EL_InvokeHandler` rather than `$EL_FireObserverEvent` / `$EL_CreateInvocation`. The C# SendMessage targets (`OnObserverEvent`, `OnHandlerInvoked`, `OnPromiseSettled`) keep their fuller names to disambiguate among siblings on `WebGLBridge`.
 
 ## Still Open
 
@@ -487,6 +504,27 @@ Phase 7 (`WebGLBridgedConversation` and other consumers) is out of scope for thi
 
 These tasks require only Node.js + pnpm. Verified with `pnpm run test` and `pnpm run typecheck`. No Unity installation required.
 
+#### Preliminary cleanup — primitive renames
+
+The current jslib uses two names that read awkwardly. Rename before any new consumer (e.g. the Conversation adapter) wires against them, since there are no C# consumers yet to coordinate with.
+
+- [x] Rename `$EL_FireObserverEvent` → `$EL_EmitEvent` across `Plugins/WebGL/ElevenLabsBridge.jslib`, `Bridge~/tests/ElevenLabsBridge.test.ts` (including the `JslibLibrary` type alias and `UnityGlobals._EL_Log` neighbours), and the prose in this plan. The C# SendMessage target stays `OnObserverEvent`.
+- [x] Rename `$EL_CreateInvocation` → `$EL_InvokeHandler` in the same set of files.
+- [x] Verify with `pnpm run typecheck && pnpm run lint && pnpm run test`.
+
+#### Preliminary cleanup — migrate primitives to TypeScript + bundle
+
+The primitives are small but the next consumer (Conversation adapter) needs a bundler anyway to ship `@elevenlabs/client`. Move the primitives to the same toolchain so both layers share one path.
+
+- [ ] Add `rolldown` to `Bridge~/devDependencies`. The TS source never references jslib system calls (`mergeInto`, `LibraryManager`) directly — those are added by the build script as a banner/footer wrapper — so we only need ambient types for the runtime globals Unity injects.
+- [ ] Add `Bridge~/src/primitives/globals.d.ts`: a small file declaring Unity-injected globals not covered by `@types/emscripten`. Covers `SendMessage` (Unity-specific) plus the hoisted `_EL_*` globals (`_EL_BridgeName`, `_EL_Observers`, `_EL_PendingInvocations`, `_EL_InvocationCounter`, `_EL_Log`) that Unity creates from our `$EL_*` exports at build time. There is no published `@types/unity-jslib` package — this is the established pattern (~15 lines).
+- [ ] Author `Bridge~/build/bundle-jslib.mjs` — takes a TS entry path and an output `.jslib` path, runs Rolldown bundling with `format: "iife"` exposing a single `library` global, then writes `mergeInto(LibraryManager.library, library);` as a footer. Reused by the Conversation adapter later.
+- [ ] Create `Bridge~/src/primitives/` with the primitives split into one file per concern: `bridge-name.ts`, `log.ts`, `call-promise.ts`, `observer.ts`, `handler.ts`. Each file uses **named exports** for its `$EL_*` / `EL_*` entries and `__deps` companions (e.g. `export const $EL_Observers: Record<number, () => void> = {}; export const $EL_RegisterObserver__deps = ["$EL_Observers"]; export function $EL_RegisterObserver(id: number, unsub: () => void) { … }`). Functions use the `function` keyword (Emscripten's jslib parser does not accept arrow functions as mergeInto values).
+- [ ] `Bridge~/src/primitives/index.ts` aggregates via namespace imports and a spread: `import * as bridgeName from "./bridge-name"; … export const library = { ...bridgeName, ...log, ...callPromise, ...observer, ...handler };`. Helpers that shouldn't ship in the jslib stay non-exported in their owning module.
+- [ ] Add `pnpm run build:primitives` to emit `Plugins/WebGL/ElevenLabsBridge.jslib`. Commit the generated file.
+- [ ] Update `Bridge~/tests/ElevenLabsBridge.test.ts` to import `library` from `src/primitives/index` directly, dropping the `readFileSync` + `new Function` indirection. Per-test setup keeps mirroring `$EL_*` keys onto `_EL_*` globals as it does today. Behaviour assertions unchanged.
+- [ ] Add a CI freshness check: `pnpm run build:primitives && git diff --exit-code Plugins/WebGL/ElevenLabsBridge.jslib`. Wire into the verification commands in `CLAUDE.md`.
+
 #### Promise-as-Task — JS half
 
 - [x] jslib promise wrapper: `EL_CallPromise` (or equivalent) follows the try/catch template, calls `SendMessage` with `id:ok:payload` on resolve and `id:err:message` on reject
@@ -499,8 +537,8 @@ These tasks require only Node.js + pnpm. Verified with `pnpm run test` and `pnpm
 
 #### Handler Invocation — JS half
 
-- [x] jslib `$EL_CreateInvocation` helper, `EL_ResolveInvocation` / `EL_RejectInvocation` DllImport targets, `$EL_PendingInvocations` store
-- [x] Vitest tests: `$EL_CreateInvocation` returns a Promise that settles when C# calls resolve or reject
+- [x] jslib `$EL_InvokeHandler` helper, `EL_ResolveInvocation` / `EL_RejectInvocation` DllImport targets, `$EL_PendingInvocations` store (initial commit used the name `$EL_CreateInvocation`; renamed in the preliminary cleanup task above)
+- [x] Vitest tests: `$EL_InvokeHandler` returns a Promise that settles when C# calls resolve or reject
 
 ---
 
