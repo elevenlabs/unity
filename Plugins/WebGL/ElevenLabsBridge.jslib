@@ -61,10 +61,10 @@ mergeInto(LibraryManager.library, {
   },
 
   // Fires an observer event to C# via SendMessage. Consumer jslib code calls
-  // _EL_FireObserverEvent(id, serialisedPayload) from their event handler.
+  // _EL_EmitEvent(id, serialisedPayload) from their event handler.
   // payload must already be serialised (e.g. JSON.stringify(event)).
-  $EL_FireObserverEvent__deps: ["$EL_BridgeName"],
-  $EL_FireObserverEvent: function (observerId, payload) {
+  $EL_EmitEvent__deps: ["$EL_BridgeName"],
+  $EL_EmitEvent: function (observerId, payload) {
     SendMessage(
       _EL_BridgeName,
       "OnObserverEvent",
@@ -101,12 +101,12 @@ mergeInto(LibraryManager.library, {
   // the Promise. Consumer jslib code awaits this to get the C# handler response.
   // handlerName: JS string identifying the registered C# handler.
   // payload: JS string (typically JSON) passed to the C# handler.
-  $EL_CreateInvocation__deps: [
+  $EL_InvokeHandler__deps: [
     "$EL_BridgeName",
     "$EL_PendingInvocations",
     "$EL_InvocationCounter",
   ],
-  $EL_CreateInvocation: function (handlerName, payload) {
+  $EL_InvokeHandler: function (handlerName, payload) {
     var id = ++_EL_InvocationCounter;
     var promise = new Promise(function (resolve, reject) {
       _EL_PendingInvocations[id] = { resolve: resolve, reject: reject };

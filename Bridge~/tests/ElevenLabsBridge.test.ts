@@ -46,17 +46,14 @@ type JslibLibrary = {
   $EL_Observers: Record<number, () => void>;
   $EL_RegisterObserver__deps: string[];
   $EL_RegisterObserver: (observerId: number, unsubscribe: () => void) => void;
-  $EL_FireObserverEvent__deps: string[];
-  $EL_FireObserverEvent: (observerId: number, payload: string) => void;
+  $EL_EmitEvent__deps: string[];
+  $EL_EmitEvent: (observerId: number, payload: string) => void;
   EL_DisposeObserver__deps: string[];
   EL_DisposeObserver: (observerId: number) => void;
   $EL_PendingInvocations: Record<number, PendingInvocation>;
   $EL_InvocationCounter: number;
-  $EL_CreateInvocation__deps: string[];
-  $EL_CreateInvocation: (
-    handlerName: string,
-    payload: string,
-  ) => Promise<string>;
+  $EL_InvokeHandler__deps: string[];
+  $EL_InvokeHandler: (handlerName: string, payload: string) => Promise<string>;
   EL_ResolveInvocation__deps: string[];
   EL_ResolveInvocation: (invocationId: number, resultPtr: number) => void;
   EL_RejectInvocation__deps: string[];
@@ -292,7 +289,7 @@ describe("Observer lifecycle", () => {
     expect(g._EL_Observers[42]).toBe(unsubscribe);
   });
 
-  it("$EL_FireObserverEvent calls SendMessage with id:payload format", () => {
+  it("$EL_EmitEvent calls SendMessage with id:payload format", () => {
     const sendMessage = vi.fn();
     const lib = loadJslib({
       utf8ToString: () => "__ElevenLabsBridge__",
@@ -300,7 +297,7 @@ describe("Observer lifecycle", () => {
     });
     lib.EL_SetBridgeName(0);
 
-    lib.$EL_FireObserverEvent(7, '{"type":"agent_response"}');
+    lib.$EL_EmitEvent(7, '{"type":"agent_response"}');
 
     expect(sendMessage).toHaveBeenCalledWith(
       "__ElevenLabsBridge__",
@@ -337,17 +334,17 @@ describe("Observer lifecycle", () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
-  it("$EL_RegisterObserver and $EL_FireObserverEvent are declared with correct deps", () => {
+  it("$EL_RegisterObserver and $EL_EmitEvent are declared with correct deps", () => {
     const lib = loadJslib();
     expect(lib["$EL_RegisterObserver__deps"]).toContain("$EL_Observers");
-    expect(lib["$EL_FireObserverEvent__deps"]).toContain("$EL_BridgeName");
+    expect(lib["$EL_EmitEvent__deps"]).toContain("$EL_BridgeName");
     expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Observers");
     expect(lib["EL_DisposeObserver__deps"]).toContain("$EL_Log");
   });
 });
 
 describe("Handler Invocation lifecycle", () => {
-  it("$EL_CreateInvocation fires SendMessage with id:handlerName:payload format", () => {
+  it("$EL_InvokeHandler fires SendMessage with id:handlerName:payload format", () => {
     const sendMessage = vi.fn();
     const lib = loadJslib({
       utf8ToString: () => "__ElevenLabsBridge__",
@@ -355,7 +352,7 @@ describe("Handler Invocation lifecycle", () => {
     });
     lib.EL_SetBridgeName(0);
 
-    lib.$EL_CreateInvocation("tool:get_weather", '{"location":"London"}');
+    lib.$EL_InvokeHandler("tool:get_weather", '{"location":"London"}');
 
     expect(sendMessage).toHaveBeenCalledWith(
       "__ElevenLabsBridge__",
@@ -364,7 +361,7 @@ describe("Handler Invocation lifecycle", () => {
     );
   });
 
-  it("$EL_CreateInvocation stores resolve and reject in $EL_PendingInvocations", () => {
+  it("$EL_InvokeHandler stores resolve and reject in $EL_PendingInvocations", () => {
     const lib = loadJslib({
       utf8ToString: () => "__ElevenLabsBridge__",
       sendMessage: vi.fn(),
@@ -372,7 +369,7 @@ describe("Handler Invocation lifecycle", () => {
     lib.EL_SetBridgeName(0);
     const g = globalThis as unknown as UnityGlobals;
 
-    lib.$EL_CreateInvocation("handler:a", "{}");
+    lib.$EL_InvokeHandler("handler:a", "{}");
 
     const ids = Object.keys(g._EL_PendingInvocations).map(Number);
     expect(ids).toHaveLength(1);
@@ -391,7 +388,7 @@ describe("Handler Invocation lifecycle", () => {
     });
     lib.EL_SetBridgeName(0);
 
-    const promise = lib.$EL_CreateInvocation("tool:get_weather", "{}");
+    const promise = lib.$EL_InvokeHandler("tool:get_weather", "{}");
     const id = parseInt(messages[0].split(":")[0]);
     lib.EL_ResolveInvocation(id, 42);
 
@@ -407,7 +404,7 @@ describe("Handler Invocation lifecycle", () => {
     });
     lib.EL_SetBridgeName(0);
 
-    const promise = lib.$EL_CreateInvocation("tool:get_weather", "{}");
+    const promise = lib.$EL_InvokeHandler("tool:get_weather", "{}");
     const id = parseInt(messages[0].split(":")[0]);
     lib.EL_RejectInvocation(id, 99);
 
@@ -424,7 +421,7 @@ describe("Handler Invocation lifecycle", () => {
     lib.EL_SetBridgeName(0);
     const g = globalThis as unknown as UnityGlobals;
 
-    lib.$EL_CreateInvocation("handler:a", "{}");
+    lib.$EL_InvokeHandler("handler:a", "{}");
     const id = parseInt(messages[0].split(":")[0]);
     lib.EL_ResolveInvocation(id, 0);
 
@@ -456,7 +453,7 @@ describe("Handler Invocation lifecycle", () => {
     });
     lib.EL_SetBridgeName(0);
 
-    const promise = lib.$EL_CreateInvocation("handler:a", "{}");
+    const promise = lib.$EL_InvokeHandler("handler:a", "{}");
     const id = parseInt(messages[0].split(":")[0]);
     lib.EL_ResolveInvocation(id, 1); // ptr=1 → "result"
     lib.EL_ResolveInvocation(id, 1); // second call: entry already removed, no-op
@@ -472,8 +469,8 @@ describe("Handler Invocation lifecycle", () => {
     lib.EL_SetBridgeName(0);
     const g = globalThis as unknown as UnityGlobals;
 
-    lib.$EL_CreateInvocation("handler:a", "{}");
-    lib.$EL_CreateInvocation("handler:b", "{}");
+    lib.$EL_InvokeHandler("handler:a", "{}");
+    lib.$EL_InvokeHandler("handler:b", "{}");
 
     const ids = Object.keys(g._EL_PendingInvocations).map(Number);
     expect(ids).toHaveLength(2);
@@ -482,13 +479,9 @@ describe("Handler Invocation lifecycle", () => {
 
   it("declares correct deps for all handler invocation entries", () => {
     const lib = loadJslib();
-    expect(lib["$EL_CreateInvocation__deps"]).toContain("$EL_BridgeName");
-    expect(lib["$EL_CreateInvocation__deps"]).toContain(
-      "$EL_PendingInvocations",
-    );
-    expect(lib["$EL_CreateInvocation__deps"]).toContain(
-      "$EL_InvocationCounter",
-    );
+    expect(lib["$EL_InvokeHandler__deps"]).toContain("$EL_BridgeName");
+    expect(lib["$EL_InvokeHandler__deps"]).toContain("$EL_PendingInvocations");
+    expect(lib["$EL_InvokeHandler__deps"]).toContain("$EL_InvocationCounter");
     expect(lib["EL_ResolveInvocation__deps"]).toContain(
       "$EL_PendingInvocations",
     );
