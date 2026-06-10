@@ -29,3 +29,12 @@ declare const _EL_Factories: Record<
   }
 >;
 declare let _EL_NextHandleId: number;
+
+// Registry helpers — hoisted by Unity when listed in __deps.
+declare function _EL_AllocateObject(obj: unknown): number;
+declare function _EL_AllocateFunction(
+  fn: (...args: unknown[]) => unknown,
+): number;
+
+// Callback dispatch — hoisted from $EL_InvokeCallback in callbacks.ts.
+declare function _EL_InvokeCallback(handle: number, payload: string): void;
