@@ -1,0 +1,214 @@
+# Plan B — Bridge into the connection + I/O controllers, not the Conversation
+
+## Context
+
+The original [RFC](./initial-rfc.md) proposed a hybrid: one `Conversation` C#
+interface, with a native implementation on desktop/mobile/XR and a WebGL
+implementation that is a thin façade over `@elevenlabs/client`'s `Conversation`.
+The [JS Conversation adapter plan](./js-conversation-adapter.md) was the
+WebGL-side detailing of that approach.
+
+After several days implementing toward that plan, the level of abstraction
+feels wrong:
+
+1. **DX divergence.** Two Conversation implementations means two timing models, two event-shape sources of truth, two places bugs can live. Even with codegen, the consumer sees subtle differences between platforms.
+2. **JS-bridge surface bigger than expected.** A faithful WebGL `Conversation` façade has to mirror the full Conversation API (lifecycle, methods, callbacks, client tools, overrides, feedback) — and every change to that surface in the JS SDK ripples through the bridge.
+3. **Audio routing concession.** Plan A's "default mode" runs audio entirely in JS, which is fast but means WebGL conversations don't go through Unity's audio pipeline by default. That's an asymmetry game developers hit immediately.
+
+**Plan B** lowers the bridge by one layer. The public Conversation lives in
+C# only and is identical on every platform. The bridge wraps the three
+classes the JS SDK already factors out — `BaseConnection`, `InputController`,
+`OutputController` — and the same C# `Conversation` orchestrates them on
+every target.
+
+See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the to-be shape.
+
+## What changes vs Plan A
+
+| Concern | Plan A | Plan B |
+|---|---|---|
+| C# Conversation implementations | Two (native + WebGL façade) | One (everywhere) |
+| WebGL bridge target | `@elevenlabs/client` `Conversation` | `BaseConnection` + `InputController` + `OutputController` |
+| Bridged JS classes count | 1 large | 4 small |
+| Bridge primitives | 3 (Promise / Observer / Handler) | 3 generic handle types (`JsObject` / `JsFunction` / `BridgeCallback`) — see [generic-bridge-primitives.md](./generic-bridge-primitives.md) |
+| Audio path on WebGL (default) | JS-only — Web Audio | JS-only — `attachInputToConnection` / `attachConnectionToOutput` glue stays in JS |
+| Audio path on WebGL (Unity-routed) | v0.3 opt-in via PCM intercept hook | v0.3 opt-in — same milestone, same shape |
+| Client tools | JS Proxy + name set + shared dispatcher key | C# table inside Conversation, no JS-side concept |
+| Late event registration | Blocked on JS SDK supporting it | Already supported (C# Conversation owns its events) |
+| Effort to write | Less C# message-routing code now, more bridge code | More C# message-routing code now, less bridge code |
+
+The trade is "write the message router in C# once" vs "write the bridge
+façade once" — and on net the C# router is the smaller surface, since the JS
+SDK exposes 4 narrow classes vs. 1 sprawling `Conversation`.
+
+## What stays the same
+
+- **The Bridge~/build/bundle-jslib.ts toolchain.** Reused for the new `ElevenLabsConnection.jslib` artifact.
+- **The RFC's codegen approach.** Protocol DTOs are still generated from OpenAPI. They're now used by *both* implementations of `IConnection`, not just native.
+- **The RFC's distribution plan, roadmap milestones, and risk inventory.** Plan B is an internal architectural pivot, not a product-level change.
+
+## The bridging primitives this plan uses
+
+Plan B is a pure consumer of [generic-bridge-primitives.md](./generic-bridge-primitives.md).
+It adds zero new primitives and zero per-class `DllImport` entry points — every
+interaction with the four JS SDK classes (`WebSocketConnection`, `WebRTCConnection`,
+`MediaDeviceInput`, `MediaDeviceOutput`) and their composition glue routes
+through the generic `JsObject` / `JsFunction` / `BridgeCallback` surface.
+
+Mapped to the new consumers:
+
+| Interaction | Primitive surface |
+|---|---|
+| Create a JS connection / input / output | `BridgeJs.InvokeFactoryAsync<JsObject>("create...", config)` against factories registered at JS boot |
+| Call a method on a JS object (with result) | `jsObject.CallAsync<T>("methodName", args)` |
+| Call a method on a JS object (fire-and-forget) | `jsObject.Call("methodName", args)` (void overload) |
+| Read a synchronous JS property | `jsObject.Get<T>("propertyName")` |
+| Receive a stream of events | C# wraps a delegate in `BridgeCallback.Wrap(handler)` and passes it as an argument: `jsObject.Call("onMessage", callback)` |
+| Hold a JS function returned from a call (e.g. a `removeListener` returned by `addListener`) | Receive as `JsFunction`; call later via `jsFunction.CallAsync(...)` |
+| Dispose a JS object | `jsObject.Dispose()` (also via `using` blocks) |
+
+What Plan B does *not* need beyond what the primitives provide:
+
+- **No per-class jslib `EL_*` entry points.** The factory registrations (Phase 2.2) are the only JS-side code we add.
+- **No async JS-to-C# round-trips for v0.1.** Client tools live entirely in the C# `Conversation` now, so the future `AsyncBridgeCallback` extension point is out of scope here.
+- **No binary-payload variants for v0.1.** Default-mode audio bytes stay inside JS via `attachInputToConnection` / `attachConnectionToOutput` and never cross the bridge. Unity-routed audio (v0.3) is where binary payloads will land.
+
+## Required `@elevenlabs/client` coordination
+
+All four classes we need are already exported from the SDK's `index.ts`:
+`WebSocketConnection`, `WebRTCConnection`, `createConnection`, plus the
+`InputController` / `OutputController` interfaces (the concrete `MediaDeviceInput`
+/ `MediaDeviceOutput` live under `platform/web/` and we import them from
+there or from the `browser` entrypoint that triggers their registration).
+
+Identified gaps:
+
+1. **Default-mode audio event stripping.** We need the C# Conversation to see audio events (for `event_id` / interruption / mode tracking) without the base64 payload duplicating into the JS↔C# string channel. **Status: solvable inside the `attachDefaultAudio` JS helper without an SDK change** — the helper monkey-patches `connection.onMessage` so that the `BridgeCallback` C# subscribes after the helper runs receives audio events with `audio_base_64` removed. Documented as an ordering constraint: subscribe to `onMessage` *after* calling `attachDefaultAudio`.
+2. **WebRTC PCM extraction for Unity-routed audio (v0.3).** Already designed: `setWebRTCAudioAdapterFactory` is the slot. **Status: no SDK change needed for v0.1**; a Unity-specific adapter lands with v0.3.
+3. **Late event registration.** Not a gap — the C# `Conversation` owns the message router and exposes standard `.NET` events with `+=` / `-=` semantics from day one. The JS-side connection's single `onMessage` callback is wired once at session start via a `BridgeCallback`, and the C# router fans out into the user's subscribed events. (This was a Plan A constraint, where the C# façade had to pass callbacks into `@elevenlabs/client`'s `Conversation` constructor; Plan B's architecture removes the constraint entirely.)
+
+No upstream PRs block Plan B's v0.1.
+
+## Disposition of in-flight plans
+
+- [`generic-bridge-primitives.md`](./generic-bridge-primitives.md) — **authoritative.** The primitive layer Plan B consumes. Reuses the scaffolding (WebGLBridge MonoBehaviour, ID generator, message parser, log helper, jslib bundler) already in the repo; the prior promise / observer / handler entry points get replaced in its Phase 2.
+- [`plan-a-bridge-primitives.md`](./plan-a-bridge-primitives.md) — **superseded by generic-bridge-primitives.md** for the primitive design. Its Foundation phase tasks already landed (and are reused); the Promise-as-Task / Observer / Handler primitive designs no longer apply.
+- [`js-conversation-adapter.md`](./js-conversation-adapter.md) — **superseded by this plan.** It is not yet committed; a `> Superseded by plan-b.md — see ARCHITECTURE.md` note will be added to its top and the file kept for historical reference. The Tasks list under it is dropped.
+- [`webgl-js-to-csharp-callbacks.md`](./webgl-js-to-csharp-callbacks.md) — **still authoritative.** The SendMessage vs DynCall analysis is independent of which JS objects we bridge.
+
+## Implementation phases
+
+Phases are ordered so everything that can be done without the Unity license
+lands first. Phases 1–3 are Unity-free and can run in parallel by separate
+agent loops. Phases 4–7 unblock once the Unity license is active.
+
+### Phase 1 — Plan disposition and naming (no code)
+
+- [ ] Add a "Superseded by plan-b.md" header to `js-conversation-adapter.md`.
+- [ ] Cross-reference Plan B from `generic-bridge-primitives.md`'s "Implementation phases" intro so future readers find it as the canonical first consumer.
+- [ ] Confirm the names sketched in [ARCHITECTURE.md](../../ARCHITECTURE.md) (`BridgedWebSocketConnection` etc.) — rename now if anything reads wrong, before code lands.
+
+### Phase 2 — JS-side factory + audio-glue registrations (Unity-free, Vitest-covered)
+
+The bulk of the frontloaded work. Output: a second `.jslib` artifact under
+`Plugins/WebGL/`, bundled from new TypeScript sources, that registers
+factories with the primitive layer at module init and exposes the
+`attachDefaultAudio` composition helper. **No new `EL_*` DllImport entry
+points** — everything goes through `$EL_RegisterFactory` and is consumed via
+the generic `JsObject` primitive from C#.
+
+- [ ] **2.1 — Dependency + scaffold.** `pnpm --dir Bridge~ add @elevenlabs/client`. Create `Bridge~/src/connection/` with `factories.ts`, `audio-glue.ts`, `method-shapes.ts`, `types.ts`, `index.ts`. `types.ts` mirrors the SDK's exported `SessionConfig`, `FormatConfig`, `InputConfig`, `OutputConfig`, `DisconnectionDetails` shapes via composition (`Pick`/`extends`) so SDK bumps ripple through tsc. Wire `pnpm run build:connection` / `verify:connection` paralleling the existing primitives scripts; commit the (initially near-empty) `Plugins/WebGL/ElevenLabsConnection.jslib`. Document the new commands in `.claude/CLAUDE.md`.
+- [ ] **2.2 — Factory registrations.** `factories.ts` calls `$EL_RegisterFactory` for each SDK class at module init:
+  - `createWebSocketConnection(config)` → `WebSocketConnection.create(config)` (returnShape: `"object"`)
+  - `createWebRTCConnection(config)` → `WebRTCConnection.create(config)` (returnShape: `"object"`)
+  - `createConnection(config)` → dispatches per `connectionType` (returnShape: `"object"`)
+  - `createMediaDeviceInput(config)` → `MediaDeviceInput.create(config)` (returnShape: `"object"`)
+  - `createMediaDeviceOutput(config)` → `MediaDeviceOutput.create(config)` (returnShape: `"object"`)
+  Vitest: mock `@elevenlabs/client`, exercise each factory through `$EL_InvokeFactory` (or its TS-side equivalent in tests), assert the returned `JsObject` handle is valid and its methods dispatch through correctly.
+- [ ] **2.3 — Per-class method shape hints.** `method-shapes.ts` declares which methods on each SDK class are sync vs async and what they return. The dispatcher uses these hints when materialising `JsObject` handles so calls route to the right `EL_ObjectCall{Async,Sync}` entry point. Examples: `WebSocketConnection.sendMessage` is sync/void; `MediaDeviceInput.setDevice` is async/void; `MediaDeviceOutput.getVolume` is sync/number. Wired in by each factory wrapping its returned instance with a `__elMethods` annotation the dispatcher reads. Vitest: assert each declared shape routes correctly when invoked.
+- [ ] **2.4 — `attachDefaultAudio` helper factory.** `audio-glue.ts` registers `attachDefaultAudio(connection, input, output)` as a factory with returnShape `"function"` (returns a `JsFunction` detach handle). Implementation calls `attachInputToConnection(input, connection)` and `attachConnectionToOutput(connection, output)` AND monkey-patches `connection.onMessage` so any later subscriber receives `audio` events with `audio_base_64` stripped. Documented ordering constraint: subscribe to `connection.onMessage` *after* calling this helper. The returned detach function reverses both attachments and the monkey-patch. Vitest: an input PCM event mock flows through to `connection.sendMessage`; an `audio` event from the connection mock reaches `output.playAudio` with original bytes; a subscriber added after `attachDefaultAudio` receives the event with `audio_base_64` removed.
+- [ ] **2.5 — Bundling + lifecycle init.** `index.ts` aggregates the registrations into the library object. Bundled via the shared `bundle-jslib.ts` toolchain to `Plugins/WebGL/ElevenLabsConnection.jslib`. The factory registrations need to run *after* the primitives layer is initialised and *before* any C# call — pick the right Emscripten hook (`__postset` per-factory or a single `__init` postset that walks them all). Vitest verifies the bundled jslib invokes the registrations on load.
+- [ ] **2.6 — End-to-end Vitest.** Mock `@elevenlabs/client`, mock the primitives' SendMessage. Drive a full happy-path session from a test: invoke `createWebSocketConnection` → invoke `createMediaDeviceInput` + `createMediaDeviceOutput` → invoke `attachDefaultAudio` → subscribe via `BridgeCallback` mocks → fire mock incoming messages → assert the callbacks receive correctly-stripped events → invoke `JsFunction.Call` for the detach handle → assert teardown.
+
+### Phase 3 — Protocol DTO codegen (Unity-free, optional pre-Unity)
+
+The C# Conversation in Phase 4 needs typed incoming/outgoing message DTOs.
+We can defer this and use untyped JSON if codegen pushes the schedule, but
+landing it now means Phase 4 starts with the right types in hand.
+
+- [ ] **3.1 — Generator scaffold.** TypeScript-based generator under `Bridge~/build/` reading the OpenAPI spec and emitting C# classes for `IncomingSocketEvent` / `OutgoingSocketEvent` unions and their nested payload types.
+- [ ] **3.2 — Output target.** Generated files committed under `Runtime/Core/Protocol/`. CSharpier-formatted; freshness gate via `verify:protocol-dtos` script.
+- [ ] **3.3 — Allocation/AOT discipline.** Generator output uses `System.Text.Json` source-generated serialization (IL2CPP-friendly) or Newtonsoft.Json — decide once we can compile in Unity. Until then, the generator emits a debug-only `Console.WriteLine` round-trip test we can run with `dotnet run` to confirm parse/emit symmetry.
+
+This phase can be deferred to overlap with Phase 4 if Phases 1–2 are slow.
+
+### Phase 4 — C# Conversation + Core abstractions (requires Unity)
+
+The Conversation logic itself. Mostly a port of `BaseConversation.ts`'s
+`onMessage` switch (lines 446-569), state tracking (mode/status/feedback),
+interruption handling, and client-tool dispatch into C#. Pure orchestration
+— no jslib, no platform-specifics — so it's testable in Edit Mode against
+mock `IConnection`/`IInputController`/`IOutputController`.
+
+- [ ] **4.1 — Define the three abstractions.** `Runtime/Core/IConnection.cs`, `IInputController.cs`, `IOutputController.cs` matching the shapes sketched in [ARCHITECTURE.md](../../ARCHITECTURE.md). `IConnection.Send` takes typed `OutgoingSocketEvent`; `OnMessage` delivers typed `IncomingSocketEvent`.
+- [ ] **4.2 — `Conversation` class.** Public API (`StartSessionAsync`, `EndSession`, `SendUserMessage`, `SendContextualUpdate`, `SendUserActivity`, `SendFeedback`, `SetVolume`, `SetMicMuted`, `GetInputByteFrequencyData`, `GetOutputByteFrequencyData`, `GetInputVolume`, `GetOutputVolume`); events for all the callback shapes the JS SDK exposes. The signature is C#-idiomatic — `event` + `EventArgs`, `Awaitable<T>` for async methods.
+- [ ] **4.3 — Message router.** Translate `BaseConversation.onMessage`'s switch into C#. Each case calls a small handler method, same as the JS SDK.
+- [ ] **4.4 — Client tool dispatch.** A `Dictionary<string, ClientToolHandler>` owned by `Conversation`. The `client_tool_call` handler looks up, awaits, sends `client_tool_result`. No Proxy, no name-set, no shared dispatcher key.
+- [ ] **4.5 — Edit-mode tests.** Mock IConnection / IInputController / IOutputController; drive every router branch and every public method. This is the regression baseline for the whole SDK.
+- [ ] **4.6 — XML doc comments on the public surface.**
+
+### Phase 5 — WebGL bridged implementations (requires Unity)
+
+Thin C# wrappers around the `JsObject` handles returned by the Phase 2
+factories. Each one is a class that holds a `JsObject`, implements the
+matching `I…` interface from Phase 4, and translates every interface call
+into a `jsObject.CallAsync(...)` / `Call(...)` / `Get<T>(...)`. **No new
+`DllImport` declarations** — the generic primitives' `EL_Object*` entry
+points carry everything.
+
+- [ ] **5.1 — `BridgedWebSocketConnection` and `BridgedWebRTCConnection`.** Both implement `IConnection`. Constructor takes a `JsObject` already obtained via `await BridgeJs.InvokeFactoryAsync<JsObject>("createWebSocketConnection", config)` (or `createWebRTCConnection`). Reads `ConversationId` / `InputFormat` / `OutputFormat` via `jsObject.Get<…>()`. `Send(OutgoingSocketEvent msg)` becomes `jsObject.Call("sendMessage", msg)`. Events: the C# event accessor wraps a delegate in `BridgeCallback.Wrap(handler)` and passes it via `jsObject.Call("onMessage", callback)`. The WebRTC variant additionally calls `jsObject.Get<JsObject>("input")` and `jsObject.Get<JsObject>("output")` to expose the input/output controllers bound to the same JS instance (per the SDK's coupling), wrapping them in `BridgedInputController` / `BridgedOutputController`.
+- [ ] **5.2 — `BridgedInputController` and `BridgedOutputController`.** Each holds a `JsObject` and implements its interface as a 1:1 method-name mapping. Sync getters (`GetVolume`, `GetByteFrequencyData`) use `jsObject.Call<float>(...)` / sync calls; async ops (`SetDevice`, `Close`) use `jsObject.CallAsync(...)`. For `getByteFrequencyData(buffer)` where C# needs to write into its own buffer, the bridged side passes a `byte[]` argument and the generic primitive's binary-payload variant — flagged as v0.3 work in [generic-bridge-primitives.md](./generic-bridge-primitives.md). For v0.1, the JS method returns a fresh `Uint8Array` per call which crosses as a JSON-encoded number array; acceptable since visualizer frame data is read at most once per Unity frame (~60 Hz, ~1 KB per call).
+- [ ] **5.3 — `BridgedSession` orchestration.** A small helper (consumed only by `Conversation.StartSessionAsync` under `#if UNITY_WEBGL`) does the full session setup: awaits the connection factory, awaits the input/output factories (WebSocket only — WebRTC already has them), calls `attachDefaultAudio` via the factory and stashes the returned `JsFunction` detach handle on the session, hands back the three bridged C# wrappers + the detach handle. The C# `Conversation` doesn't see any of this — it just receives `IConnection` + `IInputController` + `IOutputController`.
+- [ ] **5.4 — Conversation factory selection.** Inside `Conversation.StartSessionAsync`: `#if UNITY_WEBGL` delegates to `BridgedSession`; `#else` calls native impls (Phase 7). The rest of `Conversation` is platform-unaware.
+- [ ] **5.5 — Edit-mode tests for the bridged wrappers.** Stub `JsObject` / `JsFunction` / `BridgeCallback` (the generic primitives layer is its own test surface — here we only check that the bridged wrappers issue the right `CallAsync` / `Call` / `Get` invocations with the right method names and arguments, and that incoming `BridgeCallback` invocations route to the right C# events).
+
+### Phase 6 — WebGL smoke + integration (requires Unity)
+
+- [ ] **6.1 — Minimal scene.** A scene that calls `Conversation.StartSessionAsync` against a real test agent, sends a message, gets a response, ends. Manually verified in Chrome.
+- [ ] **6.2 — Validation assertions.** Same V1–V4 list as the primitives plan, plus: audio default-mode flows correctly (mic in, speaker out, no Unity AudioSource involved); end-session tears down all three JS instances without leaks.
+- [ ] **6.3 — Vitest browser-mode harness.** Drives the WebGL build from a JS test, asserting on the wire format.
+
+### Phase 7 — Native implementations (deferred — post-Unity-license)
+
+Out of scope for this plan's v0.1 critical path. Listed for completeness so
+the abstractions in Phase 4 don't accidentally over-fit WebGL.
+
+- `NativeWebSocketConnection` using `System.Net.WebSockets.ClientWebSocket`. Reuses the same protocol DTOs from Phase 3.
+- `UnityMicrophoneInput` using `UnityEngine.Microphone` + a chunking loop.
+- `UnityAudioSourceOutput` using `AudioClip` + `PCMReaderCallback` fed by a ring buffer.
+- Edit-mode tests targeting the native impls behind the same `IConnection` contract used in Phase 4.
+
+A v0.1 release tag may ship WebGL-only and call out native as v0.2, or wait
+for native — that decision is at the milestone review, not in this plan.
+
+## Verification (Unity-free phases)
+
+After each Unity-free task:
+
+```bash
+pnpm --dir Bridge~ run typecheck
+pnpm --dir Bridge~ run lint
+pnpm --dir Bridge~ run test
+```
+
+If `src/connection/` changed, also `pnpm --dir Bridge~ run verify:connection`.
+
+The local Claude permissions allowlist gates these one-by-one — don't chain
+with `&&`.
+
+## Open questions
+
+1. **Factory registration timing in Emscripten.** The Phase 2 factories need to be registered with the primitives' `$EL_Factories` table after the primitives module loads and before any C# call. Emscripten offers `__postset` per-merge and `Module.onRuntimeInitialized` — pick the right hook so the connection jslib's registrations land in a deterministic order behind the primitives'. Resolve in Phase 2.5.
+2. **Should `IConnection.Send` take a typed event union, or a serialised string?** Typed gives compile-time safety, but means the C# Conversation builds the event then `BridgedWebSocketConnection.Send` serialises and the JS dispatcher rehydrates. Untyped means the Conversation serialises once and the JS side hands the raw string straight to `connection.sendMessage`. Lean typed for native parity, but worth a second look in Phase 4.
+3. **What happens if the user calls a method during a transient disconnect?** JS SDK behaviour varies by method. Plan B's C# Conversation should make this consistent — likely "throw `InvalidOperationException`" rather than silently drop. Decide in Phase 4.
+4. **Repository structure: in `elevenlabs/packages` or standalone?** Still open from the RFC. Plan B's WebGL bundle depends on `@elevenlabs/client`, which slightly tilts toward in-monorepo. Doesn't block any phase.

@@ -290,10 +290,17 @@ public static async Awaitable<T> Call<T>(
 Consumer (typically generated):
 
 ```csharp
-// Generated façade code knows the type and picks the deserializer:
-var session = await BridgePromise.Call(
-    id => ElevenLabsBridgeNative.EL_StartSession(id, JsonConvert.SerializeObject(args)),
-    JsonConvert.DeserializeObject<SessionInfo>);
+// Generated façade picks the deserializer for non-empty payloads:
+var weather = await BridgePromise.Call(
+    promiseId => ElevenLabsBridgeNative.EL_FetchWeather(promiseId, JsonConvert.SerializeObject(query)),
+    JsonConvert.DeserializeObject<WeatherReport>);
+
+// For entrypoints that resolve with "" (no payload), use the raw overload and discard.
+// Note: consumer-specific entrypoints layer their own arguments in front of `promiseId` —
+// e.g. the Conversation adapter takes `sessionId` first across all DllImports for consistency
+// (see .claude/plans/js-conversation-adapter.md). The primitive is unopinionated about that.
+await BridgePromise.Call(
+    promiseId => ElevenLabsBridgeNative.EL_StartSession(sessionId, promiseId, JsonConvert.SerializeObject(opts)));
 ```
 
 **Registry:** `Dictionary<int, AwaitableCompletionSource<string>>` mapping ID → completion source. Two settle methods (`SetResult(id, payload)` and `SetError(id, errorMsg)`) and one cancel (`Cancel(id)`) — no null-as-discriminator. Each method atomically removes the entry by ID before touching the ACS. If JS settles after cancellation (or the bridge is destroyed mid-flight), the registry lookup misses and the call is silently dropped. The CTR is disposed when the Awaitable completes, so cancellation registrations don't outlive the operation.

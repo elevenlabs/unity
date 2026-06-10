@@ -1,0 +1,538 @@
+# Generic Bridge Primitives — Detailed Plan
+
+## Goal
+
+Build a small, generic set of primitives over Unity's WebGL jslib interop that
+lets C# code in a Unity build drive arbitrary JavaScript objects — calling
+their methods, reading their properties, subscribing to their event streams,
+and managing their lifetime — without writing a hand-rolled jslib wrapper per
+JS class. The primitives are domain-agnostic: any consumer that needs to reach
+into the browser from a Unity WebGL build uses the same surface, and a JS-side
+addition (a new method on a JS class, a new factory) requires zero new jslib
+code.
+
+## Context: the Unity WebGL interop model
+
+Unity WebGL builds compile C# to WebAssembly via IL2CPP + Emscripten. The
+interop between C# and the host JavaScript page has two directions with very
+different capabilities:
+
+- **C# → JS** is synchronous. C# declares functions with `[DllImport("__Internal")]` and Unity wires them to JS functions defined in a `.jslib` file. Calls are direct WebAssembly invocations. Multiple typed primitive arguments (`int`, `float`, `string` as pointer) are supported; return values are primitives or pointers. Strings cross via Emscripten heap allocations (`_malloc` + `stringToUTF8` outbound, `UTF8ToString` inbound).
+- **JS → C#** is fire-and-forget. JavaScript calls `unityInstance.SendMessage(gameObject, methodName, singleArg)` — at most one string argument, no return value, delivered to a public instance method on a named `MonoBehaviour`. Empirically delivered synchronously when called from async JS callbacks (see "SendMessage timing" below).
+
+Every JS interaction we build has to fit through these two narrow channels.
+Anything async — a JS Promise resolving, a JS event firing — has to *signal*
+into C# via `SendMessage` and then *be retrieved* by C# via a synchronous
+`DllImport` getter on the way back through. That signal-then-retrieve shape
+is the structural backbone of every primitive below.
+
+## The primitive set
+
+Three handle types — two invoked by C#, one invoked by JS — implemented with
+the same registry-and-marker machinery.
+
+### 1. `JsObject` — remote JS objects held by C#
+
+Represents a JavaScript object whose lifetime is owned by C#. C# obtains an
+object by calling a registered **factory** (e.g. "give me a new
+WebSocketConnection") and from then on calls methods, reads properties, and
+eventually releases it. The C# side holds an opaque `int` handle; the JS side
+maintains a `Map<handle, object>` registry.
+
+Operations:
+
+- **Factory invocation** — call a named, pre-registered JS factory function with arguments, get a result. Sync or async per the factory's registered shape. The result is either a primitive value, a fresh `JsObject` handle, or a `JsFunction` handle.
+- **Method call (async)** — call a named method on the held object whose return value comes via a `Promise`. C# awaits the resolved value through the settle channel.
+- **Method call (sync)** — call a named method that returns synchronously; result comes back as the return value of the `DllImport`. Used for hot paths where the async settle round-trip would add a frame of latency.
+- **Property read (sync)** — get a named property's value via a `DllImport`. JSON-encoded; deserialised on the C# side.
+- **Dispose** — drop the JS-side registry entry. Implemented via `IDisposable` (and a finalizer-based safety log).
+
+### 2. `JsFunction` — remote JS functions held by C#
+
+When a JS method or factory returns a function value (e.g. `addListener` returning
+its corresponding `removeListener`, a factory returning a `detach` callback), C#
+captures it as a `JsFunction` handle. Later C# invokes it via the same async or
+sync `DllImport` channel as `JsObject` method calls. This is the dual of
+`JsObject`: same lifetime model, different lookup table on the JS side.
+
+Operations: **Call (async)**, **Call (sync)**, **Dispose**. No "register" step
+— `JsFunction` handles are only obtained by JS returning a function value from
+some other call.
+
+### 3. `BridgeCallback` — C# delegates exposed to JS
+
+The inverse of `JsFunction`: a C# delegate that JS holds as a callable. C# wraps
+a delegate in a `BridgeCallback`, passes it as an argument to any JS method (see
+"Wire protocol" below for how the argument is encoded), and JS sees a plain
+function. When JS calls it, `SendMessage` routes back to the bridge, the registry
+looks up the handle, and the delegate runs on Unity's main thread.
+
+This covers the "JS event stream → C# handler" pattern — a connection's
+`onMessage` callback, a worklet's port message listener, anything shaped like
+`addListener(callback)`. The C# side wraps a delegate as a callback and passes
+it as the argument; the JS side just sees a function and stores or invokes it
+as it would any other.
+
+Operations:
+
+- **Wrap** — wrap a C# delegate in a `BridgeCallback` with an allocated handle.
+- **Invocation** — happens from JS only; C# never invokes a `BridgeCallback` directly. JS-side invocation fires `SendMessage` → C# bridge dispatches to the registered delegate on the main thread.
+- **Dispose** — remove the C# delegate from the registry. JS calls arriving after dispose miss the registry and no-op silently. The JS-side teardown (removing the listener from the JS event source) is the consumer's concern — typically a paired call to whatever `JsFunction` was returned alongside the registration (e.g. `removeListener`).
+
+`BridgeCallback` is fire-and-forget — JS doesn't receive a return value back
+from C#. A future `AsyncBridgeCallback` (noted under "Possible extensions")
+would let JS `await` a result from C#, covering patterns like remote tool
+dispatch. Out of scope for v0.1.
+
+## Wire protocol
+
+Every async entry point has the signature `(handleOrFactoryName, argsJsonPtr, promiseId)`
+and settles through one shared `OnPromiseSettled` SendMessage handler. Every
+sync entry point has the signature `(handle, argsJsonPtr)` returning a
+heap-string pointer. The same JSON marker conventions (`$ref`, `$fn`, `$cb`)
+apply to all arguments and all returns. Adding a new entry point reuses the
+registries, the settle channel, the marker conventions, and the error-routing
+template — only the marshalling differs.
+
+### Identifiers
+
+- **Object handle** — `int`, allocated by C# via `BridgeIdGenerator`, registered with the JS object map at object-creation time.
+- **Function handle** — `int`, allocated by the JS side at the moment it materialises a function value to hand back to C#. Communicated to C# in the JSON-encoded return value of whatever call produced it.
+- **Callback handle** — `int`, allocated by C# via `BridgeIdGenerator` at the moment C# wraps a delegate in a `BridgeCallback`.
+- **Promise ID** — `int`, allocated by C# per async operation; used to route the eventual settle SendMessage back to the right `AwaitableCompletionSource<T>`.
+
+All four ID spaces are disjoint by allocator and consumer; collisions are
+impossible.
+
+### Argument encoding
+
+C# methods that drive the primitives accept `params object[]` and serialise
+to a JSON array. Three types of argument get wrapped in **typed markers** so
+the JS side can rehydrate them into the live JS value before the call:
+
+| C# value | JSON shape | JS rehydration |
+|---|---|---|
+| `JsObject` reference | `{ "$ref": <handle> }` | Look up object in registry |
+| `JsFunction` reference | `{ "$fn": <handle> }` | Look up function in registry |
+| `BridgeCallback` | `{ "$cb": <handle> }` | Materialise `function(arg) { _EL_InvokeCallback(handle, JSON.stringify(arg)); }` |
+| Anything else | Plain JSON | As-is |
+
+Return values follow the inverse convention:
+
+| JS value | JSON shape | C# decoding |
+|---|---|---|
+| A registered JS object | `{ "$ref": <newlyAllocatedHandle> }` | Wrap in `JsObject` |
+| A function | `{ "$fn": <newlyAllocatedHandle> }` | Wrap in `JsFunction` |
+| `undefined` / void | `null` | Discard |
+| Anything else | JSON-serialised | Deserialise per C#-side expected type |
+
+Whether a returned JS object becomes a `JsObject` (allocated and registered)
+or gets JSON-serialised in full is a **per-factory / per-method decision**
+made by the JS side at registration time. The JS dispatcher consults a small
+hint map: "calls to `WebSocketConnection.sendMessage` return void; calls to
+the `createWebSocketConnection` factory return an object; calls to `addListener`
+return a function." Without these hints, every non-primitive return would
+become a `JsObject`, leaking handles for cases the consumer just wanted to
+JSON-roundtrip.
+
+### Settlement channel
+
+All async operations settle through one SendMessage handler — `OnPromiseSettled`
+— with the payload `"<promiseId>:ok:<resultJson>"` or `"<promiseId>:err:<message>"`.
+A single C# registry maps promise IDs → `AwaitableCompletionSource<string>`;
+the raw payload string is returned to the caller's awaiting `Awaitable` and
+deserialised on the C# side per the expected return type.
+
+Synchronous operations (sync method calls, property reads) bypass this channel
+entirely — the `DllImport` returns a heap-pointer-to-UTF8 string that C#
+copies and frees.
+
+## Architecture decisions
+
+### `Awaitable` over `Task` / `UniTask`
+
+Unity's [`Awaitable` / `AwaitableCompletionSource<T>`](https://docs.unity3d.com/2023.1/Documentation/ScriptReference/Awaitable.html)
+(Unity 2023.1+) is the right async primitive for a library SDK:
+
+- Zero external dependencies
+- Pooled (reduced GC), main-thread by default
+- Continuations after `await` reliably preserve the Emscripten call context on WebGL, where `Task.Delay` and some `Task` continuations are known to misbehave
+
+Consumers who want UniTask can wrap via `ToUniTask()`. This pins the
+**minimum Unity version to 2023.1+ (Unity 6 LTS)**.
+
+### SendMessage timing — assumed synchronous
+
+Unity's docs don't specify SendMessage timing. Community evidence (WebSocket
+bridges that immediately `_free` payload memory after SendMessage; production
+audio bridges) indicates that **SendMessage delivers synchronously when called
+from within a jslib callback**, including from `Promise.then`, `setTimeout`,
+and `WebSocket.onmessage` handlers. The C# method runs inline before the next
+JS statement.
+
+If this assumption breaks in a future Unity version, the fix is local: add a
+one-frame queue at the dispatch layer. The registry and handler lookup don't
+change.
+
+A frame-count assertion test in the first WebGL build confirms the assumption.
+
+### Error handling
+
+Every jslib function wraps its body in `try { ... } catch (e) { settle as err }`.
+Errors are always routed through the same settlement channel so the consumer's
+`await` throws; there's no separate error path. C# wraps JS error messages in
+a `BridgeException`.
+
+### Lifetime via `IDisposable` + finalizer safety net
+
+Primary cleanup is `IDisposable` (and `using` blocks where appropriate).
+Finalizers run on WebGL but with unpredictable timing — they're a last-resort
+**leak detector** that logs a warning if a handle is GC'd without being
+explicitly disposed, not the primary cleanup path.
+
+### Registry rule: first-wins, lookup-then-remove
+
+All registries (promises, callbacks, objects, functions) use the same pattern:
+operations look up by ID, atomically remove the entry, then act on the
+removed state. WebGL is single-threaded, but re-entrancy is possible — a
+handler triggering another bridge operation can loop back into the same
+registry, or `Dispose` can interleave with an in-flight dispatch. The
+lookup-then-remove rule means stale signals (a settle arriving after a
+cancel, a dispatch after a dispose) miss the registry and no-op silently,
+rather than double-completing or double-disposing.
+
+## C# API design
+
+```csharp
+namespace ElevenLabs.WebGL
+{
+    // Entry point for everything: invoke a JS-registered factory by name.
+    public static class BridgeJs
+    {
+        // Async factory call. Returns a JsObject, JsFunction, or
+        // deserialises into T per the registered return shape.
+        public static Awaitable<T> InvokeFactoryAsync<T>(
+            string factoryName,
+            params object[] args);
+
+        // Synchronous factory call. Only valid for factories registered as sync.
+        public static T InvokeFactory<T>(
+            string factoryName,
+            params object[] args);
+    }
+
+    // Handle to a remote JS object. Disposing releases the JS-side mapping.
+    public sealed class JsObject : IDisposable, IAsyncDisposable
+    {
+        public int Handle { get; }
+
+        // Async method call.
+        public Awaitable<T> CallAsync<T>(string method, params object[] args);
+        public Awaitable CallAsync(string method, params object[] args);
+
+        // Sync method call (only for methods registered as sync on the JS side).
+        public T Call<T>(string method, params object[] args);
+        public void Call(string method, params object[] args);
+
+        // Sync property read.
+        public T Get<T>(string property);
+
+        public void Dispose();      // releases JS-side entry
+        public ValueTask DisposeAsync();
+    }
+
+    // Handle to a JS function reference.
+    public sealed class JsFunction : IDisposable, IAsyncDisposable
+    {
+        public int Handle { get; }
+        public Awaitable<T> CallAsync<T>(params object[] args);
+        public Awaitable CallAsync(params object[] args);
+        public T Call<T>(params object[] args);
+        public void Call(params object[] args);
+        public void Dispose();
+        public ValueTask DisposeAsync();
+    }
+
+    // A C# delegate exposed to JS as a callable. Held in a registry for its lifetime;
+    // dispose to free the registry entry. C# never invokes a BridgeCallback directly —
+    // JS calls it, SendMessage routes back, and the wrapped delegate runs on the main thread.
+    public sealed class BridgeCallback : IDisposable
+    {
+        public int Handle { get; }
+
+        // Wrap a C# delegate. Returns a BridgeCallback that JS can invoke.
+        public static BridgeCallback Wrap(Action<string> handler);
+
+        // Typed convenience overload.
+        public static BridgeCallback Wrap<T>(Action<T> handler);
+
+        public void Dispose();      // removes the C# delegate from the registry
+    }
+
+    // Wraps a JS-thrown error.
+    public sealed class BridgeException : Exception { ... }
+}
+```
+
+Argument auto-marshalling: `params object[] args` accepts plain values
+(serialised as JSON), `JsObject` (encoded as `{$ref}`), `JsFunction`
+(encoded as `{$fn}`), and `BridgeCallback` (encoded as `{$cb}`).
+
+## JS API design
+
+The JS side is one bundled `.jslib`. It exposes a small set of `EL_*`
+DllImport targets, a registry of factories, and a uniform dispatcher.
+
+```javascript
+// State
+$EL_Objects:    {},   // handle -> JS object
+$EL_Functions:  {},   // handle -> JS function
+$EL_Factories:  {},   // name -> { fn, returnShape }
+$EL_NextFnId:   1,    // JS-allocated function handle counter
+
+// Registration (called from external JS at app boot, before any C# call)
+$EL_RegisterFactory: function(name, fn, returnShape) { ... },
+//   returnShape: "object" | "function" | "value" | "void"
+
+// Object method registration (per-class — tells the dispatcher whether each
+// method is async/sync and what to do with its return value)
+$EL_RegisterMethods: function(handle, methods) { ... },
+//   methods: { methodName: { async: bool, returnShape: "..." } }
+```
+
+DllImport entry points (every name follows the `EL_…` namespace):
+
+```
+EL_InvokeFactoryAsync(factoryNamePtr, argsJsonPtr, promiseId)
+EL_InvokeFactorySync(factoryNamePtr, argsJsonPtr) -> stringPtr
+EL_ObjectCallAsync(handle, methodPtr, argsJsonPtr, promiseId)
+EL_ObjectCallSync(handle, methodPtr, argsJsonPtr) -> stringPtr
+EL_ObjectGet(handle, propPtr) -> stringPtr
+EL_ObjectRelease(handle)
+EL_FunctionCallAsync(handle, argsJsonPtr, promiseId)
+EL_FunctionCallSync(handle, argsJsonPtr) -> stringPtr
+EL_FunctionRelease(handle)
+```
+
+No DllImport for `BridgeCallback` release — the callback registry is C#-owned,
+and `BridgeCallback.Dispose` simply removes the C# delegate. The JS-side
+wrapper function may still be held by some JS listener; subsequent invocations
+arrive, miss the registry lookup, and no-op silently. JS-side cleanup (calling
+`removeListener`) is the consumer's concern.
+
+The dispatcher is the same for every entry point:
+
+```javascript
+function dispatch(target, argsJson) {
+    var args = JSON.parse(argsJson || "[]").map(rehydrate);
+    return target.apply(null, args);
+}
+
+function rehydrate(value) {
+    if (value === null || typeof value !== "object") return value;
+    if ("$ref" in value)  return _EL_Objects[value.$ref];
+    if ("$fn"  in value)  return _EL_Functions[value.$fn];
+    if ("$cb"  in value)  return makeBridgeCallback(value.$cb);
+    // Plain object/array — recurse to rehydrate nested markers
+    return mapValues(value, rehydrate);
+}
+
+function encodeReturn(value, returnShape) {
+    if (returnShape === "object")   { var h = nextHandle(); _EL_Objects[h] = value;   return { $ref: h }; }
+    if (returnShape === "function") { var h = nextHandle(); _EL_Functions[h] = value; return { $fn:  h }; }
+    if (returnShape === "void")     return null;
+    return value;
+}
+```
+
+`makeBridgeCallback(handle)` returns a `function(arg) { _EL_InvokeCallback(handle, JSON.stringify(arg)); }`. The closure captures the handle int; the JS side never sees it as anything other than a plain function.
+
+This is the entirety of the bridge runtime. Every domain-specific class (a
+`WebSocketConnection`, an audio controller, anything else) is consumed via
+its registered factories and method hints — no new jslib code per class.
+
+## File layout
+
+The package root is the UPM package (`io.elevenlabs.agents`). JS sources
+under `Bridge~/` (Unity ignores `~`-suffixed dirs); generated jslib under
+`Plugins/WebGL/` (committed; CI gates freshness).
+
+```
+Runtime/
+  WebGL/
+    BridgeJs.cs                — public InvokeFactory entry point
+    JsObject.cs                — handle + async/sync call/get/dispose
+    JsFunction.cs              — function-ref handle
+    BridgeCallback.cs          — C# delegate exposed to JS
+    BridgeException.cs         — JS-originated error type
+    WebGLBridge.cs             — singleton MonoBehaviour, SendMessage handlers
+    BridgeIdGenerator.cs       — monotonic int IDs (C#-allocated)
+    BridgeMessageParser.cs     — "id:status:payload" parsing
+    BridgeLog.cs               — tagged logger
+    Marshalling/
+      BridgeArgEncoder.cs      — encodes object[] -> JSON with $ref/$fn/$cb markers
+      BridgeValueDecoder.cs    — decodes returns into primitives, JsObject, JsFunction
+    Internal/
+      Registries.cs            — Promise / Callback / Object / Function registries
+      ElevenLabsBridgeNative.cs — DllImport declarations + non-WebGL throwing stubs
+
+Plugins/WebGL/
+  ElevenLabsBridge.jslib       — generated from Bridge~/src/primitives/ (committed)
+
+Bridge~/
+  src/
+    primitives/
+      bridge-name.ts           — $EL_BridgeName + setter
+      log.ts                   — $EL_Log
+      registries.ts            — $EL_Objects / $EL_Functions / $EL_Factories tables, ID alloc
+      marshalling.ts           — rehydrate / encodeReturn / makeBridgeCallback
+      callbacks.ts             — $EL_InvokeCallback (SendMessage edge of the callback path)
+      promise-settle.ts        — $EL_Settle (shared by every async entrypoint)
+      dispatcher.ts            — the EL_* DllImport surface
+      index.ts                 — aggregates the library object
+      globals.d.ts             — ambient types for Unity-injected globals
+  tests/
+    primitives/                — Vitest coverage per file above
+  build/
+    bundle-jslib.ts            — shared Rolldown bundling script
+```
+
+The C# side stays in one assembly (`ElevenLabs.Agents.WebGL`); the JS side
+ships as one `.jslib`. No per-domain JS code in this primitive layer — the
+domain consumers (e.g. the connection wrappers) register their factories at
+JS boot via `$EL_RegisterFactory`.
+
+## Testing
+
+Three layers, same as the existing repo conventions.
+
+### JS unit tests (Vitest, Node) — `Bridge~/tests/`
+
+The jslib source is bundled by Rolldown and the TypeScript modules are
+imported directly in tests. Unity globals (`SendMessage`, `UTF8ToString`,
+`_malloc`, etc.) are replaced with fakes; the dispatcher and registries are
+exercised in isolation. Asserts:
+
+- Factory registration and invocation
+- Argument rehydration: `{$ref}`, `{$fn}`, `{$cb}` markers map to live values
+- Return encoding: factory marked `"object"` allocates a handle; `"void"` returns null
+- Callback fan-out: passing a `{$cb}` marker materialises a JS function that fires `SendMessage` with the correct format on invocation
+- Lifetime: `EL_ObjectRelease` drops the registry entry; calls afterwards fail cleanly
+- Error path: a JS-thrown error inside a method settles as `err`
+
+### C# unit tests (Unity Test Runner, Edit Mode) — `Tests/Editor/`
+
+Stubbed DllImports. Asserts:
+
+- ID uniqueness, monotonic generation
+- `BridgeArgEncoder` correctly encodes mixed args (primitives + JsObject + JsFunction + BridgeCallback)
+- `BridgeValueDecoder` correctly produces JsObject / JsFunction handles from `{$ref}` / `{$fn}` returns
+- Registry first-wins behaviour: double-settle, settle-after-cancel, dispose-mid-dispatch
+- Message parsing edge cases: colons in payload, empty payload, Unicode
+
+### Integration tests (WebGL build + Vitest browser mode) — Phase 5+
+
+A minimal Unity scene exercises the full round-trip in Chrome / Firefox /
+Safari. Vitest browser mode loads the WebGL build and asserts on the bridge
+behaviour from the outside.
+
+## Implementation phases
+
+Ordered to frontload everything that doesn't require a Unity license.
+
+### Phase 1 — Existing scaffolding (already in repo)
+
+These exist and are reused as-is. Listed for clarity, no new work:
+
+- `WebGLBridge.cs` singleton MonoBehaviour with `[RuntimeInitializeOnLoadMethod]`
+- `BridgeIdGenerator.cs` monotonic int ID generator
+- `BridgeMessageParser.cs` (variants will be trimmed to just `id:status:payload` for the settle channel)
+- `BridgeLog.cs` tagged logger
+- `BridgeException.cs`
+- `Bridge~/` pnpm + Vitest + Prettier + ESLint + Rolldown setup
+- `Bridge~/build/bundle-jslib.ts` Rolldown bundling script
+- The `$EL_BridgeName` + `$EL_Log` jslib helpers
+
+Anything from the prior bridge primitives implementation that doesn't fit
+the new design is removed in Phase 2. Specifically: `$EL_CallPromise` is
+replaced by the per-entrypoint settle pattern; `$EL_InvokeHandler` /
+`EL_ResolveInvocation` / `EL_RejectInvocation` (the handler invocation
+primitive) is removed — JS→C# calls in this design go through
+`BridgeCallback`, and async JS→C# round-trips are deferred to the future
+`AsyncBridgeCallback` extension point (see "Possible extensions"); the
+prior observer primitive (`$EL_RegisterObserver` / `$EL_EmitEvent` /
+`EL_DisposeObserver`) collapses into the `BridgeCallback` shape and its
+files are replaced in Phase 2.
+
+### Phase 2 — JS-side primitives (Unity-free, Vitest-covered)
+
+All testable end-to-end in Node with Vitest mocking the Unity runtime.
+Tasks within this phase are mostly parallelisable.
+
+- [ ] **2.1 — Registries.** `Bridge~/src/primitives/registries.ts` — `$EL_Objects`, `$EL_Functions`, `$EL_Factories`, JS-side function-handle allocator. Per-table `register`, `lookup`, `release` operations. Vitest: register/lookup/release; release-then-lookup misses cleanly; double-release is a no-op.
+- [ ] **2.2 — Marshalling.** `marshalling.ts` — `rehydrate(value)` and `encodeReturn(value, shape)`. Walks nested structures. Vitest: every marker shape round-trips; nested arrays/objects with mixed markers work; unknown markers pass through as-is.
+- [ ] **2.3 — Callback dispatch helper.** `callbacks.ts` — `$EL_InvokeCallback(handle, payload)` SendMessages with `handle + ':' + payload`. Used by the JS function returned from `makeBridgeCallback`. No JS-side release entry point — the C# registry is the authority; JS-side closures are the consumer's lifetime concern (typically via a paired `removeListener` `JsFunction`). Vitest: invocation fires `SendMessage` with the correct format.
+- [ ] **2.4 — Settle helper.** `promise-settle.ts` — `$EL_Settle(promiseId, status, payload)` SendMessages with `promiseId + ':' + status + ':' + payload`. Used by every async entrypoint. Vitest: ok/err round-trip; error message survives JSON escaping.
+- [ ] **2.5 — Dispatcher and entry points.** `dispatcher.ts` — the eight `EL_*` DllImport targets listed above. Each wraps its body in try/catch that routes to `$EL_Settle` on error (async) or returns a string-encoded error pointer (sync). Vitest:
+  - `EL_InvokeFactoryAsync` resolves with the registered return shape; missing factory rejects
+  - `EL_ObjectCallAsync` calls the method with rehydrated args; settles with encoded return
+  - `EL_ObjectCallSync` returns the heap-string-encoded value
+  - `EL_ObjectGet` reads the property
+  - `EL_ObjectRelease` drops the entry; subsequent calls reject with "unknown handle"
+  - `EL_FunctionCallAsync` / `EL_FunctionCallSync` / `EL_FunctionRelease` parallel to object variants
+- [ ] **2.6 — Index aggregation + bundling.** `index.ts` re-exports via namespace imports + spread; `pnpm run build:primitives` emits `Plugins/WebGL/ElevenLabsBridge.jslib`. `pnpm run verify:primitives` rebuilds + `git diff --exit-code`. Existing CLAUDE.md command documentation updated to match the new shape.
+- [ ] **2.7 — Sample factory for end-to-end test.** A throwaway `mathFactory` registered in a Vitest setup file (returns an object with `add(a, b)` sync, `addAsync(a, b)` async, `getPi()` property, `addTickListener(callback)` returning a `removeListener` function). End-to-end Vitest exercises every primitive surface against it — factory invocation, sync method, async method, property read, callback registration with `BridgeCallback`, function-handle round-trip via `removeListener`, dispose. Not shipped; just used for cross-cutting coverage.
+
+### Phase 3 — C# primitive layer (requires Unity)
+
+- [ ] **3.1 — DllImport declarations.** `ElevenLabsBridgeNative.cs` — every `EL_*` entry point, `#if UNITY_WEBGL && !UNITY_EDITOR` real bodies and throwing stubs otherwise (matches the existing convention).
+- [ ] **3.2 — Registries (C# side).** `Internal/Registries.cs` — promise registry (`Dictionary<int, AwaitableCompletionSource<string>>`), callback registry (`Dictionary<int, Action<string>>`). Atomic lookup-then-remove on settle/dispatch/dispose. Edit-mode tests for first-wins behaviour.
+- [ ] **3.3 — Marshalling (C# side).** `Marshalling/BridgeArgEncoder.cs` and `BridgeValueDecoder.cs`. Encoder walks `params object[]`, emits JSON with `$ref` / `$fn` / `$cb` markers based on runtime type. Decoder reads JSON returns and produces primitives, `JsObject`, `JsFunction`. Edit-mode tests round-trip each shape.
+- [ ] **3.4 — `BridgeJs` static entry point.** `InvokeFactoryAsync<T>` / `InvokeFactory<T>` async/sync overloads. Internally allocates a promise ID (async) or marshals and calls the sync DllImport. Returns deserialised `T` (including `JsObject` / `JsFunction` as `T`).
+- [ ] **3.5 — `JsObject` + `JsFunction`.** `CallAsync<T>` / `Call<T>` / `Get<T>` overloads; `Dispose` calls `EL_ObjectRelease` / `EL_FunctionRelease`. Finalizer logs a warning via `BridgeLog` if dispose wasn't called. Edit-mode tests against stubbed DllImports.
+- [ ] **3.6 — `BridgeCallback`.** `Wrap(Action<string>)` + typed overload allocates a handle and registers the delegate. `Dispose` removes the registry entry. Wires `WebGLBridge.OnCallbackInvoked` to `BridgeCallbackRegistry.Dispatch`. Edit-mode tests for wrap / invoke / dispose, including "invocation after dispose silently no-ops."
+- [ ] **3.7 — Wire `WebGLBridge.OnPromiseSettled`.** Replaces the Phase-1 stub; routes to the promise registry. Edit-mode tests: settle resolves the `AwaitableCompletionSource`; err raises `BridgeException`.
+- [ ] **3.8 — XML doc comments** on every public type and member.
+
+### Phase 4 — WebGL smoke test (requires Unity)
+
+- [ ] **4.1 — Minimal scene.** A `BridgePrimitiveSmokeTest` MonoBehaviour: registers the `mathFactory` from Phase 2.7 in a `.jspre` (or its equivalent), then in C# `Start()` invokes the factory, exercises each surface (method, property, callback registration, function-handle round-trip), asserts on results, logs to console.
+- [ ] **4.2 — Validation assertions.**
+  - V1: `SendMessage` from an async JS callback delivers same-frame (`Time.frameCount` comparison)
+  - V2: `Awaitable` continuation after `await JsObject.CallAsync(...)` can immediately call another `DllImport` without breakage
+  - V3: `BridgeCallback` invocations arrive in order under rapid emission from JS
+  - V4: A `JsFunction` returned from a method call survives across multiple sync calls
+- [ ] **4.3 — Clean IL2CPP build.** No warnings, no missing symbols. Manual verification in Chrome and at least one of Firefox/Safari.
+
+### Phase 5 — Automated integration (requires Unity)
+
+- [ ] **5.1 — Vitest browser-mode harness.** Playwright provider loads the WebGL build; the harness drives the smoke-test scene from JS and asserts on the bridge protocol.
+- [ ] **5.2 — Edge cases.** Double-dispose, orphaned handles on bridge destroy, special chars in payload (colons, newlines, Unicode), large payloads (>100KB), rapid-fire callback invocations from JS.
+- [ ] **5.3 — Cross-browser CI.** Chrome, Firefox, Safari.
+
+## Definition of done
+
+- Every `EL_*` entry point has Vitest coverage exercising its happy path, an error path, and a "missing handle" path.
+- Every `BridgeJs` / `JsObject` / `JsFunction` / `BridgeCallback` public method has an Edit-mode test exercising it against stubbed DllImports.
+- The Vitest browser-mode integration suite passes on Chrome, Firefox, Safari in CI.
+- Validation assertions V1–V4 pass in a real browser.
+- A clean IL2CPP WebGL build succeeds with no warnings.
+- `pnpm run verify:primitives` exits 0 on a fresh clone (jslib is reproducible from TS sources).
+- Public C# API is documented with XML doc comments.
+- The UPM package installs cleanly into a Unity 2023.1+ project via git URL.
+
+## Open questions
+
+1. **Argument auto-marshalling depth.** The encoder walks nested structures for `$ref` / `$fn` / `$cb` markers — is that needed in practice, or are object / function / callback args always top-level? Top-level-only is simpler and faster but locks out cases like `{ options: { onMessage: callback } }` payload shapes.
+2. **Return-shape declaration locality.** Should return shapes be declared at factory registration time, or per call from the C# side? Registration-time matches the proposed dispatcher; per-call gives the C# side more flexibility. Lean registration-time for v0.1.
+3. **Synchronous error reporting.** Async entry points settle errors through the promise channel. Sync entry points return a string pointer — how do errors look? Proposed: a sentinel prefix (`"!err:"` + message) that the C# decoder recognises and throws. Alternative: a separate `EL_LastSyncError` getter that C# polls after every sync call. First option is one fewer round trip.
+4. **Auto-teardown helper for `BridgeCallback`.** A `BridgeCallback.Dispose` call removes the C# delegate, but the JS-side closure capturing the handle stays alive until the JS consumer drops it (e.g. by calling `removeListener`). A future helper could pair a `BridgeCallback` with a `JsFunction` at wrap time so `Dispose` invokes the teardown automatically. Defer until a real consumer makes the pattern repetitive enough to warrant it.
+
+## Possible extensions
+
+Noted to mark the primitive set as "complete on paper" — the design has a
+natural place for each, but none are needed for v0.1.
+
+- **`AsyncBridgeCallback`** — a `BridgeCallback` whose JS-side wrapper function returns a `Promise` that settles when C# resolves it (via a `EL_ResolveCallback(invocationId, resultJson)` DllImport). Lets JS-side code `await` a result from C#, covering patterns like remote tool dispatch (a JS module asking C# to execute a tool and waiting for the result). Reuses the existing settle channel plus a per-invocation registry on the JS side. With this in place the primitive set covers every interop direction symmetrically: C# can call sync or async into JS (via `JsObject` / `JsFunction`); JS can call sync-style fire-and-forget or async-with-result into C# (via `BridgeCallback` / `AsyncBridgeCallback`).
+- **Binary-payload variants** — `EL_ObjectCallBytes(handle, methodPtr, bufferPtr, bufferLen, promiseId)` and a mirror return variant for hot paths (audio PCM frames at 40+ Hz). Avoids the JSON encode/decode of base64 strings. Slot-in alongside the existing async/sync call entry points without changing the wider protocol.
+- **DynCall + `[MonoPInvokeCallback]` fast path** — for hot paths where even the SendMessage hop is too slow (PCM streaming at high sample rates), the C# side can register a static method via `[MonoPInvokeCallback]` whose function pointer JS calls via `Module.dynCall_*`. Out of scope; v0.1 stays on SendMessage as discussed in [webgl-js-to-csharp-callbacks.md](./webgl-js-to-csharp-callbacks.md).
