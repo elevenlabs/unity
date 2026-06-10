@@ -486,7 +486,7 @@ Tasks within this phase are mostly parallelisable.
 - [x] **2.2 — Marshalling.** `marshalling.ts` — `rehydrate(value)` and `encodeReturn(value, shape)`. Walks nested structures. Vitest: every marker shape round-trips; nested arrays/objects with mixed markers work; unknown markers pass through as-is.
 - [x] **2.3 — Callback dispatch helper.** `callbacks.ts` — `$EL_InvokeCallback(handle, payload)` SendMessages with `handle + ':' + payload`. Used by the JS function returned from `makeBridgeCallback`. No JS-side release entry point — the C# registry is the authority; JS-side closures are the consumer's lifetime concern (typically via a paired `removeListener` `JsFunction`). Vitest: invocation fires `SendMessage` with the correct format.
 - [x] **2.4 — Settle helper.** `promise-settle.ts` — `$EL_Settle(promiseId, status, payload)` SendMessages with `promiseId + ':' + status + ':' + payload`. Used by every async entrypoint. Vitest: ok/err round-trip; error message survives JSON escaping.
-- [ ] **2.5 — Dispatcher and entry points.** `dispatcher.ts` — the eight `EL_*` DllImport targets listed above. Each wraps its body in try/catch that routes to `$EL_Settle` on error (async) or returns a string-encoded error pointer (sync). Vitest:
+- [x] **2.5 — Dispatcher and entry points.** `dispatcher.ts` — the eight `EL_*` DllImport targets listed above. Each wraps its body in try/catch that routes to `$EL_Settle` on error (async) or returns a string-encoded error pointer (sync). Vitest:
   - `EL_InvokeFactoryAsync` resolves with the registered return shape; missing factory rejects
   - `EL_ObjectCallAsync` calls the method with rehydrated args; settles with encoded return
   - `EL_ObjectCallSync` returns the heap-string-encoded value

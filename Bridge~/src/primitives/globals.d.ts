@@ -35,6 +35,35 @@ declare function _EL_AllocateObject(obj: unknown): number;
 declare function _EL_AllocateFunction(
   fn: (...args: unknown[]) => unknown,
 ): number;
+declare function _EL_LookupObject(handle: number): unknown;
+declare function _EL_LookupFunction(
+  handle: number,
+): ((...args: unknown[]) => unknown) | undefined;
+declare function _EL_LookupFactory(name: string):
+  | {
+      fn: (...args: unknown[]) => unknown;
+      returnShape: "object" | "function" | "value" | "void";
+    }
+  | undefined;
+declare function _EL_ReleaseObject(handle: number): void;
+declare function _EL_ReleaseFunction(handle: number): void;
+
+// Marshalling helpers — hoisted from marshalling.ts.
+declare function _EL_Rehydrate(value: unknown): unknown;
+declare function _EL_EncodeReturn(
+  value: unknown,
+  shape: "object" | "function" | "value" | "void",
+): unknown;
 
 // Callback dispatch — hoisted from $EL_InvokeCallback in callbacks.ts.
 declare function _EL_InvokeCallback(handle: number, payload: string): void;
+
+// Settle channel — hoisted from $EL_Settle in promise-settle.ts.
+declare function _EL_Settle(
+  promiseId: number,
+  status: "ok" | "err",
+  payload: string,
+): void;
+
+// Emscripten heap allocation — available globally in the jslib runtime.
+declare function _malloc(size: number): number;
