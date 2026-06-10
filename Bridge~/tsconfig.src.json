@@ -10,5 +10,6 @@
     "composite": true,
     "outDir": "dist/src"
   },
-  "include": ["vitest.config.ts", "src/**/*.ts"]
+  "include": ["vitest.config.ts", "src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

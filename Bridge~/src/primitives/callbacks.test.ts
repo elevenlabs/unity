@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { $EL_InvokeCallback } from "../../src/primitives/callbacks";
+import { $EL_InvokeCallback } from "./callbacks";
 
 type ElGlobals = typeof globalThis & {
   _EL_BridgeName: string;
@@ -9,8 +9,8 @@ type ElGlobals = typeof globalThis & {
 const g = globalThis as ElGlobals;
 
 beforeEach(() => {
-  g._EL_BridgeName = "__ElevenLabsBridge__";
-  g.SendMessage = vi.fn();
+  vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
+  vi.stubGlobal("SendMessage", vi.fn());
 });
 
 describe("$EL_InvokeCallback", () => {

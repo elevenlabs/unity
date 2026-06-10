@@ -1,16 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  $EL_EncodeReturn,
-  $EL_Rehydrate,
-} from "../../src/primitives/marshalling";
-import {
-  $EL_AllocateFunction,
-  $EL_AllocateObject,
-} from "../../src/primitives/registries";
+import { $EL_EncodeReturn, $EL_Rehydrate } from "./marshalling";
+import { $EL_AllocateFunction, $EL_AllocateObject } from "./registries";
 
-// Stand up the Unity-hoisted globals on globalThis before each test so the
-// helper functions can mutate and read them exactly as they would in a live
-// WebGL build.
+// Stub the Unity-hoisted globals on globalThis before each test so the helper
+// functions can mutate and read them exactly as they would in a live WebGL
+// build. vitest restores them between tests (unstubGlobals in vitest.config.ts).
 type ElGlobals = typeof globalThis & {
   _EL_Objects: Record<number, unknown>;
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
@@ -23,12 +17,12 @@ type ElGlobals = typeof globalThis & {
 const g = globalThis as ElGlobals;
 
 beforeEach(() => {
-  g._EL_Objects = {};
-  g._EL_Functions = {};
-  g._EL_NextHandleId = 1;
-  g._EL_AllocateObject = $EL_AllocateObject;
-  g._EL_AllocateFunction = $EL_AllocateFunction;
-  g._EL_InvokeCallback = vi.fn();
+  vi.stubGlobal("_EL_Objects", {});
+  vi.stubGlobal("_EL_Functions", {});
+  vi.stubGlobal("_EL_NextHandleId", 1);
+  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("_EL_InvokeCallback", vi.fn());
 });
 
 describe("$EL_Rehydrate", () => {

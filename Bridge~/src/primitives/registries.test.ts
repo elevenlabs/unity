@@ -8,12 +8,12 @@ import {
   $EL_RegisterFactory,
   $EL_ReleaseFunction,
   $EL_ReleaseObject,
-} from "../../src/primitives/registries";
+} from "./registries";
 
 // The primitive helpers reference `_EL_Objects`, `_EL_Functions`,
 // `_EL_Factories`, `_EL_NextHandleId` — the Unity-hoisted module-level globals.
-// In Node we stand them up on globalThis ourselves before each test so the
-// helpers can mutate them.
+// In Node we stub them on globalThis via vi.stubGlobal so vitest restores them
+// between tests (unstubGlobals is enabled in vitest.config.ts).
 type ElGlobals = typeof globalThis & {
   _EL_Objects: Record<number, unknown>;
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
@@ -29,10 +29,10 @@ type ElGlobals = typeof globalThis & {
 const g = globalThis as ElGlobals;
 
 beforeEach(() => {
-  g._EL_Objects = {};
-  g._EL_Functions = {};
-  g._EL_Factories = {};
-  g._EL_NextHandleId = 1;
+  vi.stubGlobal("_EL_Objects", {});
+  vi.stubGlobal("_EL_Functions", {});
+  vi.stubGlobal("_EL_Factories", {});
+  vi.stubGlobal("_EL_NextHandleId", 1);
 });
 
 describe("object registry", () => {
