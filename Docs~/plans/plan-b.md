@@ -247,3 +247,28 @@ with `&&`.
 2. **Should `IConnection.Send` take a typed event union, or a serialised string?** Typed gives compile-time safety, but means the C# Conversation builds the event then `BridgedWebSocketConnection.Send` serialises and the JS dispatcher rehydrates. Untyped means the Conversation serialises once and the JS side hands the raw string straight to `connection.sendMessage`. Lean typed for native parity, but worth a second look in Phase 4.
 3. **What happens if the user calls a method during a transient disconnect?** JS SDK behaviour varies by method. Plan B's C# Conversation should make this consistent — likely "throw `InvalidOperationException`" rather than silently drop. Decide in Phase 4.
 4. **Repository structure: in `elevenlabs/packages` or standalone?** Still open from the RFC. Plan B's WebGL bundle depends on `@elevenlabs/client`, which slightly tilts toward in-monorepo. Doesn't block any phase.
+
+## Pending Human Approval
+
+The tasks below are appended during implementation as new work is discovered.
+They are not yet approved for execution — promote them into a numbered phase
+task above once agreed.
+
+- [ ] **Remove deep-import workaround once `@elevenlabs/client` exports `MediaDeviceInput` / `MediaDeviceOutput` upstream.** Task 2.2 needs the concrete `MediaDeviceInput` / `MediaDeviceOutput` classes from `@elevenlabs/client/dist/platform/web/{input,output}.js`, but those sub-paths are not in the SDK's package `exports` map. To get tsc, Vitest, and Rolldown to resolve them today, three workarounds were added:
+  1. `Bridge~/src/connection/platform-web.d.ts` — ambient `declare module` stubs for the two deep sub-paths so tsc accepts the imports.
+  2. `Bridge~/vitest.config.ts` — `resolve.alias` entries pointing each deep path at the corresponding file in `node_modules` so Vite (Vitest's resolver) bypasses the exports check at test time.
+  3. `Bridge~/build/bundle-jslib.ts` — equivalent `resolve.alias` entries for Rolldown so the production jslib bundle resolves them too.
+
+  The cleanest upstream fix (per [Local SDK iteration workflow](#local-sdk-iteration-workflow)) is to expose the two classes through a first-class entrypoint — either:
+  - **a `@elevenlabs/client/unity` sub-path export** that re-exports `MediaDeviceInput`, `MediaDeviceOutput`, and (later) the `attachDefaultAudio` helper, or
+  - **broadening the existing `./internal` export** to a directory pattern (e.g. `"./internal/*": "./dist/internal/*"`) and moving the symbols into that namespace, or
+  - **adding `MediaDeviceInput` / `MediaDeviceOutput` to the existing `./internal` re-exports in `dist/internal.{js,d.ts}`** (smallest change — `./internal` is already declared as a single file, no new export entry needed in `package.json`).
+
+  Once a `@elevenlabs/client` release ships any of those:
+  1. Replace the deep imports in `factories.ts` with the new public entrypoint.
+  2. Delete `Bridge~/src/connection/platform-web.d.ts`.
+  3. Delete the `resolve.alias` block in `Bridge~/vitest.config.ts`.
+  4. Delete the `deepImportAliases` block in `Bridge~/build/bundle-jslib.ts`.
+  5. Rebuild and re-run `verify:connection` to confirm parity.
+
+  Tracking: open an upstream PR against `elevenlabs/packages` for the chosen shape; once merged and released, bump the dep version and execute the cleanup above in a single follow-up commit.
