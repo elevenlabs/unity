@@ -117,7 +117,7 @@ factories with the primitive layer at module init and exposes the
 points** — everything goes through `$EL_RegisterFactory` and is consumed via
 the generic `JsObject` primitive from C#.
 
-- [ ] **2.1 — Dependency + scaffold.** `pnpm --dir Bridge~ add @elevenlabs/client`. Create `Bridge~/src/connection/` with `factories.ts`, `audio-glue.ts`, `types.ts`, `index.ts`. `types.ts` mirrors the SDK's exported `SessionConfig`, `FormatConfig`, `InputConfig`, `OutputConfig`, `DisconnectionDetails` shapes via composition (`Pick`/`extends`) so SDK bumps ripple through tsc. Wire `pnpm run build:connection` / `verify:connection` paralleling the existing primitives scripts; commit the (initially near-empty) `Plugins/WebGL/ElevenLabsConnection.jslib`. Document the new commands in `.claude/CLAUDE.md`.
+- [x] **2.1 — Dependency + scaffold.** `pnpm --dir Bridge~ add @elevenlabs/client`. Create `Bridge~/src/connection/` with `factories.ts`, `audio-glue.ts`, `types.ts`, `index.ts`. `types.ts` mirrors the SDK's exported `SessionConfig`, `FormatConfig`, `InputConfig`, `OutputConfig`, `DisconnectionDetails` shapes via composition (`Pick`/`extends`) so SDK bumps ripple through tsc. Wire `pnpm run build:connection` / `verify:connection` paralleling the existing primitives scripts; commit the (initially near-empty) `Plugins/WebGL/ElevenLabsConnection.jslib`. Document the new commands in `.claude/CLAUDE.md`.
 - [ ] **2.2 — Factory registrations.** `factories.ts` calls `$EL_RegisterFactory(name, fn)` for each SDK class at module init:
   - `createWebSocketConnection(config)` → `WebSocketConnection.create(config)`
   - `createWebRTCConnection(config)` → `WebRTCConnection.create(config)`

@@ -11,7 +11,9 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests",
     "build:primitives": "node build/bundle-jslib.ts src/primitives/index.ts ../Plugins/WebGL/ElevenLabsBridge.jslib",
-    "verify:primitives": "pnpm run build:primitives && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsBridge.jslib"
+    "verify:primitives": "pnpm run build:primitives && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsBridge.jslib",
+    "build:connection": "node build/bundle-jslib.ts src/connection/index.ts ../Plugins/WebGL/ElevenLabsConnection.jslib",
+    "verify:connection": "pnpm run build:connection && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsConnection.jslib"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -28,5 +30,8 @@
     "rolldown": "^1.1.0",
     "typescript": "^6.0.3",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@elevenlabs/client": "^1.10.0"
   }
 }
