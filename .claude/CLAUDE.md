@@ -49,4 +49,4 @@ in a non-TS form (e.g. `eslint.config.js`).
 
 ## Project plans
 
-Implementation plans live in `.claude/plans/`. Look there for context on agreed approaches, and place any new plans there too.
+Implementation plans live in `Docs~/plans/` (alongside `Docs~/ARCHITECTURE.md`). Look there for context on agreed approaches, and place any new plans there too.

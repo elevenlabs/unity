@@ -1,6 +1,6 @@
 # Plan: JS Conversation Adapter — wiring `@elevenlabs/client` to the bridge primitives
 
-> **Superseded by [plan-b.md](./plan-b.md) — see [ARCHITECTURE.md](../../ARCHITECTURE.md).**
+> **Superseded by [plan-b.md](./plan-b.md) — see [ARCHITECTURE.md](../ARCHITECTURE.md).**
 > Plan B bridges `@elevenlabs/client`'s connection + input/output controllers
 > instead of its `Conversation` class. Kept for historical reference; the
 > Tasks list below is dropped.

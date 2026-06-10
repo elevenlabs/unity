@@ -21,7 +21,7 @@ classes the JS SDK already factors out — `BaseConnection`, `InputController`,
 `OutputController` — and the same C# `Conversation` orchestrates them on
 every target.
 
-See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the to-be shape.
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for the to-be shape.
 
 ## What changes vs Plan A
 
@@ -106,7 +106,7 @@ agent loops. Phases 4–7 unblock once the Unity license is active.
 
 - [x] Add a "Superseded by plan-b.md" header to `js-conversation-adapter.md`.
 - [x] Cross-reference Plan B from `generic-bridge-primitives.md`'s "Implementation phases" intro so future readers find it as the canonical first consumer.
-- [x] Confirm the names sketched in [ARCHITECTURE.md](../../ARCHITECTURE.md) (`BridgedWebSocketConnection` etc.) — rename now if anything reads wrong, before code lands. Renamed `BridgeJs` → `JsBridge` (reads more naturally as a noun: "the bridge to JS"). `BridgedSession` left as-is but flagged as worth a second look — "Session" overlaps with the agent platform's session concept; could be `WebGLSessionLauncher` or inlined into `Conversation.StartSessionAsync`.
+- [x] Confirm the names sketched in [ARCHITECTURE.md](../ARCHITECTURE.md) (`BridgedWebSocketConnection` etc.) — rename now if anything reads wrong, before code lands. Renamed `BridgeJs` → `JsBridge` (reads more naturally as a noun: "the bridge to JS"). `BridgedSession` left as-is but flagged as worth a second look — "Session" overlaps with the agent platform's session concept; could be `WebGLSessionLauncher` or inlined into `Conversation.StartSessionAsync`.
 
 ### Phase 2 — JS-side factory + audio-glue registrations (Unity-free, Vitest-covered)
 
@@ -150,7 +150,7 @@ interruption handling, and client-tool dispatch into C#. Pure orchestration
 — no jslib, no platform-specifics — so it's testable in Edit Mode against
 mock `IConnection`/`IInputController`/`IOutputController`.
 
-- [ ] **4.1 — Define the three abstractions.** `Runtime/Core/IConnection.cs`, `IInputController.cs`, `IOutputController.cs` matching the shapes sketched in [ARCHITECTURE.md](../../ARCHITECTURE.md). `IConnection.Send` takes typed `OutgoingSocketEvent`; `OnMessage` delivers typed `IncomingSocketEvent`.
+- [ ] **4.1 — Define the three abstractions.** `Runtime/Core/IConnection.cs`, `IInputController.cs`, `IOutputController.cs` matching the shapes sketched in [ARCHITECTURE.md](../ARCHITECTURE.md). `IConnection.Send` takes typed `OutgoingSocketEvent`; `OnMessage` delivers typed `IncomingSocketEvent`.
 - [ ] **4.2 — `Conversation` class.** Public API (`StartSessionAsync`, `EndSession`, `SendUserMessage`, `SendContextualUpdate`, `SendUserActivity`, `SendFeedback`, `SetVolume`, `SetMicMuted`, `GetInputByteFrequencyData`, `GetOutputByteFrequencyData`, `GetInputVolume`, `GetOutputVolume`); events for all the callback shapes the JS SDK exposes. The signature is C#-idiomatic — `event` + `EventArgs`, `Awaitable<T>` for async methods.
 - [ ] **4.3 — Message router.** Translate `BaseConversation.onMessage`'s switch into C#. Each case calls a small handler method, same as the JS SDK.
 - [ ] **4.4 — Client tool dispatch.** A `Dictionary<string, ClientToolHandler>` owned by `Conversation`. The `client_tool_call` handler looks up, awaits, sends `client_tool_result`. No Proxy, no name-set, no shared dispatcher key.

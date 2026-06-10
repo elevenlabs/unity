@@ -298,7 +298,7 @@ var weather = await BridgePromise.Call(
 // For entrypoints that resolve with "" (no payload), use the raw overload and discard.
 // Note: consumer-specific entrypoints layer their own arguments in front of `promiseId` —
 // e.g. the Conversation adapter takes `sessionId` first across all DllImports for consistency
-// (see .claude/plans/js-conversation-adapter.md). The primitive is unopinionated about that.
+// (see Docs~/plans/js-conversation-adapter.md). The primitive is unopinionated about that.
 await BridgePromise.Call(
     promiseId => ElevenLabsBridgeNative.EL_StartSession(sessionId, promiseId, JsonConvert.SerializeObject(opts)));
 ```

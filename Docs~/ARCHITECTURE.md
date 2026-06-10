@@ -2,7 +2,7 @@
 
 > Living document. Captures the **to-be** shape of the ElevenLabs Unity SDK as we
 > build toward v0.1 and beyond. Update as decisions land. For implementation
-> sequencing, see [`.claude/plans/`](.claude/plans/).
+> sequencing, see [`plans/`](./plans/).
 
 ## Goal
 
@@ -138,7 +138,7 @@ handles across the boundary.
 - **`JsFunction`** — C# handle to a remote JS function (typically returned from a `JsObject` method, e.g. a `removeListener` returned by `addListener`); call sync or async, dispose.
 - **`BridgeCallback`** — C# delegate exposed to JS as a callable. Wrap a delegate, pass it as a method argument; JS sees a plain function. When JS calls it, SendMessage routes back to the bridge and the wrapped delegate runs on Unity's main thread.
 
-See [`.claude/plans/generic-bridge-primitives.md`](.claude/plans/generic-bridge-primitives.md)
+See [`plans/generic-bridge-primitives.md`](./plans/generic-bridge-primitives.md)
 for the detailed design and protocol. Adding a method to the JS SDK requires
 **no new bridge code** — the C# façade just calls a new method name through
 the existing `JsObject` primitive.
@@ -188,9 +188,10 @@ Emscripten concatenates them at WebGL build time.
 ## Repository layout
 
 ```
-ARCHITECTURE.md                  ← this file
+Docs~/
+  ARCHITECTURE.md                ← this file
+  plans/                         ← design plans (read these before architectural changes)
 package.json                     ← UPM manifest (io.elevenlabs.agents)
-.claude/plans/                   ← design plans (read these before architectural changes)
 
 Runtime/
   ElevenLabs.Agents.asmdef       ← public API + Core abstractions
