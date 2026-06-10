@@ -134,7 +134,7 @@ by JS — all share one registry-and-marker machinery, one async settle channel,
 and one set of JSON marker conventions (`$ref` / `$fn` / `$cb`) for passing
 handles across the boundary.
 
-- **`JsObject`** — C# handle to a remote JS object. Construct via `BridgeJs.InvokeFactoryAsync<JsObject>(name, args)` against factories the JS side registered at module init; call methods, read properties, dispose.
+- **`JsObject`** — C# handle to a remote JS object. Construct via `JsBridge.InvokeFactoryAsync<JsObject>(name, args)` against factories the JS side registered at module init; call methods, read properties, dispose.
 - **`JsFunction`** — C# handle to a remote JS function (typically returned from a `JsObject` method, e.g. a `removeListener` returned by `addListener`); call sync or async, dispose.
 - **`BridgeCallback`** — C# delegate exposed to JS as a callable. Wrap a delegate, pass it as a method argument; JS sees a plain function. When JS calls it, SendMessage routes back to the bridge and the wrapped delegate runs on Unity's main thread.
 
@@ -208,7 +208,7 @@ Runtime/
     BridgedOutputController.cs      ← thin wrapper around a JsObject
     BridgedSession.cs               ← orchestrates the factory calls + attachDefaultAudio
     WebGLBridge.cs                  ← primitives MonoBehaviour (existing scaffolding)
-    BridgeJs.cs                     ← public InvokeFactory entry point
+    JsBridge.cs                     ← public InvokeFactory entry point
     JsObject.cs
     JsFunction.cs
     BridgeCallback.cs

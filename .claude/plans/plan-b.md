@@ -59,7 +59,7 @@ Mapped to the new consumers:
 
 | Interaction | Primitive surface |
 |---|---|
-| Create a JS connection / input / output | `BridgeJs.InvokeFactoryAsync<JsObject>("create...", config)` against factories registered at JS boot |
+| Create a JS connection / input / output | `JsBridge.InvokeFactoryAsync<JsObject>("create...", config)` against factories registered at JS boot |
 | Call a method on a JS object (with result) | `jsObject.CallAsync<T>("methodName", args)` |
 | Call a method on a JS object (fire-and-forget) | `jsObject.Call("methodName", args)` (void overload) |
 | Read a synchronous JS property | `jsObject.Get<T>("propertyName")` |
@@ -104,9 +104,9 @@ agent loops. Phases 4–7 unblock once the Unity license is active.
 
 ### Phase 1 — Plan disposition and naming (no code)
 
-- [ ] Add a "Superseded by plan-b.md" header to `js-conversation-adapter.md`.
-- [ ] Cross-reference Plan B from `generic-bridge-primitives.md`'s "Implementation phases" intro so future readers find it as the canonical first consumer.
-- [ ] Confirm the names sketched in [ARCHITECTURE.md](../../ARCHITECTURE.md) (`BridgedWebSocketConnection` etc.) — rename now if anything reads wrong, before code lands.
+- [x] Add a "Superseded by plan-b.md" header to `js-conversation-adapter.md`.
+- [x] Cross-reference Plan B from `generic-bridge-primitives.md`'s "Implementation phases" intro so future readers find it as the canonical first consumer.
+- [x] Confirm the names sketched in [ARCHITECTURE.md](../../ARCHITECTURE.md) (`BridgedWebSocketConnection` etc.) — rename now if anything reads wrong, before code lands. Renamed `BridgeJs` → `JsBridge` (reads more naturally as a noun: "the bridge to JS"). `BridgedSession` left as-is but flagged as worth a second look — "Session" overlaps with the agent platform's session concept; could be `WebGLSessionLauncher` or inlined into `Conversation.StartSessionAsync`.
 
 ### Phase 2 — JS-side factory + audio-glue registrations (Unity-free, Vitest-covered)
 
@@ -166,7 +166,7 @@ into a `jsObject.CallAsync(...)` / `Call(...)` / `Get<T>(...)`. **No new
 `DllImport` declarations** — the generic primitives' `EL_Object*` entry
 points carry everything.
 
-- [ ] **5.1 — `BridgedWebSocketConnection` and `BridgedWebRTCConnection`.** Both implement `IConnection`. Constructor takes a `JsObject` already obtained via `await BridgeJs.InvokeFactoryAsync<JsObject>("createWebSocketConnection", config)` (or `createWebRTCConnection`). Reads `ConversationId` / `InputFormat` / `OutputFormat` via `jsObject.Get<…>()`. `Send(OutgoingSocketEvent msg)` becomes `jsObject.Call("sendMessage", msg)`. Events: the C# event accessor wraps a delegate in `BridgeCallback.Wrap(handler)` and passes it via `jsObject.Call("onMessage", callback)`. The WebRTC variant additionally calls `jsObject.Get<JsObject>("input")` and `jsObject.Get<JsObject>("output")` to expose the input/output controllers bound to the same JS instance (per the SDK's coupling), wrapping them in `BridgedInputController` / `BridgedOutputController`.
+- [ ] **5.1 — `BridgedWebSocketConnection` and `BridgedWebRTCConnection`.** Both implement `IConnection`. Constructor takes a `JsObject` already obtained via `await JsBridge.InvokeFactoryAsync<JsObject>("createWebSocketConnection", config)` (or `createWebRTCConnection`). Reads `ConversationId` / `InputFormat` / `OutputFormat` via `jsObject.Get<…>()`. `Send(OutgoingSocketEvent msg)` becomes `jsObject.Call("sendMessage", msg)`. Events: the C# event accessor wraps a delegate in `BridgeCallback.Wrap(handler)` and passes it via `jsObject.Call("onMessage", callback)`. The WebRTC variant additionally calls `jsObject.Get<JsObject>("input")` and `jsObject.Get<JsObject>("output")` to expose the input/output controllers bound to the same JS instance (per the SDK's coupling), wrapping them in `BridgedInputController` / `BridgedOutputController`.
 - [ ] **5.2 — `BridgedInputController` and `BridgedOutputController`.** Each holds a `JsObject` and implements its interface as a 1:1 method-name mapping. Sync getters (`GetVolume`, `GetByteFrequencyData`) use `jsObject.Call<float>(...)` / sync calls; async ops (`SetDevice`, `Close`) use `jsObject.CallAsync(...)`. For `getByteFrequencyData(buffer)` where C# needs to write into its own buffer, the bridged side passes a `byte[]` argument and the generic primitive's binary-payload variant — flagged as v0.3 work in [generic-bridge-primitives.md](./generic-bridge-primitives.md). For v0.1, the JS method returns a fresh `Uint8Array` per call which crosses as a JSON-encoded number array; acceptable since visualizer frame data is read at most once per Unity frame (~60 Hz, ~1 KB per call).
 - [ ] **5.3 — `BridgedSession` orchestration.** A small helper (consumed only by `Conversation.StartSessionAsync` under `#if UNITY_WEBGL`) does the full session setup: awaits the connection factory, awaits the input/output factories (WebSocket only — WebRTC already has them), calls `attachDefaultAudio` via the factory and stashes the returned `JsFunction` detach handle on the session, hands back the three bridged C# wrappers + the detach handle. The C# `Conversation` doesn't see any of this — it just receives `IConnection` + `IInputController` + `IOutputController`.
 - [ ] **5.4 — Conversation factory selection.** Inside `Conversation.StartSessionAsync`: `#if UNITY_WEBGL` delegates to `BridgedSession`; `#else` calls native impls (Phase 7). The rest of `Conversation` is platform-unaware.

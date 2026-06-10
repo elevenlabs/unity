@@ -207,7 +207,7 @@ rather than double-completing or double-disposing.
 namespace ElevenLabs.WebGL
 {
     // Entry point for everything: invoke a JS-registered factory by name.
-    public static class BridgeJs
+    public static class JsBridge
     {
         // Async factory call. Returns a JsObject, JsFunction, or
         // deserialises into T per the registered return shape.
@@ -360,7 +360,7 @@ under `Bridge~/` (Unity ignores `~`-suffixed dirs); generated jslib under
 ```
 Runtime/
   WebGL/
-    BridgeJs.cs                — public InvokeFactory entry point
+    JsBridge.cs                — public InvokeFactory entry point
     JsObject.cs                — handle + async/sync call/get/dispose
     JsFunction.cs              — function-ref handle
     BridgeCallback.cs          — C# delegate exposed to JS
@@ -440,6 +440,11 @@ behaviour from the outside.
 
 Ordered to frontload everything that doesn't require a Unity license.
 
+The first downstream consumer of this primitive layer is [plan-b.md](./plan-b.md)
+(the connection / I/O controller bridge that the C# `Conversation` orchestrates).
+Plan B's Phase 2 lands at the same time as this plan's Phase 2 — both produce
+JS-side artifacts that bundle and test in isolation.
+
 ### Phase 1 — Existing scaffolding (already in repo)
 
 These exist and are reused as-is. Listed for clarity, no new work:
@@ -488,7 +493,7 @@ Tasks within this phase are mostly parallelisable.
 - [ ] **3.1 — DllImport declarations.** `ElevenLabsBridgeNative.cs` — every `EL_*` entry point, `#if UNITY_WEBGL && !UNITY_EDITOR` real bodies and throwing stubs otherwise (matches the existing convention).
 - [ ] **3.2 — Registries (C# side).** `Internal/Registries.cs` — promise registry (`Dictionary<int, AwaitableCompletionSource<string>>`), callback registry (`Dictionary<int, Action<string>>`). Atomic lookup-then-remove on settle/dispatch/dispose. Edit-mode tests for first-wins behaviour.
 - [ ] **3.3 — Marshalling (C# side).** `Marshalling/BridgeArgEncoder.cs` and `BridgeValueDecoder.cs`. Encoder walks `params object[]`, emits JSON with `$ref` / `$fn` / `$cb` markers based on runtime type. Decoder reads JSON returns and produces primitives, `JsObject`, `JsFunction`. Edit-mode tests round-trip each shape.
-- [ ] **3.4 — `BridgeJs` static entry point.** `InvokeFactoryAsync<T>` / `InvokeFactory<T>` async/sync overloads. Internally allocates a promise ID (async) or marshals and calls the sync DllImport. Returns deserialised `T` (including `JsObject` / `JsFunction` as `T`).
+- [ ] **3.4 — `JsBridge` static entry point.** `InvokeFactoryAsync<T>` / `InvokeFactory<T>` async/sync overloads. Internally allocates a promise ID (async) or marshals and calls the sync DllImport. Returns deserialised `T` (including `JsObject` / `JsFunction` as `T`).
 - [ ] **3.5 — `JsObject` + `JsFunction`.** `CallAsync<T>` / `Call<T>` / `Get<T>` overloads; `Dispose` calls `EL_ObjectRelease` / `EL_FunctionRelease`. Finalizer logs a warning via `BridgeLog` if dispose wasn't called. Edit-mode tests against stubbed DllImports.
 - [ ] **3.6 — `BridgeCallback`.** `Wrap(Action<string>)` + typed overload allocates a handle and registers the delegate. `Dispose` removes the registry entry. Wires `WebGLBridge.OnCallbackInvoked` to `BridgeCallbackRegistry.Dispatch`. Edit-mode tests for wrap / invoke / dispose, including "invocation after dispose silently no-ops."
 - [ ] **3.7 — Wire `WebGLBridge.OnPromiseSettled`.** Replaces the Phase-1 stub; routes to the promise registry. Edit-mode tests: settle resolves the `AwaitableCompletionSource`; err raises `BridgeException`.
@@ -513,7 +518,7 @@ Tasks within this phase are mostly parallelisable.
 ## Definition of done
 
 - Every `EL_*` entry point has Vitest coverage exercising its happy path, an error path, and a "missing handle" path.
-- Every `BridgeJs` / `JsObject` / `JsFunction` / `BridgeCallback` public method has an Edit-mode test exercising it against stubbed DllImports.
+- Every `JsBridge` / `JsObject` / `JsFunction` / `BridgeCallback` public method has an Edit-mode test exercising it against stubbed DllImports.
 - The Vitest browser-mode integration suite passes on Chrome, Firefox, Safari in CI.
 - Validation assertions V1–V4 pass in a real browser.
 - A clean IL2CPP WebGL build succeeds with no warnings.
