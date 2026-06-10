@@ -13,10 +13,12 @@
 
 import * as bridgeName from "./bridge-name";
 import * as log from "./log";
+import * as registries from "./registries";
 
 const library = {
   ...bridgeName,
   ...log,
+  ...registries,
 };
 
 export default library;

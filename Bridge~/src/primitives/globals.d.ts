@@ -15,3 +15,17 @@ declare function _EL_Log(
   scope: string,
   msg: string,
 ): void;
+
+// Registry tables — Unity hoists these from the $EL_-prefixed library entries.
+// Other primitive modules declare them in __deps and reference them via the
+// `_EL_*` names below.
+declare const _EL_Objects: Record<number, unknown>;
+declare const _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+declare const _EL_Factories: Record<
+  string,
+  {
+    fn: (...args: unknown[]) => unknown;
+    returnShape: "object" | "function" | "value" | "void";
+  }
+>;
+declare let _EL_NextHandleId: number;

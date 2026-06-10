@@ -44,10 +44,79 @@ var library = (function() {
 	}
 
 //#endregion
+//#region src/primitives/registries.ts
+	var registries_exports = /* @__PURE__ */ __exportAll({
+		$EL_AllocateFunction: () => $EL_AllocateFunction,
+		$EL_AllocateFunction__deps: () => $EL_AllocateFunction__deps,
+		$EL_AllocateObject: () => $EL_AllocateObject,
+		$EL_AllocateObject__deps: () => $EL_AllocateObject__deps,
+		$EL_Factories: () => $EL_Factories,
+		$EL_Functions: () => $EL_Functions,
+		$EL_LookupFactory: () => $EL_LookupFactory,
+		$EL_LookupFactory__deps: () => $EL_LookupFactory__deps,
+		$EL_LookupFunction: () => $EL_LookupFunction,
+		$EL_LookupFunction__deps: () => $EL_LookupFunction__deps,
+		$EL_LookupObject: () => $EL_LookupObject,
+		$EL_LookupObject__deps: () => $EL_LookupObject__deps,
+		$EL_NextHandleId: () => 1,
+		$EL_Objects: () => $EL_Objects,
+		$EL_RegisterFactory: () => $EL_RegisterFactory,
+		$EL_RegisterFactory__deps: () => $EL_RegisterFactory__deps,
+		$EL_ReleaseFunction: () => $EL_ReleaseFunction,
+		$EL_ReleaseFunction__deps: () => $EL_ReleaseFunction__deps,
+		$EL_ReleaseObject: () => $EL_ReleaseObject,
+		$EL_ReleaseObject__deps: () => $EL_ReleaseObject__deps
+	});
+	const $EL_Objects = {};
+	const $EL_Functions = {};
+	const $EL_Factories = {};
+	const $EL_NextHandleId = 1;
+	const $EL_RegisterFactory__deps = ["$EL_Factories"];
+	function $EL_RegisterFactory(name, fn, returnShape) {
+		_EL_Factories[name] = {
+			fn,
+			returnShape
+		};
+	}
+	const $EL_AllocateObject__deps = ["$EL_Objects", "$EL_NextHandleId"];
+	function $EL_AllocateObject(obj) {
+		const handle = _EL_NextHandleId++;
+		_EL_Objects[handle] = obj;
+		return handle;
+	}
+	const $EL_LookupObject__deps = ["$EL_Objects"];
+	function $EL_LookupObject(handle) {
+		return _EL_Objects[handle];
+	}
+	const $EL_ReleaseObject__deps = ["$EL_Objects"];
+	function $EL_ReleaseObject(handle) {
+		delete _EL_Objects[handle];
+	}
+	const $EL_AllocateFunction__deps = ["$EL_Functions", "$EL_NextHandleId"];
+	function $EL_AllocateFunction(fn) {
+		const handle = _EL_NextHandleId++;
+		_EL_Functions[handle] = fn;
+		return handle;
+	}
+	const $EL_LookupFunction__deps = ["$EL_Functions"];
+	function $EL_LookupFunction(handle) {
+		return _EL_Functions[handle];
+	}
+	const $EL_ReleaseFunction__deps = ["$EL_Functions"];
+	function $EL_ReleaseFunction(handle) {
+		delete _EL_Functions[handle];
+	}
+	const $EL_LookupFactory__deps = ["$EL_Factories"];
+	function $EL_LookupFactory(name) {
+		return _EL_Factories[name];
+	}
+
+//#endregion
 //#region src/primitives/index.ts
 	const library = {
 		...bridge_name_exports,
-		...log_exports
+		...log_exports,
+		...registries_exports
 	};
 
 //#endregion
