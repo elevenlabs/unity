@@ -40,23 +40,12 @@ namespace ElevenLabs.WebGL
             }
         }
 
-        // SendMessage targets. Each primitive's phase replaces these stubs with real dispatch.
-
-        /// <summary>Called by JS via SendMessage when a promise settles (ok or err).</summary>
-        public void OnPromiseSettled(string message) =>
-            BridgeLog.Info($"OnPromiseSettled: {message}");
-
-        /// <summary>Called by JS via SendMessage when an observer event fires.</summary>
-        public void OnObserverEvent(string message) =>
-            BridgeLog.Info($"OnObserverEvent: {message}");
-
-        /// <summary>Called by JS via SendMessage when JS invokes a registered C# async handler.</summary>
-        public void OnHandlerInvoked(string message) =>
-            BridgeLog.Info($"OnHandlerInvoked: {message}");
+        // SendMessage targets are added in Phase 3 of generic-bridge-primitives.md
+        // alongside the registries they dispatch into.
 
         private void OnDestroy()
         {
-            // Each primitive's phase wires real teardown (CancelAll / DisposeAll / RejectAll) here.
+            // Phase 3 wires real teardown (registry cancellation/disposal) here.
         }
     }
 }

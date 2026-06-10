@@ -13,16 +13,10 @@
 
 import * as bridgeName from "./bridge-name";
 import * as log from "./log";
-import * as callPromise from "./call-promise";
-import * as observer from "./observer";
-import * as handler from "./handler";
 
 const library = {
   ...bridgeName,
   ...log,
-  ...callPromise,
-  ...observer,
-  ...handler,
 };
 
 export default library;

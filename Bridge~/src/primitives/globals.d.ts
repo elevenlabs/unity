@@ -15,9 +15,3 @@ declare function _EL_Log(
   scope: string,
   msg: string,
 ): void;
-declare const _EL_Observers: Record<number, () => void>;
-declare const _EL_PendingInvocations: Record<
-  number,
-  { resolve: (value: string) => void; reject: (reason: Error) => void }
->;
-declare let _EL_InvocationCounter: number;

@@ -8,8 +8,8 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.src.json --noEmit && tsc -p tsconfig.tests.json --noEmit && tsc -p tsconfig.build.json --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest --passWithNoTests",
     "build:primitives": "node build/bundle-jslib.ts src/primitives/index.ts ../Plugins/WebGL/ElevenLabsBridge.jslib",
     "verify:primitives": "pnpm run build:primitives && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsBridge.jslib"
   },

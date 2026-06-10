@@ -458,16 +458,24 @@ These exist and are reused as-is. Listed for clarity, no new work:
 - `Bridge~/build/bundle-jslib.ts` Rolldown bundling script
 - The `$EL_BridgeName` + `$EL_Log` jslib helpers
 
-Anything from the prior bridge primitives implementation that doesn't fit
-the new design is removed in Phase 2. Specifically: `$EL_CallPromise` is
-replaced by the per-entrypoint settle pattern; `$EL_InvokeHandler` /
-`EL_ResolveInvocation` / `EL_RejectInvocation` (the handler invocation
-primitive) is removed — JS→C# calls in this design go through
-`BridgeCallback`, and async JS→C# round-trips are deferred to the future
-`AsyncBridgeCallback` extension point (see "Possible extensions"); the
-prior observer primitive (`$EL_RegisterObserver` / `$EL_EmitEvent` /
-`EL_DisposeObserver`) collapses into the `BridgeCallback` shape and its
-files are replaced in Phase 2.
+Files from the prior bridge primitives implementation that don't fit the new
+design are deleted in the Phase 1 cleanup step below — a single discrete
+commit that leaves the repo on the kept scaffolding only, before any Phase 2
+code lands.
+
+### Phase 1 cleanup — Delete the prior primitive implementation (Unity-free, single commit)
+
+Lands before any Phase 2 task. Rationale: starts the new work from a clean
+slate so the new files don't have to coexist with their predecessors during
+review or bisection.
+
+- [x] **1c.1 — Delete superseded JS sources.** Remove `Bridge~/src/primitives/call-promise.ts`, `observer.ts`, `handler.ts`. (`$EL_CallPromise` is replaced by the per-entrypoint settle pattern in Phase 2.4; the observer primitive collapses into `BridgeCallback` in Phase 2's marshalling; handler invocation has no v0.1 consumer and is deferred to the future `AsyncBridgeCallback` extension point.)
+- [x] **1c.2 — Delete superseded JS tests.** Remove `Bridge~/tests/ElevenLabsBridge.test.ts`. Per-file Vitest coverage for the new primitives returns alongside each Phase 2 task. Added `--passWithNoTests` to the `test` / `test:watch` scripts so `pnpm run test` exits 0 during the brief window before Phase 2 tests land.
+- [x] **1c.3 — Trim `Bridge~/src/primitives/index.ts`.** Keep imports and spreads for only `bridge-name` and `log`. The next aggregation pass happens in Phase 2.6.
+- [x] **1c.4 — Trim `Bridge~/src/primitives/globals.d.ts`.** Remove the ambient declarations for `_EL_Observers`, `_EL_PendingInvocations`, and `_EL_InvocationCounter`. Keep `SendMessage`, `_EL_BridgeName`, and `_EL_Log`.
+- [x] **1c.5 — Trim `Runtime/WebGL/WebGLBridge.cs`.** Remove the three stub SendMessage handlers (`OnPromiseSettled`, `OnObserverEvent`, `OnHandlerInvoked`). They'll be replaced in Phase 3 with the real dispatch — but with different signatures and registries, so leaving them as stubs would create dead handlers that mis-suggest the new shape.
+- [x] **1c.6 — Regenerate the jslib.** `pnpm --dir Bridge~ run build:primitives` rebuilds `Plugins/WebGL/ElevenLabsBridge.jslib` from the now-much-smaller source set (only `bridge-name` + `log`). Commit the regenerated file.
+- [x] **1c.7 — Verify.** All of `pnpm --dir Bridge~ run typecheck`, `pnpm --dir Bridge~ run lint`, `pnpm --dir Bridge~ run verify:primitives` pass.
 
 ### Phase 2 — JS-side primitives (Unity-free, Vitest-covered)
 
