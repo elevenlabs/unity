@@ -493,7 +493,7 @@ Tasks within this phase are mostly parallelisable.
   - `EL_ObjectGet` reads the property
   - `EL_ObjectRelease` drops the entry; subsequent calls reject with "unknown handle"
   - `EL_FunctionCallAsync` / `EL_FunctionCallSync` / `EL_FunctionRelease` parallel to object variants
-- [ ] **2.6 — Index aggregation + bundling.** `index.ts` re-exports via namespace imports + spread; `pnpm run build:primitives` emits `Plugins/WebGL/ElevenLabsBridge.jslib`. `pnpm run verify:primitives` rebuilds + `git diff --exit-code`. Existing CLAUDE.md command documentation updated to match the new shape.
+- [x] **2.6 — Index aggregation + bundling.** `index.ts` re-exports via namespace imports + spread; `pnpm run build:primitives` emits `Plugins/WebGL/ElevenLabsBridge.jslib`. `pnpm run verify:primitives` rebuilds + `git diff --exit-code`. Existing CLAUDE.md command documentation updated to match the new shape.
 - [ ] **2.7 — Sample factory for end-to-end test.** A throwaway `mathFactory` registered in a Vitest setup file (returns an object with `add(a, b)` sync, `addAsync(a, b)` async, `getPi()` property, `addTickListener(callback)` returning a `removeListener` function). End-to-end Vitest exercises every primitive surface against it — factory invocation, sync method, async method, property read, callback registration with `BridgeCallback`, function-handle round-trip via `removeListener`, dispose. Not shipped; just used for cross-cutting coverage.
 
 ### Phase 3 — C# primitive layer (requires Unity)

@@ -406,7 +406,8 @@ describe("EL_ObjectRelease", () => {
 
 describe("EL_FunctionCallAsync", () => {
   it("calls the function and settles with the return value", async () => {
-    const fn = (...args: unknown[]) => (args[0] as number) * (args[1] as number);
+    const fn = (...args: unknown[]) =>
+      (args[0] as number) * (args[1] as number);
     const handle = $EL_AllocateFunction(fn);
 
     EL_FunctionCallAsync(handle, makePtr("[6,7]"), 10);
