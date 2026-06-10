@@ -86,10 +86,11 @@ dispatch. Out of scope for v0.1.
 
 ## Wire protocol
 
-Every async entry point has the signature `(handleOrFactoryName, argsJsonPtr, promiseId)`
+Every async entry point has the signature `(handleOrFactoryName, argsJsonPtr, returnShape, promiseId)`
 and settles through one shared `OnPromiseSettled` SendMessage handler. Every
-sync entry point has the signature `(handle, argsJsonPtr)` returning a
-heap-string pointer. The same JSON marker conventions (`$ref`, `$fn`, `$cb`)
+sync entry point has the signature `(handle, argsJsonPtr, returnShape)` returning
+a heap-string pointer. `returnShape` is a small int (see the table under "Return
+shape codes" below). The same JSON marker conventions (`$ref`, `$fn`, `$cb`)
 apply to all arguments and all returns. Adding a new entry point reuses the
 registries, the settle channel, the marker conventions, and the error-routing
 template — only the marshalling differs.
@@ -126,14 +127,32 @@ Return values follow the inverse convention:
 | `undefined` / void | `null` | Discard |
 | Anything else | JSON-serialised | Deserialise per C#-side expected type |
 
-Whether a returned JS object becomes a `JsObject` (allocated and registered)
-or gets JSON-serialised in full is a **per-factory / per-method decision**
-made by the JS side at registration time. The JS dispatcher consults a small
-hint map: "calls to `WebSocketConnection.sendMessage` return void; calls to
-the `createWebSocketConnection` factory return an object; calls to `addListener`
-return a function." Without these hints, every non-primitive return would
-become a `JsObject`, leaking handles for cases the consumer just wanted to
-JSON-roundtrip.
+Whether a returned JS object becomes a `JsObject` (allocated and registered),
+a `JsFunction`, or gets JSON-serialised in full is a **per-call decision**
+driven by the C# call site. Every dispatcher entry point takes a `returnShape`
+int argument (`0` = value / `1` = object / `2` = function / `3` = void); the C#
+side derives it from the generic `<T>` parameter — `CallAsync<JsObject>` sends
+`1`, `CallAsync<JsFunction>` sends `2`, the non-generic `CallAsync` sends `3`,
+everything else sends `0`. No JS-side hint table is needed — the C# generic
+is the single source of truth, and mismatch is impossible by construction.
+
+### Return shape codes
+
+A small numeric enum shared between the C# `BridgeReturnShape` and the JS
+dispatcher's `decodeReturnShape`:
+
+| Code | Name | Meaning |
+|---:|---|---|
+| `0` | `value` | Plain JSON round-trip; the default for primitives, arrays, and data objects. |
+| `1` | `object` | Allocate a JsObject handle from the JS return value; encode as `{ "$ref": handle }`. |
+| `2` | `function` | Allocate a JsFunction handle from the JS return value; encode as `{ "$fn": handle }`. |
+| `3` | `void` | Discard the return value; settle `null`. |
+
+Unknown codes fall back to `value`. The JS side does not validate the type of
+the actual return against the shape — if C# asks for `function` but JS returns
+an object, the allocator stores whatever it got and C# gets a `JsFunction` that
+breaks on first invocation. That mismatch is impossible when C# derives the
+code from `<T>` automatically.
 
 ### Settlement channel
 
@@ -203,19 +222,29 @@ rather than double-completing or double-disposing.
 
 ## C# API design
 
+The generic `<T>` parameter on every call site is the single source of truth
+for the return shape. The implementation translates `T` into the int code
+sent across the DllImport boundary:
+
+| C# `<T>` | `BridgeReturnShape` code |
+|---|---:|
+| `JsObject` | `1` (object) |
+| `JsFunction` | `2` (function) |
+| (non-generic overload returning `void` / `Awaitable`) | `3` (void) |
+| anything else (primitives, data classes, arrays, …) | `0` (value) |
+
 ```csharp
 namespace ElevenLabs.WebGL
 {
     // Entry point for everything: invoke a JS-registered factory by name.
     public static class JsBridge
     {
-        // Async factory call. Returns a JsObject, JsFunction, or
-        // deserialises into T per the registered return shape.
+        // Async factory call. T resolution drives the return shape code.
         public static Awaitable<T> InvokeFactoryAsync<T>(
             string factoryName,
             params object[] args);
 
-        // Synchronous factory call. Only valid for factories registered as sync.
+        // Synchronous factory call. T resolution drives the return shape code.
         public static T InvokeFactory<T>(
             string factoryName,
             params object[] args);
@@ -226,15 +255,15 @@ namespace ElevenLabs.WebGL
     {
         public int Handle { get; }
 
-        // Async method call.
+        // Async method call. T resolution drives the return shape code.
         public Awaitable<T> CallAsync<T>(string method, params object[] args);
         public Awaitable CallAsync(string method, params object[] args);
 
-        // Sync method call (only for methods registered as sync on the JS side).
+        // Sync method call. T resolution drives the return shape code.
         public T Call<T>(string method, params object[] args);
         public void Call(string method, params object[] args);
 
-        // Sync property read.
+        // Sync property read (always value-shape — JSON round-trip).
         public T Get<T>(string property);
 
         public void Dispose();      // releases JS-side entry
@@ -285,34 +314,36 @@ DllImport targets, a registry of factories, and a uniform dispatcher.
 
 ```javascript
 // State
-$EL_Objects:    {},   // handle -> JS object
-$EL_Functions:  {},   // handle -> JS function
-$EL_Factories:  {},   // name -> { fn, returnShape }
-$EL_NextFnId:   1,    // JS-allocated function handle counter
+$EL_Objects:      {},   // handle -> JS object
+$EL_Functions:    {},   // handle -> JS function
+$EL_Factories:    {},   // name   -> fn
+$EL_NextHandleId: 1,    // shared object/function handle counter
 
 // Registration (called from external JS at app boot, before any C# call)
-$EL_RegisterFactory: function(name, fn, returnShape) { ... },
-//   returnShape: "object" | "function" | "value" | "void"
-
-// Object method registration (per-class — tells the dispatcher whether each
-// method is async/sync and what to do with its return value)
-$EL_RegisterMethods: function(handle, methods) { ... },
-//   methods: { methodName: { async: bool, returnShape: "..." } }
+$EL_RegisterFactory: function(name, fn) { ... },
 ```
+
+There is no `$EL_RegisterMethods` and no per-handle method shape table. Each
+dispatcher call carries its own `returnShape` int from the C# side; the JS
+side just decodes it and runs.
 
 DllImport entry points (every name follows the `EL_…` namespace):
 
 ```
-EL_InvokeFactoryAsync(factoryNamePtr, argsJsonPtr, promiseId)
-EL_InvokeFactorySync(factoryNamePtr, argsJsonPtr) -> stringPtr
-EL_ObjectCallAsync(handle, methodPtr, argsJsonPtr, promiseId)
-EL_ObjectCallSync(handle, methodPtr, argsJsonPtr) -> stringPtr
+EL_InvokeFactoryAsync(factoryNamePtr, argsJsonPtr, returnShape, promiseId)
+EL_InvokeFactorySync(factoryNamePtr, argsJsonPtr, returnShape) -> stringPtr
+EL_ObjectCallAsync(handle, methodPtr, argsJsonPtr, returnShape, promiseId)
+EL_ObjectCallSync(handle, methodPtr, argsJsonPtr, returnShape) -> stringPtr
 EL_ObjectGet(handle, propPtr) -> stringPtr
 EL_ObjectRelease(handle)
-EL_FunctionCallAsync(handle, argsJsonPtr, promiseId)
-EL_FunctionCallSync(handle, argsJsonPtr) -> stringPtr
+EL_FunctionCallAsync(handle, argsJsonPtr, returnShape, promiseId)
+EL_FunctionCallSync(handle, argsJsonPtr, returnShape) -> stringPtr
 EL_FunctionRelease(handle)
 ```
+
+`returnShape` is the int code from the "Return shape codes" table above
+(`0` value / `1` object / `2` function / `3` void). `EL_ObjectGet` has no
+shape parameter — property reads always JSON-roundtrip the value.
 
 No DllImport for `BridgeCallback` release — the callback registry is C#-owned,
 and `BridgeCallback.Dispose` simply removes the C# delegate. The JS-side
@@ -323,6 +354,9 @@ arrive, miss the registry lookup, and no-op silently. JS-side cleanup (calling
 The dispatcher is the same for every entry point:
 
 ```javascript
+const RETURN_SHAPES = ["value", "object", "function", "void"];
+function decodeReturnShape(code) { return RETURN_SHAPES[code] ?? "value"; }
+
 function dispatch(target, argsJson) {
     var args = JSON.parse(argsJson || "[]").map(rehydrate);
     return target.apply(null, args);
@@ -349,7 +383,8 @@ function encodeReturn(value, returnShape) {
 
 This is the entirety of the bridge runtime. Every domain-specific class (a
 `WebSocketConnection`, an audio controller, anything else) is consumed via
-its registered factories and method hints — no new jslib code per class.
+its registered factory — no new jslib code per class, no JS-side declaration
+of which methods return what.
 
 ## File layout
 
@@ -487,14 +522,15 @@ Tasks within this phase are mostly parallelisable.
 - [x] **2.3 — Callback dispatch helper.** `callbacks.ts` — `$EL_InvokeCallback(handle, payload)` SendMessages with `handle + ':' + payload`. Used by the JS function returned from `makeBridgeCallback`. No JS-side release entry point — the C# registry is the authority; JS-side closures are the consumer's lifetime concern (typically via a paired `removeListener` `JsFunction`). Vitest: invocation fires `SendMessage` with the correct format.
 - [x] **2.4 — Settle helper.** `promise-settle.ts` — `$EL_Settle(promiseId, status, payload)` SendMessages with `promiseId + ':' + status + ':' + payload`. Used by every async entrypoint. Vitest: ok/err round-trip; error message survives JSON escaping.
 - [x] **2.5 — Dispatcher and entry points.** `dispatcher.ts` — the eight `EL_*` DllImport targets listed above. Each wraps its body in try/catch that routes to `$EL_Settle` on error (async) or returns a string-encoded error pointer (sync). Vitest:
-  - `EL_InvokeFactoryAsync` resolves with the registered return shape; missing factory rejects
+  - `EL_InvokeFactoryAsync` resolves with the value encoded per the per-call `returnShape` int; missing factory rejects
   - `EL_ObjectCallAsync` calls the method with rehydrated args; settles with encoded return
   - `EL_ObjectCallSync` returns the heap-string-encoded value
   - `EL_ObjectGet` reads the property
   - `EL_ObjectRelease` drops the entry; subsequent calls reject with "unknown handle"
   - `EL_FunctionCallAsync` / `EL_FunctionCallSync` / `EL_FunctionRelease` parallel to object variants
+  - unknown `returnShape` code falls back to `value`
 - [x] **2.6 — Index aggregation + bundling.** `index.ts` re-exports via namespace imports + spread; `pnpm run build:primitives` emits `Plugins/WebGL/ElevenLabsBridge.jslib`. `pnpm run verify:primitives` rebuilds + `git diff --exit-code`. Existing CLAUDE.md command documentation updated to match the new shape.
-- [x] **2.7 — Sample factory for end-to-end test.** A throwaway `mathFactory` registered in a Vitest setup file (returns an object with `add(a, b)` sync, `addAsync(a, b)` async, `getPi()` property, `addTickListener(callback)` returning a `removeListener` function). End-to-end Vitest exercises every primitive surface against it — factory invocation, sync method, async method, property read, callback registration with `BridgeCallback`, function-handle round-trip via `removeListener`, dispose. Not shipped; just used for cross-cutting coverage.
+- [x] **2.7 — Sample factory for end-to-end test.** A throwaway `mathFactory` registered in a Vitest setup file (returns an object with `add(a, b)` sync, `addAsync(a, b)` async, `pi` property, `addTickListener(callback)` returning a `removeListener` function). End-to-end Vitest exercises every primitive surface against it — factory invocation (shape `object`), sync method (shape `value`), async method (shape `value`), property read, callback registration with `BridgeCallback`, function-handle round-trip via `removeListener` (shape `function`), dispose. Not shipped; just used for cross-cutting coverage. Resolved open question #2 in the process: return shapes are passed per-call as ints rather than declared at registration time.
 
 ### Phase 3 — C# primitive layer (requires Unity)
 
@@ -537,7 +573,7 @@ Tasks within this phase are mostly parallelisable.
 ## Open questions
 
 1. **Argument auto-marshalling depth.** The encoder walks nested structures for `$ref` / `$fn` / `$cb` markers — is that needed in practice, or are object / function / callback args always top-level? Top-level-only is simpler and faster but locks out cases like `{ options: { onMessage: callback } }` payload shapes.
-2. **Return-shape declaration locality.** Should return shapes be declared at factory registration time, or per call from the C# side? Registration-time matches the proposed dispatcher; per-call gives the C# side more flexibility. Lean registration-time for v0.1.
+2. ~~**Return-shape declaration locality.**~~ **Resolved (2026-06-10): per-call.** Every dispatcher entry point takes a `returnShape` int derived from the C# `<T>` parameter. Eliminates the registration-time hint table (`$EL_RegisterMethods`) entirely — the C# generic is the single source of truth, and call-site / registration mismatch is impossible by construction. The one int per call across the DllImport boundary is negligible cost compared to splitting the source of truth across a separate registration block.
 3. **Synchronous error reporting.** Async entry points settle errors through the promise channel. Sync entry points return a string pointer — how do errors look? Proposed: a sentinel prefix (`"!err:"` + message) that the C# decoder recognises and throws. Alternative: a separate `EL_LastSyncError` getter that C# polls after every sync call. First option is one fewer round trip.
 4. **Auto-teardown helper for `BridgeCallback`.** A `BridgeCallback.Dispose` call removes the C# delegate, but the JS-side closure capturing the handle stays alive until the JS consumer drops it (e.g. by calling `removeListener`). A future helper could pair a `BridgeCallback` with a `JsFunction` at wrap time so `Dispose` invokes the teardown automatically. Defer until a real consumer makes the pattern repetitive enough to warrant it.
 

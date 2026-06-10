@@ -5,10 +5,24 @@
 // heap string ("!err:<message>"). Argument rehydration and return encoding are
 // delegated to $EL_Rehydrate / $EL_EncodeReturn.
 //
-// Object method return shapes are resolved per-handle/method via $EL_GetMethodShape
-// (registered by callers via $EL_RegisterMethods). Defaults to "value" when unregistered.
+// Every call entry point takes a `returnShape` int parameter from C#. The C#
+// generic `<T>` resolution maps directly to a numeric code via the table below,
+// and this code is the single source of truth for how the JS return value is
+// encoded back. No registration step is required on the JS side — the C#
+// call site already knows the type it expects, so it just says so.
 
 import type { ReturnShape } from "./registries";
+
+// Numeric codes for ReturnShape, passed across the DllImport boundary.
+// Must stay in sync with the C# BridgeReturnShape enum (Phase 3).
+//   0 = value     (plain JSON round-trip; the default)
+//   1 = object    (allocate a JsObject handle, return { $ref })
+//   2 = function  (allocate a JsFunction handle, return { $fn })
+//   3 = void      (discard the return, settle null)
+const RETURN_SHAPES: ReturnShape[] = ["value", "object", "function", "void"];
+function decodeReturnShape(code: number): ReturnShape {
+  return RETURN_SHAPES[code] ?? "value";
+}
 
 // Allocates a UTF-8 string on the Emscripten heap and returns the pointer.
 // The C# caller copies then frees the returned memory.
@@ -54,16 +68,17 @@ export const EL_InvokeFactoryAsync__deps = [
 export function EL_InvokeFactoryAsync(
   factoryNamePtr: number,
   argsJsonPtr: number,
+  returnShape: number,
   promiseId: number,
 ): void {
   const name = UTF8ToString(factoryNamePtr);
   try {
-    const entry = _EL_LookupFactory(name);
-    if (!entry) throw new Error(`Unknown factory: ${name}`);
+    const fn = _EL_LookupFactory(name);
+    if (!fn) throw new Error(`Unknown factory: ${name}`);
     settleWith(
       promiseId,
-      entry.fn(...parseArgs(argsJsonPtr)),
-      entry.returnShape,
+      fn(...parseArgs(argsJsonPtr)),
+      decodeReturnShape(returnShape),
     );
   } catch (e: unknown) {
     _EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
@@ -80,14 +95,17 @@ export const EL_InvokeFactorySync__deps = [
 export function EL_InvokeFactorySync(
   factoryNamePtr: number,
   argsJsonPtr: number,
+  returnShape: number,
 ): number {
   try {
     const name = UTF8ToString(factoryNamePtr);
-    const entry = _EL_LookupFactory(name);
-    if (!entry) throw new Error(`Unknown factory: ${name}`);
-    const result = entry.fn(...parseArgs(argsJsonPtr));
+    const fn = _EL_LookupFactory(name);
+    if (!fn) throw new Error(`Unknown factory: ${name}`);
+    const result = fn(...parseArgs(argsJsonPtr));
     return allocString(
-      JSON.stringify(_EL_EncodeReturn(result, entry.returnShape)) ?? "null",
+      JSON.stringify(
+        _EL_EncodeReturn(result, decodeReturnShape(returnShape)),
+      ) ?? "null",
     );
   } catch (e: unknown) {
     return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
@@ -98,7 +116,6 @@ export function EL_InvokeFactorySync(
 
 export const EL_ObjectCallAsync__deps = [
   "$EL_LookupObject",
-  "$EL_GetMethodShape",
   "$EL_Rehydrate",
   "$EL_EncodeReturn",
   "$EL_Settle",
@@ -107,6 +124,7 @@ export function EL_ObjectCallAsync(
   handle: number,
   methodPtr: number,
   argsJsonPtr: number,
+  returnShape: number,
   promiseId: number,
 ): void {
   const method = UTF8ToString(methodPtr);
@@ -119,7 +137,7 @@ export function EL_ObjectCallAsync(
     settleWith(
       promiseId,
       fn.apply(obj, parseArgs(argsJsonPtr)),
-      _EL_GetMethodShape(handle, method),
+      decodeReturnShape(returnShape),
     );
   } catch (e: unknown) {
     _EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
@@ -130,7 +148,6 @@ export function EL_ObjectCallAsync(
 
 export const EL_ObjectCallSync__deps = [
   "$EL_LookupObject",
-  "$EL_GetMethodShape",
   "$EL_Rehydrate",
   "$EL_EncodeReturn",
 ];
@@ -138,6 +155,7 @@ export function EL_ObjectCallSync(
   handle: number,
   methodPtr: number,
   argsJsonPtr: number,
+  returnShape: number,
 ): number {
   try {
     const method = UTF8ToString(methodPtr);
@@ -149,7 +167,7 @@ export function EL_ObjectCallSync(
     const result = fn.apply(obj, parseArgs(argsJsonPtr));
     return allocString(
       JSON.stringify(
-        _EL_EncodeReturn(result, _EL_GetMethodShape(handle, method)),
+        _EL_EncodeReturn(result, decodeReturnShape(returnShape)),
       ) ?? "null",
     );
   } catch (e: unknown) {
@@ -190,12 +208,17 @@ export const EL_FunctionCallAsync__deps = [
 export function EL_FunctionCallAsync(
   handle: number,
   argsJsonPtr: number,
+  returnShape: number,
   promiseId: number,
 ): void {
   try {
     const fn = _EL_LookupFunction(handle);
     if (!fn) throw new Error(`unknown handle: ${handle}`);
-    settleWith(promiseId, fn(...parseArgs(argsJsonPtr)), "value");
+    settleWith(
+      promiseId,
+      fn(...parseArgs(argsJsonPtr)),
+      decodeReturnShape(returnShape),
+    );
   } catch (e: unknown) {
     _EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
   }
@@ -211,13 +234,16 @@ export const EL_FunctionCallSync__deps = [
 export function EL_FunctionCallSync(
   handle: number,
   argsJsonPtr: number,
+  returnShape: number,
 ): number {
   try {
     const fn = _EL_LookupFunction(handle);
     if (!fn) throw new Error(`unknown handle: ${handle}`);
     const result = fn(...parseArgs(argsJsonPtr));
     return allocString(
-      JSON.stringify(_EL_EncodeReturn(result, "value")) ?? "null",
+      JSON.stringify(
+        _EL_EncodeReturn(result, decodeReturnShape(returnShape)),
+      ) ?? "null",
     );
   } catch (e: unknown) {
     return allocString("!err:" + (e instanceof Error ? e.message : String(e)));

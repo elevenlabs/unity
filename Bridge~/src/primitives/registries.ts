@@ -1,8 +1,8 @@
-// Shared state and helpers for the three primitive registries:
+// Shared state and helpers for the primitive registries:
 //
 //   $EL_Objects     — handle (int) -> JS object held on behalf of C#
 //   $EL_Functions   — handle (int) -> JS function held on behalf of C#
-//   $EL_Factories   — name -> { fn, returnShape } registered by external JS at boot
+//   $EL_Factories   — name -> fn registered by external JS at boot
 //   $EL_NextHandleId — shared counter for JS-allocated object/function handles
 //
 // All four are $-prefixed so Unity hoists them as module-level globals
@@ -12,29 +12,26 @@
 // ID space for "things JS handed back to C# that need a registry entry." C# IDs
 // for callbacks and promise IDs come from a separate C#-allocated space, so
 // collisions across spaces are impossible.
+//
+// Return shapes are NOT stored here — they're passed per-call by C# as an int
+// argument on every dispatcher entry point (see dispatcher.ts). This keeps the
+// C# generic `<T>` parameter as the single source of truth for how a return
+// value should be decoded.
 
 export type ReturnShape = "object" | "function" | "value" | "void";
 
-export interface FactoryEntry {
-  fn: (...args: unknown[]) => unknown;
-  returnShape: ReturnShape;
-}
+export type FactoryFn = (...args: unknown[]) => unknown;
 
 export const $EL_Objects = {};
 export const $EL_Functions = {};
 export const $EL_Factories = {};
-export const $EL_MethodShapes = {};
 export const $EL_NextHandleId = 1;
 
 // --- Factory registration (called from external JS at app boot) ---
 
 export const $EL_RegisterFactory__deps = ["$EL_Factories"];
-export function $EL_RegisterFactory(
-  name: string,
-  fn: (...args: unknown[]) => unknown,
-  returnShape: ReturnShape,
-): void {
-  _EL_Factories[name] = { fn, returnShape };
+export function $EL_RegisterFactory(name: string, fn: FactoryFn): void {
+  _EL_Factories[name] = fn;
 }
 
 // --- Object registry ---
@@ -51,27 +48,22 @@ export function $EL_LookupObject(handle: number): unknown {
   return _EL_Objects[handle];
 }
 
-export const $EL_ReleaseObject__deps = ["$EL_Objects", "$EL_MethodShapes"];
+export const $EL_ReleaseObject__deps = ["$EL_Objects"];
 export function $EL_ReleaseObject(handle: number): void {
   delete _EL_Objects[handle];
-  delete (_EL_MethodShapes as Record<number, unknown>)[handle];
 }
 
 // --- Function registry ---
 
 export const $EL_AllocateFunction__deps = ["$EL_Functions", "$EL_NextHandleId"];
-export function $EL_AllocateFunction(
-  fn: (...args: unknown[]) => unknown,
-): number {
+export function $EL_AllocateFunction(fn: FactoryFn): number {
   const handle = _EL_NextHandleId++;
   _EL_Functions[handle] = fn;
   return handle;
 }
 
 export const $EL_LookupFunction__deps = ["$EL_Functions"];
-export function $EL_LookupFunction(
-  handle: number,
-): ((...args: unknown[]) => unknown) | undefined {
+export function $EL_LookupFunction(handle: number): FactoryFn | undefined {
   return _EL_Functions[handle];
 }
 
@@ -80,41 +72,9 @@ export function $EL_ReleaseFunction(handle: number): void {
   delete _EL_Functions[handle];
 }
 
-// --- Factory lookup (used by the dispatcher in 2.5) ---
+// --- Factory lookup (used by the dispatcher) ---
 
 export const $EL_LookupFactory__deps = ["$EL_Factories"];
-export function $EL_LookupFactory(name: string): FactoryEntry | undefined {
+export function $EL_LookupFactory(name: string): FactoryFn | undefined {
   return _EL_Factories[name];
-}
-
-// --- Method shape registry ---
-// Associates an object handle with a map of method names to return shapes.
-// Called after allocating an object handle to declare which methods return
-// "function" or "object" values (defaults to "value" when absent).
-
-export const $EL_RegisterMethods__deps = ["$EL_MethodShapes"];
-export function $EL_RegisterMethods(
-  handle: number,
-  methods: Record<string, { returnShape: ReturnShape }>,
-): void {
-  (
-    _EL_MethodShapes as Record<
-      number,
-      Record<string, { returnShape: ReturnShape }>
-    >
-  )[handle] = methods;
-}
-
-export const $EL_GetMethodShape__deps = ["$EL_MethodShapes"];
-export function $EL_GetMethodShape(
-  handle: number,
-  method: string,
-): ReturnShape {
-  const shapes = (
-    _EL_MethodShapes as Record<
-      number,
-      Record<string, { returnShape: ReturnShape }> | undefined
-    >
-  )[handle];
-  return shapes?.[method]?.returnShape ?? "value";
 }

@@ -52,21 +52,16 @@ var library = (function() {
 		$EL_AllocateObject__deps: () => $EL_AllocateObject__deps,
 		$EL_Factories: () => $EL_Factories,
 		$EL_Functions: () => $EL_Functions,
-		$EL_GetMethodShape: () => $EL_GetMethodShape,
-		$EL_GetMethodShape__deps: () => $EL_GetMethodShape__deps,
 		$EL_LookupFactory: () => $EL_LookupFactory,
 		$EL_LookupFactory__deps: () => $EL_LookupFactory__deps,
 		$EL_LookupFunction: () => $EL_LookupFunction,
 		$EL_LookupFunction__deps: () => $EL_LookupFunction__deps,
 		$EL_LookupObject: () => $EL_LookupObject,
 		$EL_LookupObject__deps: () => $EL_LookupObject__deps,
-		$EL_MethodShapes: () => $EL_MethodShapes,
 		$EL_NextHandleId: () => 1,
 		$EL_Objects: () => $EL_Objects,
 		$EL_RegisterFactory: () => $EL_RegisterFactory,
 		$EL_RegisterFactory__deps: () => $EL_RegisterFactory__deps,
-		$EL_RegisterMethods: () => $EL_RegisterMethods,
-		$EL_RegisterMethods__deps: () => $EL_RegisterMethods__deps,
 		$EL_ReleaseFunction: () => $EL_ReleaseFunction,
 		$EL_ReleaseFunction__deps: () => $EL_ReleaseFunction__deps,
 		$EL_ReleaseObject: () => $EL_ReleaseObject,
@@ -75,14 +70,10 @@ var library = (function() {
 	const $EL_Objects = {};
 	const $EL_Functions = {};
 	const $EL_Factories = {};
-	const $EL_MethodShapes = {};
 	const $EL_NextHandleId = 1;
 	const $EL_RegisterFactory__deps = ["$EL_Factories"];
-	function $EL_RegisterFactory(name, fn, returnShape) {
-		_EL_Factories[name] = {
-			fn,
-			returnShape
-		};
+	function $EL_RegisterFactory(name, fn) {
+		_EL_Factories[name] = fn;
 	}
 	const $EL_AllocateObject__deps = ["$EL_Objects", "$EL_NextHandleId"];
 	function $EL_AllocateObject(obj) {
@@ -94,10 +85,9 @@ var library = (function() {
 	function $EL_LookupObject(handle) {
 		return _EL_Objects[handle];
 	}
-	const $EL_ReleaseObject__deps = ["$EL_Objects", "$EL_MethodShapes"];
+	const $EL_ReleaseObject__deps = ["$EL_Objects"];
 	function $EL_ReleaseObject(handle) {
 		delete _EL_Objects[handle];
-		delete _EL_MethodShapes[handle];
 	}
 	const $EL_AllocateFunction__deps = ["$EL_Functions", "$EL_NextHandleId"];
 	function $EL_AllocateFunction(fn) {
@@ -116,14 +106,6 @@ var library = (function() {
 	const $EL_LookupFactory__deps = ["$EL_Factories"];
 	function $EL_LookupFactory(name) {
 		return _EL_Factories[name];
-	}
-	const $EL_RegisterMethods__deps = ["$EL_MethodShapes"];
-	function $EL_RegisterMethods(handle, methods) {
-		_EL_MethodShapes[handle] = methods;
-	}
-	const $EL_GetMethodShape__deps = ["$EL_MethodShapes"];
-	function $EL_GetMethodShape(handle, method) {
-		return _EL_MethodShapes[handle]?.[method]?.returnShape ?? "value";
 	}
 
 //#endregion
@@ -206,6 +188,15 @@ var library = (function() {
 		EL_ObjectRelease: () => EL_ObjectRelease,
 		EL_ObjectRelease__deps: () => EL_ObjectRelease__deps
 	});
+	const RETURN_SHAPES = [
+		"value",
+		"object",
+		"function",
+		"void"
+	];
+	function decodeReturnShape(code) {
+		return RETURN_SHAPES[code] ?? "value";
+	}
 	function allocString(s) {
 		const len = lengthBytesUTF8(s) + 1;
 		const buf = _malloc(len);
@@ -230,12 +221,12 @@ var library = (function() {
 		"$EL_EncodeReturn",
 		"$EL_Settle"
 	];
-	function EL_InvokeFactoryAsync(factoryNamePtr, argsJsonPtr, promiseId) {
+	function EL_InvokeFactoryAsync(factoryNamePtr, argsJsonPtr, returnShape, promiseId) {
 		const name = UTF8ToString(factoryNamePtr);
 		try {
-			const entry = _EL_LookupFactory(name);
-			if (!entry) throw new Error(`Unknown factory: ${name}`);
-			settleWith(promiseId, entry.fn(...parseArgs(argsJsonPtr)), entry.returnShape);
+			const fn = _EL_LookupFactory(name);
+			if (!fn) throw new Error(`Unknown factory: ${name}`);
+			settleWith(promiseId, fn(...parseArgs(argsJsonPtr)), decodeReturnShape(returnShape));
 		} catch (e) {
 			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		}
@@ -245,43 +236,41 @@ var library = (function() {
 		"$EL_Rehydrate",
 		"$EL_EncodeReturn"
 	];
-	function EL_InvokeFactorySync(factoryNamePtr, argsJsonPtr) {
+	function EL_InvokeFactorySync(factoryNamePtr, argsJsonPtr, returnShape) {
 		try {
 			const name = UTF8ToString(factoryNamePtr);
-			const entry = _EL_LookupFactory(name);
-			if (!entry) throw new Error(`Unknown factory: ${name}`);
-			const result = entry.fn(...parseArgs(argsJsonPtr));
-			return allocString(JSON.stringify(_EL_EncodeReturn(result, entry.returnShape)) ?? "null");
+			const fn = _EL_LookupFactory(name);
+			if (!fn) throw new Error(`Unknown factory: ${name}`);
+			const result = fn(...parseArgs(argsJsonPtr));
+			return allocString(JSON.stringify(_EL_EncodeReturn(result, decodeReturnShape(returnShape))) ?? "null");
 		} catch (e) {
 			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}
 	}
 	const EL_ObjectCallAsync__deps = [
 		"$EL_LookupObject",
-		"$EL_GetMethodShape",
 		"$EL_Rehydrate",
 		"$EL_EncodeReturn",
 		"$EL_Settle"
 	];
-	function EL_ObjectCallAsync(handle, methodPtr, argsJsonPtr, promiseId) {
+	function EL_ObjectCallAsync(handle, methodPtr, argsJsonPtr, returnShape, promiseId) {
 		const method = UTF8ToString(methodPtr);
 		try {
 			const obj = _EL_LookupObject(handle);
 			if (obj === void 0) throw new Error(`unknown handle: ${handle}`);
 			const fn = obj[method];
 			if (typeof fn !== "function") throw new Error(`No method '${method}' on handle ${handle}`);
-			settleWith(promiseId, fn.apply(obj, parseArgs(argsJsonPtr)), _EL_GetMethodShape(handle, method));
+			settleWith(promiseId, fn.apply(obj, parseArgs(argsJsonPtr)), decodeReturnShape(returnShape));
 		} catch (e) {
 			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		}
 	}
 	const EL_ObjectCallSync__deps = [
 		"$EL_LookupObject",
-		"$EL_GetMethodShape",
 		"$EL_Rehydrate",
 		"$EL_EncodeReturn"
 	];
-	function EL_ObjectCallSync(handle, methodPtr, argsJsonPtr) {
+	function EL_ObjectCallSync(handle, methodPtr, argsJsonPtr, returnShape) {
 		try {
 			const method = UTF8ToString(methodPtr);
 			const obj = _EL_LookupObject(handle);
@@ -289,7 +278,7 @@ var library = (function() {
 			const fn = obj[method];
 			if (typeof fn !== "function") throw new Error(`No method '${method}' on handle ${handle}`);
 			const result = fn.apply(obj, parseArgs(argsJsonPtr));
-			return allocString(JSON.stringify(_EL_EncodeReturn(result, _EL_GetMethodShape(handle, method))) ?? "null");
+			return allocString(JSON.stringify(_EL_EncodeReturn(result, decodeReturnShape(returnShape))) ?? "null");
 		} catch (e) {
 			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}
@@ -316,11 +305,11 @@ var library = (function() {
 		"$EL_EncodeReturn",
 		"$EL_Settle"
 	];
-	function EL_FunctionCallAsync(handle, argsJsonPtr, promiseId) {
+	function EL_FunctionCallAsync(handle, argsJsonPtr, returnShape, promiseId) {
 		try {
 			const fn = _EL_LookupFunction(handle);
 			if (!fn) throw new Error(`unknown handle: ${handle}`);
-			settleWith(promiseId, fn(...parseArgs(argsJsonPtr)), "value");
+			settleWith(promiseId, fn(...parseArgs(argsJsonPtr)), decodeReturnShape(returnShape));
 		} catch (e) {
 			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		}
@@ -330,12 +319,12 @@ var library = (function() {
 		"$EL_Rehydrate",
 		"$EL_EncodeReturn"
 	];
-	function EL_FunctionCallSync(handle, argsJsonPtr) {
+	function EL_FunctionCallSync(handle, argsJsonPtr, returnShape) {
 		try {
 			const fn = _EL_LookupFunction(handle);
 			if (!fn) throw new Error(`unknown handle: ${handle}`);
 			const result = fn(...parseArgs(argsJsonPtr));
-			return allocString(JSON.stringify(_EL_EncodeReturn(result, "value")) ?? "null");
+			return allocString(JSON.stringify(_EL_EncodeReturn(result, decodeReturnShape(returnShape))) ?? "null");
 		} catch (e) {
 			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}

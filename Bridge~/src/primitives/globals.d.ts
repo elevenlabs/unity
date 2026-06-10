@@ -21,14 +21,7 @@ declare function _EL_Log(
 // `_EL_*` names below.
 declare const _EL_Objects: Record<number, unknown>;
 declare const _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-declare const _EL_Factories: Record<
-  string,
-  {
-    fn: (...args: unknown[]) => unknown;
-    returnShape: "object" | "function" | "value" | "void";
-  }
->;
-declare const _EL_MethodShapes: Record<number, unknown>;
+declare const _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
 declare let _EL_NextHandleId: number;
 
 // Registry helpers — hoisted by Unity when listed in __deps.
@@ -40,25 +33,11 @@ declare function _EL_LookupObject(handle: number): unknown;
 declare function _EL_LookupFunction(
   handle: number,
 ): ((...args: unknown[]) => unknown) | undefined;
-declare function _EL_LookupFactory(name: string):
-  | {
-      fn: (...args: unknown[]) => unknown;
-      returnShape: "object" | "function" | "value" | "void";
-    }
-  | undefined;
+declare function _EL_LookupFactory(
+  name: string,
+): ((...args: unknown[]) => unknown) | undefined;
 declare function _EL_ReleaseObject(handle: number): void;
 declare function _EL_ReleaseFunction(handle: number): void;
-declare function _EL_RegisterMethods(
-  handle: number,
-  methods: Record<
-    string,
-    { returnShape: "object" | "function" | "value" | "void" }
-  >,
-): void;
-declare function _EL_GetMethodShape(
-  handle: number,
-  method: string,
-): "object" | "function" | "value" | "void";
 
 // Marshalling helpers — hoisted from marshalling.ts.
 declare function _EL_Rehydrate(value: unknown): unknown;

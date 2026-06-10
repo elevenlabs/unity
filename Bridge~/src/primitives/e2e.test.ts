@@ -4,6 +4,9 @@
 // factory invocation, sync/async method calls, property read, BridgeCallback
 // fan-out, function-handle round-trip via removeListener, and dispose.
 // Not shipped — purely for cross-cutting integration coverage.
+//
+// Return shapes are passed per-call as ints (matching the C# BridgeReturnShape
+// enum that Phase 3 will introduce), not registered up-front.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -18,12 +21,10 @@ import {
 import {
   $EL_AllocateFunction,
   $EL_AllocateObject,
-  $EL_GetMethodShape,
   $EL_LookupFactory,
   $EL_LookupFunction,
   $EL_LookupObject,
   $EL_RegisterFactory,
-  $EL_RegisterMethods,
   $EL_ReleaseFunction,
   $EL_ReleaseObject,
 } from "./registries";
@@ -31,14 +32,15 @@ import { $EL_EncodeReturn, $EL_Rehydrate } from "./marshalling";
 import { $EL_Settle } from "./promise-settle";
 import { $EL_InvokeCallback } from "./callbacks";
 
+const SHAPE_VALUE = 0;
+const SHAPE_OBJECT = 1;
+const SHAPE_FUNCTION = 2;
+const SHAPE_VOID = 3;
+
 type ElGlobals = typeof globalThis & {
   _EL_Objects: Record<number, unknown>;
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-  _EL_Factories: Record<
-    string,
-    { fn: (...args: unknown[]) => unknown; returnShape: string }
-  >;
-  _EL_MethodShapes: Record<number, unknown>;
+  _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
   _EL_NextHandleId: number;
   _EL_BridgeName: string;
   SendMessage: (go: string, method: string, value: string) => void;
@@ -85,7 +87,6 @@ beforeEach(() => {
   vi.stubGlobal("_EL_Objects", {});
   vi.stubGlobal("_EL_Functions", {});
   vi.stubGlobal("_EL_Factories", {});
-  vi.stubGlobal("_EL_MethodShapes", {});
   vi.stubGlobal("_EL_NextHandleId", 1);
 
   vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
@@ -95,8 +96,6 @@ beforeEach(() => {
   vi.stubGlobal("_EL_LookupFunction", $EL_LookupFunction);
   vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
   vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
-  vi.stubGlobal("_EL_RegisterMethods", $EL_RegisterMethods);
-  vi.stubGlobal("_EL_GetMethodShape", $EL_GetMethodShape);
 
   vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);
   vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
@@ -117,7 +116,7 @@ beforeEach(() => {
     heap.set(ptr, s);
   });
 
-  $EL_RegisterFactory("mathFactory", () => mathObj, "object");
+  $EL_RegisterFactory("mathFactory", () => mathObj);
 });
 
 function lastSendMessage(): string {
@@ -127,7 +126,12 @@ function lastSendMessage(): string {
 
 describe("mathFactory end-to-end", () => {
   it("factory invocation returns a JsObject handle for the math object", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
 
     expect(lastSendMessage()).toBe('1:ok:{"$ref":1}');
@@ -135,22 +139,43 @@ describe("mathFactory end-to-end", () => {
   });
 
   it("sync method add(3, 4) → 7", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
 
-    const ptr = EL_ObjectCallSync(mathHandle, makePtr("add"), makePtr("[3,4]"));
+    const ptr = EL_ObjectCallSync(
+      mathHandle,
+      makePtr("add"),
+      makePtr("[3,4]"),
+      SHAPE_VALUE,
+    );
     expect(readPtr(ptr)).toBe("7");
   });
 
   it("async method addAsync(5, 6) settles with 11", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
 
     (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
-    EL_ObjectCallAsync(mathHandle, makePtr("addAsync"), makePtr("[5,6]"), 2);
+    EL_ObjectCallAsync(
+      mathHandle,
+      makePtr("addAsync"),
+      makePtr("[5,6]"),
+      SHAPE_VALUE,
+      2,
+    );
     await Promise.resolve();
     await Promise.resolve(); // extra tick for the inner Promise.resolve
 
@@ -158,7 +183,12 @@ describe("mathFactory end-to-end", () => {
   });
 
   it("property read: pi returns Math.PI", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
 
@@ -167,13 +197,14 @@ describe("mathFactory end-to-end", () => {
   });
 
   it("BridgeCallback fan-out: addTickListener receives the closure and fires SendMessage on invocation", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
-
-    $EL_RegisterMethods(mathHandle, {
-      addTickListener: { returnShape: "function" },
-    });
 
     (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
@@ -182,6 +213,7 @@ describe("mathFactory end-to-end", () => {
       mathHandle,
       makePtr("addTickListener"),
       makePtr(JSON.stringify([{ $cb: cbHandle }])),
+      SHAPE_FUNCTION,
       3,
     );
     await Promise.resolve();
@@ -206,13 +238,14 @@ describe("mathFactory end-to-end", () => {
   });
 
   it("function-handle round-trip: calling removeListener via EL_FunctionCallAsync removes the listener", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
-
-    $EL_RegisterMethods(mathHandle, {
-      addTickListener: { returnShape: "function" },
-    });
 
     (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
@@ -220,6 +253,7 @@ describe("mathFactory end-to-end", () => {
       mathHandle,
       makePtr("addTickListener"),
       makePtr(JSON.stringify([{ $cb: 3001 }])),
+      SHAPE_FUNCTION,
       4,
     );
     await Promise.resolve();
@@ -230,34 +264,37 @@ describe("mathFactory end-to-end", () => {
 
     (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
-    EL_FunctionCallAsync(removeListenerHandle, makePtr("[]"), 5);
+    EL_FunctionCallAsync(removeListenerHandle, makePtr("[]"), SHAPE_VOID, 5);
     await Promise.resolve();
 
     expect(lastSendMessage()).toBe("5:ok:null");
     expect(listeners.length).toBe(0);
   });
 
-  it("dispose: EL_ObjectRelease clears the object handle and its method shapes", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+  it("dispose: EL_ObjectRelease clears the object handle", async () => {
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
-
-    $EL_RegisterMethods(mathHandle, { add: { returnShape: "value" } });
 
     EL_ObjectRelease(mathHandle);
 
     expect(g._EL_Objects[mathHandle]).toBeUndefined();
-    expect(g._EL_MethodShapes[mathHandle]).toBeUndefined();
   });
 
   it("dispose: EL_FunctionRelease clears the function handle", async () => {
-    EL_InvokeFactoryAsync(makePtr("mathFactory"), makePtr("[]"), 1);
+    EL_InvokeFactoryAsync(
+      makePtr("mathFactory"),
+      makePtr("[]"),
+      SHAPE_OBJECT,
+      1,
+    );
     await Promise.resolve();
     const mathHandle = 1;
-
-    $EL_RegisterMethods(mathHandle, {
-      addTickListener: { returnShape: "function" },
-    });
 
     (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
@@ -265,6 +302,7 @@ describe("mathFactory end-to-end", () => {
       mathHandle,
       makePtr("addTickListener"),
       makePtr(JSON.stringify([{ $cb: 4001 }])),
+      SHAPE_FUNCTION,
       6,
     );
     await Promise.resolve();
