@@ -13,6 +13,7 @@ import {
 import {
   $EL_AllocateFunction,
   $EL_AllocateObject,
+  $EL_GetMethodShape,
   $EL_LookupFactory,
   $EL_LookupFunction,
   $EL_LookupObject,
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.stubGlobal("_EL_Objects", {});
   vi.stubGlobal("_EL_Functions", {});
   vi.stubGlobal("_EL_Factories", {});
+  vi.stubGlobal("_EL_MethodShapes", {});
   vi.stubGlobal("_EL_NextHandleId", 1);
   vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
   vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
@@ -69,6 +71,7 @@ beforeEach(() => {
   vi.stubGlobal("_EL_LookupFunction", $EL_LookupFunction);
   vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
   vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
+  vi.stubGlobal("_EL_GetMethodShape", $EL_GetMethodShape);
 
   // Marshalling
   vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);

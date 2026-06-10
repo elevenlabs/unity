@@ -5,8 +5,8 @@
 // heap string ("!err:<message>"). Argument rehydration and return encoding are
 // delegated to $EL_Rehydrate / $EL_EncodeReturn.
 //
-// Object and function method calls use "value" return shape by default. A future
-// $EL_RegisterMethods helper will allow per-method shape overrides.
+// Object method return shapes are resolved per-handle/method via $EL_GetMethodShape
+// (registered by callers via $EL_RegisterMethods). Defaults to "value" when unregistered.
 
 import type { ReturnShape } from "./registries";
 
@@ -98,6 +98,7 @@ export function EL_InvokeFactorySync(
 
 export const EL_ObjectCallAsync__deps = [
   "$EL_LookupObject",
+  "$EL_GetMethodShape",
   "$EL_Rehydrate",
   "$EL_EncodeReturn",
   "$EL_Settle",
@@ -115,7 +116,11 @@ export function EL_ObjectCallAsync(
     const fn = (obj as Record<string, (...args: unknown[]) => unknown>)[method];
     if (typeof fn !== "function")
       throw new Error(`No method '${method}' on handle ${handle}`);
-    settleWith(promiseId, fn.apply(obj, parseArgs(argsJsonPtr)), "value");
+    settleWith(
+      promiseId,
+      fn.apply(obj, parseArgs(argsJsonPtr)),
+      _EL_GetMethodShape(handle, method),
+    );
   } catch (e: unknown) {
     _EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
   }
@@ -125,6 +130,7 @@ export function EL_ObjectCallAsync(
 
 export const EL_ObjectCallSync__deps = [
   "$EL_LookupObject",
+  "$EL_GetMethodShape",
   "$EL_Rehydrate",
   "$EL_EncodeReturn",
 ];
@@ -142,7 +148,9 @@ export function EL_ObjectCallSync(
       throw new Error(`No method '${method}' on handle ${handle}`);
     const result = fn.apply(obj, parseArgs(argsJsonPtr));
     return allocString(
-      JSON.stringify(_EL_EncodeReturn(result, "value")) ?? "null",
+      JSON.stringify(
+        _EL_EncodeReturn(result, _EL_GetMethodShape(handle, method)),
+      ) ?? "null",
     );
   } catch (e: unknown) {
     return allocString("!err:" + (e instanceof Error ? e.message : String(e)));

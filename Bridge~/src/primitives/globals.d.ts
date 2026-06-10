@@ -28,6 +28,7 @@ declare const _EL_Factories: Record<
     returnShape: "object" | "function" | "value" | "void";
   }
 >;
+declare const _EL_MethodShapes: Record<number, unknown>;
 declare let _EL_NextHandleId: number;
 
 // Registry helpers — hoisted by Unity when listed in __deps.
@@ -47,6 +48,17 @@ declare function _EL_LookupFactory(name: string):
   | undefined;
 declare function _EL_ReleaseObject(handle: number): void;
 declare function _EL_ReleaseFunction(handle: number): void;
+declare function _EL_RegisterMethods(
+  handle: number,
+  methods: Record<
+    string,
+    { returnShape: "object" | "function" | "value" | "void" }
+  >,
+): void;
+declare function _EL_GetMethodShape(
+  handle: number,
+  method: string,
+): "object" | "function" | "value" | "void";
 
 // Marshalling helpers — hoisted from marshalling.ts.
 declare function _EL_Rehydrate(value: unknown): unknown;

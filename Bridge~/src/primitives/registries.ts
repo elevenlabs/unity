@@ -23,6 +23,7 @@ export interface FactoryEntry {
 export const $EL_Objects = {};
 export const $EL_Functions = {};
 export const $EL_Factories = {};
+export const $EL_MethodShapes = {};
 export const $EL_NextHandleId = 1;
 
 // --- Factory registration (called from external JS at app boot) ---
@@ -50,9 +51,10 @@ export function $EL_LookupObject(handle: number): unknown {
   return _EL_Objects[handle];
 }
 
-export const $EL_ReleaseObject__deps = ["$EL_Objects"];
+export const $EL_ReleaseObject__deps = ["$EL_Objects", "$EL_MethodShapes"];
 export function $EL_ReleaseObject(handle: number): void {
   delete _EL_Objects[handle];
+  delete (_EL_MethodShapes as Record<number, unknown>)[handle];
 }
 
 // --- Function registry ---
@@ -83,4 +85,36 @@ export function $EL_ReleaseFunction(handle: number): void {
 export const $EL_LookupFactory__deps = ["$EL_Factories"];
 export function $EL_LookupFactory(name: string): FactoryEntry | undefined {
   return _EL_Factories[name];
+}
+
+// --- Method shape registry ---
+// Associates an object handle with a map of method names to return shapes.
+// Called after allocating an object handle to declare which methods return
+// "function" or "object" values (defaults to "value" when absent).
+
+export const $EL_RegisterMethods__deps = ["$EL_MethodShapes"];
+export function $EL_RegisterMethods(
+  handle: number,
+  methods: Record<string, { returnShape: ReturnShape }>,
+): void {
+  (
+    _EL_MethodShapes as Record<
+      number,
+      Record<string, { returnShape: ReturnShape }>
+    >
+  )[handle] = methods;
+}
+
+export const $EL_GetMethodShape__deps = ["$EL_MethodShapes"];
+export function $EL_GetMethodShape(
+  handle: number,
+  method: string,
+): ReturnShape {
+  const shapes = (
+    _EL_MethodShapes as Record<
+      number,
+      Record<string, { returnShape: ReturnShape }> | undefined
+    >
+  )[handle];
+  return shapes?.[method]?.returnShape ?? "value";
 }
