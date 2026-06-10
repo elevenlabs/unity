@@ -10,7 +10,8 @@
 
 import { rolldown } from "rolldown";
 import { writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 if (args.length !== 2) {
@@ -19,7 +20,33 @@ if (args.length !== 2) {
 }
 const [entry, output] = args.map((p) => resolve(p));
 
-const bundle = await rolldown({ input: entry });
+// Alias deep @elevenlabs/client sub-paths that are not in its exports map.
+// Rolldown enforces the exports field during resolution so deep imports fail
+// without an alias. The aliases short-circuit resolution to absolute file
+// paths, bypassing the exports check for only these two paths while leaving
+// normal resolution unchanged for everything else.
+const nodeModulesDir = fileURLToPath(
+  new URL("../node_modules", import.meta.url),
+);
+const platformWebBase = join(
+  nodeModulesDir,
+  "@elevenlabs/client/dist/platform/web",
+);
+const deepImportAliases = {
+  "@elevenlabs/client/dist/platform/web/input.js": join(
+    platformWebBase,
+    "input.js",
+  ),
+  "@elevenlabs/client/dist/platform/web/output.js": join(
+    platformWebBase,
+    "output.js",
+  ),
+};
+
+const bundle = await rolldown({
+  input: entry,
+  resolve: { alias: deepImportAliases },
+});
 
 try {
   const { output: chunks } = await bundle.generate({
