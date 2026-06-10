@@ -89,6 +89,39 @@ Identified gaps:
 
 No upstream PRs block Plan B's v0.1.
 
+### Local SDK iteration workflow
+
+Some Plan B tasks (notably 2.3's `attachDefaultAudio` monkey-patch, and any
+deeper integration discovered in Phases 4-5) will likely want small tweaks
+to `@elevenlabs/client` before the change is ready to upstream. To avoid
+maintaining a hard fork:
+
+1. **While iterating**, use a pnpm `overrides` entry in
+   `Bridge~/package.json` pointing at a local checkout (`link:../../packages/packages/client`
+   or similar). Edits show up immediately without a publish loop. CI is
+   guarded because the override path doesn't exist on the CI runner — the
+   override is per-developer and must be removed before merging.
+2. **Once a tweak is stable**, capture it as a `pnpm patch` under
+   `Bridge~/patches/` and reference it via `patchedDependencies` in
+   `Bridge~/package.json` so the lockfile is reproducible for everyone.
+3. **Open the upstream PR** in parallel; once merged and a new
+   `@elevenlabs/client` version ships, bump the dep version and delete
+   the patch.
+
+Where a tweak adds *new exports* rather than modifying existing ones
+(e.g. exposing a primitive `MediaDeviceInput` / `MediaDeviceOutput` that
+the SDK currently keeps internal, or surfacing an `attachDefaultAudio`
+helper), the preferred upstream shape is a dedicated entrypoint — either
+an `internal-unity` export condition (so the SDK can keep the symbol off
+the public surface) or an explicit sub-path export like
+`@elevenlabs/client/unity`. Both forms let the Rolldown bundler resolve
+the right runtime file *and* let tsc resolve the matching `.d.ts`, which
+the `browser` condition currently doesn't (Rolldown picks `dist/platform/web/index.js`
+at bundle time while tsc walks `dist/index.d.ts` for types — patches
+that touch only the runtime path won't get type-checked). A first-class
+entrypoint is also a smaller, less-controversial upstream PR than
+loosening the existing `index.ts` exports.
+
 ## Disposition of in-flight plans
 
 - [`generic-bridge-primitives.md`](./generic-bridge-primitives.md) — **authoritative.** The primitive layer Plan B consumes. Reuses the scaffolding (WebGLBridge MonoBehaviour, ID generator, message parser, log helper, jslib bundler) already in the repo; the prior promise / observer / handler entry points get replaced in its Phase 2.
