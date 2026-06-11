@@ -1,0 +1,988 @@
+asyncapi: 2.6.0
+info:
+  title: ElevenLabs real-time API
+  description: ElevenLabs real-time API for real-time conversational AI interactions
+  license:
+    name: MIT License
+  version: 1.1.0
+servers:
+  Production:
+    url: wss://api.elevenlabs.io
+    protocol: wss
+    description: Production (default). Routed to the closest region.
+  Production-US:
+    url: wss://api.us.elevenlabs.io
+    protocol: wss
+    description: Production routed only to the US region.
+  Production-EU:
+    url: wss://api.eu.residency.elevenlabs.io
+    protocol: wss
+    description: Production route for customers with EU data residency.
+  Production-India:
+    url: wss://api.in.residency.elevenlabs.io
+    protocol: wss
+    description: Production route for customers with India data residency.
+  Production-Singapore:
+    url: wss://api.sg.residency.elevenlabs.io
+    protocol: wss
+    description: Production route for customers with Singapore data residency.
+tags:
+- name: conversationalAI
+  description: APIs related to conversational AI functionality
+channels:
+  /v1/convai/conversation:
+    x-fern-audiences:
+    - convai
+    bindings:
+      ws:
+        query:
+          type: object
+          required:
+          - agent_id
+          properties:
+            agent_id:
+              description: The unique identifier of the agent to converse with.
+              schema:
+                type: string
+    description: Establish a WebSocket connection for real-time conversations with an AI agent.
+    publish:
+      summary: Messages sent from the client to the server.
+      description: Defines the message types that can be sent from client to server
+      message:
+        oneOf:
+        - $ref: '#/components/messages/UserAudioChunk'
+        - $ref: '#/components/messages/UserMessage'
+        - $ref: '#/components/messages/UserActivity'
+        - $ref: '#/components/messages/MultimodalMessage'
+        - $ref: '#/components/messages/Pong'
+        - $ref: '#/components/messages/ClientToolResult'
+        - $ref: '#/components/messages/ContextualUpdate'
+        - $ref: '#/components/messages/ConversationInitiationClientData'
+    subscribe:
+      summary: Messages sent from the server to the client.
+      description: Defines the message types that can be received by the client from the server
+      message:
+        oneOf:
+        - $ref: '#/components/messages/ConversationInitiationMetadata'
+        - $ref: '#/components/messages/AgentResponseComplete'
+        - $ref: '#/components/messages/UserTranscript'
+        - $ref: '#/components/messages/AgentResponse'
+        - $ref: '#/components/messages/AgentResponseCorrection'
+        - $ref: '#/components/messages/AudioResponse'
+        - $ref: '#/components/messages/Interruption'
+        - $ref: '#/components/messages/VadScore'
+        - $ref: '#/components/messages/ClientToolCall'
+        - $ref: '#/components/messages/AgentToolResponseFullPayload'
+        - $ref: '#/components/messages/Ping'
+    x-fern-examples:
+    - messages:
+      - type: publish
+        messageId: ConversationInitiationClientData
+        value:
+          type: conversation_initiation_client_data
+          conversation_config_override:
+            agent:
+              prompt:
+                prompt: You are a helpful customer support agent named Alexis.
+              first_message: Hi, I'm Alexis from ElevenLabs support. How can I help you today?
+              language: en
+            tts:
+              voice_id: 21m00Tcm4TlvDq8ikWAM
+          custom_llm_extra_body:
+            temperature: 0.7
+            max_tokens: 150
+          dynamic_variables:
+            user_name: John
+            account_type: premium
+      - type: subscribe
+        messageId: ConversationInitiationMetadata
+        value:
+          type: conversation_initiation_metadata
+          conversation_initiation_metadata_event:
+            conversation_id: conv_123456789
+            agent_output_audio_format: pcm_16000
+            user_input_audio_format: pcm_16000
+      - type: publish
+        messageId: UserAudioChunk
+        value:
+          user_audio_chunk: base64EncodedAudioData==
+      - type: subscribe
+        messageId: VadScore
+        value:
+          type: vad_score
+          vad_score_event:
+            vad_score: 0.95
+      - type: subscribe
+        messageId: UserTranscript
+        value:
+          type: user_transcript
+          user_transcription_event:
+            user_transcript: I need help with my voice cloning project.
+            event_id: 42
+      - type: subscribe
+        messageId: AgentResponse
+        value:
+          type: agent_response
+          agent_response_event:
+            agent_response: I'd be happy to help with your voice cloning project. Could you tell me what specific aspects
+              you need assistance with?
+            event_id: 43
+      - type: subscribe
+        messageId: AudioResponse
+        value:
+          type: audio
+          audio_event:
+            audio_base_64: base64EncodedAudioResponse==
+            event_id: 1
+            alignment:
+              chars:
+              - H
+              - e
+              - l
+              - l
+              - o
+              char_durations_ms:
+              - 50
+              - 30
+              - 40
+              - 40
+              - 60
+              char_start_times_ms:
+              - 0
+              - 50
+              - 80
+              - 120
+              - 160
+      - type: subscribe
+        messageId: Ping
+        value:
+          type: ping
+          ping_event:
+            event_id: 12345
+            ping_ms: 50
+      - type: publish
+        messageId: Pong
+        value:
+          type: pong
+          event_id: 12345
+      - type: subscribe
+        messageId: ClientToolCall
+        value:
+          type: client_tool_call
+          client_tool_call:
+            tool_name: check_account_status
+            tool_call_id: tool_call_123
+            parameters:
+              user_id: user_123
+            event_id: 44
+            expects_response: true
+      - type: publish
+        messageId: ClientToolResult
+        value:
+          type: client_tool_result
+          tool_call_id: tool_call_123
+          result: Account is active and in good standing
+          is_error: false
+      - type: publish
+        messageId: ContextualUpdate
+        value:
+          type: contextual_update
+          text: User is viewing the pricing page
+      - type: publish
+        messageId: UserMessage
+        value:
+          type: user_message
+          text: I would like to upgrade my account
+      - type: publish
+        messageId: UserActivity
+        value:
+          type: user_activity
+      - type: publish
+        messageId: MultimodalMessage
+        value:
+          type: multimodal_message
+          text:
+            type: user_message
+            text: What is this file?
+          file:
+            type: file_input
+            file_id: file_12345
+components:
+  messages:
+    ConversationInitiationMetadata:
+      name: Conversation Initiation Metadata
+      description: Initial metadata and configuration details for a new conversation, only sent once.
+      payload:
+        $ref: '#/components/schemas/ConversationInitiationMetadata'
+    AgentResponseComplete:
+      name: Agent Response Complete
+      description: Notification that the agent has finished generating a complete response.
+      payload:
+        $ref: '#/components/schemas/AgentResponseComplete'
+    UserTranscript:
+      name: User Transcript
+      description: Real-time transcriptions of user speech input.
+      payload:
+        $ref: '#/components/schemas/UserTranscript'
+    AgentResponse:
+      name: Agent Response
+      description: Text responses generated by the AI agent.
+      payload:
+        $ref: '#/components/schemas/AgentResponse'
+    AgentResponseCorrection:
+      name: Agent Response Correction
+      description: Correction to a previous agent response.
+      payload:
+        $ref: '#/components/schemas/AgentResponseCorrection'
+    AudioResponse:
+      name: Audio Response
+      description: Synthesized audio chunks of the agent's speech response.
+      payload:
+        $ref: '#/components/schemas/AudioResponse'
+    Interruption:
+      name: Interruption
+      description: Notification that the agent's current response was interrupted.
+      payload:
+        $ref: '#/components/schemas/Interruption'
+    VadScore:
+      name: VAD Score
+      description: Voice Activity Detection scoring information.
+      payload:
+        $ref: '#/components/schemas/VadScore'
+    ClientToolCall:
+      name: Client Tool Call
+      description: Requests from server for client to execute specific tool functions.
+      payload:
+        $ref: '#/components/schemas/ClientToolCall'
+    AgentToolResponseFullPayload:
+      name: Agent Tool Response Full Payload
+      description: Tool response including the tool's full result payload as a string.
+      payload:
+        $ref: '#/components/schemas/AgentToolResponseFullPayload'
+    Ping:
+      name: Ping
+      description: Server-initiated ping messages for measuring connection latency.
+      payload:
+        $ref: '#/components/schemas/Ping'
+    UserAudioChunk:
+      name: User Audio Chunk
+      description: Send audio data chunks from the user to the server for processing.
+      payload:
+        $ref: '#/components/schemas/UserAudioChunk'
+    UserMessage:
+      name: User Message
+      description: Text message sent by the user to the conversation.
+      payload:
+        $ref: '#/components/schemas/UserMessage'
+    UserActivity:
+      name: User Activity
+      description: Activity ping to prevent agent interruption and indicate user presence.
+      payload:
+        $ref: '#/components/schemas/UserActivity'
+    MultimodalMessage:
+      name: Multimodal Message
+      description: A message combining text and a file reference, sent by the user to the conversation.
+      payload:
+        $ref: '#/components/schemas/MultimodalMessage'
+    Pong:
+      name: Pong
+      description: Response message to server ping requests for latency measurement.
+      payload:
+        $ref: '#/components/schemas/Pong'
+    ClientToolResult:
+      name: Client Tool Result
+      description: Results from client-side tool execution requested by the server.
+      payload:
+        $ref: '#/components/schemas/ClientToolResult'
+    ContextualUpdate:
+      name: Contextual Update
+      description: Non-interrupting content sent to update the conversation state without disrupting the flow.
+      payload:
+        $ref: '#/components/schemas/ContextualUpdate'
+    ConversationInitiationClientData:
+      name: Conversation Initiation Client Data
+      description: Client configuration data to override default conversation settings.
+      payload:
+        $ref: '#/components/schemas/ConversationInitiationClientData'
+  schemas:
+    ConversationInitiationMetadata:
+      properties:
+        conversation_initiation_metadata_event:
+          properties:
+            conversation_id:
+              type: string
+            agent_output_audio_format:
+              enum:
+              - pcm_8000
+              - pcm_16000
+              - pcm_22050
+              - pcm_24000
+              - pcm_44100
+              - pcm_48000
+              - ulaw_8000
+              type: string
+              description: Audio format specification for agent's speech output.
+            user_input_audio_format:
+              enum:
+              - pcm_8000
+              - pcm_16000
+              - pcm_22050
+              - pcm_24000
+              - pcm_44100
+              - pcm_48000
+              - ulaw_8000
+              type: string
+              description: Audio format specification for user's speech input.
+          required:
+          - conversation_id
+          - agent_output_audio_format
+          - user_input_audio_format
+          type: object
+        type:
+          x-fern-type: literal<"conversation_initiation_metadata">
+      required:
+      - conversation_initiation_metadata_event
+      type: object
+    AgentResponseComplete:
+      properties:
+        agent_response_complete_event:
+          properties:
+            event_id:
+              type: integer
+          required:
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"agent_response_complete">
+      required:
+      - agent_response_complete_event
+      type: object
+    UserTranscript:
+      properties:
+        user_transcription_event:
+          properties:
+            user_transcript:
+              type: string
+            event_id:
+              type: integer
+          required:
+          - user_transcript
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"user_transcript">
+      required:
+      - user_transcription_event
+      type: object
+    AgentResponse:
+      properties:
+        agent_response_event:
+          properties:
+            agent_response:
+              type: string
+            event_id:
+              type: integer
+          required:
+          - agent_response
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"agent_response">
+      required:
+      - agent_response_event
+      type: object
+    AgentResponseCorrection:
+      properties:
+        agent_response_correction_event:
+          properties:
+            original_agent_response:
+              type: string
+            corrected_agent_response:
+              type: string
+            event_id:
+              type: integer
+          required:
+          - original_agent_response
+          - corrected_agent_response
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"agent_response_correction">
+      required:
+      - agent_response_correction_event
+      type: object
+    AudioResponse:
+      properties:
+        audio_event:
+          properties:
+            audio_base_64:
+              type: string
+            event_id:
+              type: integer
+            alignment:
+              properties:
+                chars:
+                  items:
+                    type: string
+                  type: array
+                char_start_times_ms:
+                  items:
+                    type: integer
+                  type: array
+                char_durations_ms:
+                  items:
+                    type: integer
+                  type: array
+              required:
+              - chars
+              - char_start_times_ms
+              - char_durations_ms
+              type: object
+              description: Character-level timing data for the audio chunk, useful for synchronized text display or lip-syncing.
+            is_final:
+              default: false
+              description: Whether this is the last audio chunk of the current agent response.
+              type: boolean
+          required:
+          - audio_base_64
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"audio">
+      required:
+      - audio_event
+      type: object
+    Interruption:
+      properties:
+        interruption_event:
+          properties:
+            event_id:
+              type: integer
+          required:
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"interruption">
+      required:
+      - interruption_event
+      type: object
+    VadScore:
+      properties:
+        vad_score_event:
+          properties:
+            vad_score:
+              type: number
+          required:
+          - vad_score
+          type: object
+        type:
+          x-fern-type: literal<"vad_score">
+      required:
+      - vad_score_event
+      type: object
+    ClientToolCall:
+      properties:
+        client_tool_call:
+          properties:
+            tool_name:
+              type: string
+            tool_call_id:
+              type: string
+            parameters:
+              additionalProperties: true
+              type: object
+            event_id:
+              type: integer
+            expects_response:
+              description: Whether the server expects a ClientToolResult response.
+              type: boolean
+          required:
+          - tool_name
+          - tool_call_id
+          - parameters
+          - event_id
+          - expects_response
+          type: object
+        type:
+          x-fern-type: literal<"client_tool_call">
+      required:
+      - client_tool_call
+      type: object
+    AgentToolResponseFullPayload:
+      properties:
+        agent_tool_response_full_payload:
+          properties:
+            tool_name:
+              type: string
+            tool_call_id:
+              type: string
+            tool_type:
+              type: string
+            is_error:
+              type: boolean
+            is_blocked:
+              default: false
+              type: boolean
+            event_id:
+              type: integer
+            is_called:
+              type: boolean
+            full_tool_result:
+              type: string
+            truncated:
+              default: false
+              type: boolean
+          required:
+          - tool_name
+          - tool_call_id
+          - tool_type
+          - is_error
+          - event_id
+          - is_called
+          - full_tool_result
+          type: object
+        type:
+          x-fern-type: literal<"agent_tool_response_full_payload">
+      required:
+      - agent_tool_response_full_payload
+      type: object
+    Ping:
+      properties:
+        ping_event:
+          properties:
+            event_id:
+              type: integer
+            ping_ms:
+              type: integer
+          required:
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"ping">
+      required:
+      - ping_event
+      type: object
+    UserAudioChunk:
+      properties:
+        user_audio_chunk:
+          description: Base64-encoded audio data from the user's microphone.
+          type: string
+      required:
+      - user_audio_chunk
+      type: object
+    UserMessage:
+      properties:
+        type:
+          x-fern-type: literal<"user_message">
+        text:
+          type: string
+      type: object
+    UserActivity:
+      properties:
+        type:
+          x-fern-type: literal<"user_activity">
+      type: object
+    MultimodalMessage:
+      properties:
+        type:
+          x-fern-type: literal<"multimodal_message">
+        text:
+          properties:
+            type:
+              const: user_message
+              default: user_message
+              type: string
+            text:
+              type: string
+          type: object
+        file:
+          properties:
+            type:
+              const: file_input
+              default: file_input
+              type: string
+            file_id:
+              type: string
+          required:
+          - file_id
+          type: object
+      type: object
+    Pong:
+      properties:
+        type:
+          x-fern-type: literal<"pong">
+        event_id:
+          description: ID of the ping event this pong responds to.
+          type: integer
+      required:
+      - event_id
+      type: object
+    ClientToolResult:
+      properties:
+        type:
+          x-fern-type: literal<"client_tool_result">
+        tool_call_id:
+          description: ID of the tool call this result corresponds to.
+          type: string
+        result:
+          type: string
+        is_error:
+          type: boolean
+        error_type:
+          description: Optional category for the failure reason. When set, `is_error`
+            is treated as true. `user_rejected` is special-cased to mark the tool
+            as not having been called.
+          type: string
+          nullable: true
+          enum:
+          - user_rejected
+          - external_server
+          - external_client
+          - customer_auth
+          - client_timeout
+          - unknown
+      required:
+      - tool_call_id
+      - result
+      - is_error
+      type: object
+    ContextualUpdate:
+      properties:
+        type:
+          x-fern-type: literal<"contextual_update">
+        text:
+          description: Context text to inject into the conversation without interrupting.
+          type: string
+      required:
+      - text
+      type: object
+    DynamicVariableNestedValueType:
+      anyOf:
+      - type: string
+      - type: integer
+      - type: number
+      - type: boolean
+      - items:
+          $ref: '#/components/schemas/DynamicVariableNestedValueType'
+        type: array
+      - type: 'null'
+    ConversationInitiationClientData:
+      properties:
+        conversation_config_override:
+          example:
+            agent:
+              first_message: Hello, how can I help you today?
+              language: en
+              prompt:
+                knowledge_base: []
+                llm: gemini-2.0-flash-001
+                prompt: You are a helpful assistant that can answer questions about the topic of the conversation.
+                tool_ids: []
+            tts:
+              similarity_boost: 0.8
+              speed: 1.0
+              stability: 0.5
+              voice_id: cjVigY5qzO86Huf0OWal
+            turn:
+              soft_timeout_config:
+                message: Hhmmmm...yeah.
+          properties:
+            turn:
+              example:
+                soft_timeout_config:
+                  message: Hhmmmm...yeah.
+              properties:
+                soft_timeout_config:
+                  example:
+                    message: Hhmmmm...yeah.
+                  properties:
+                    message:
+                      type: string
+                      description: Message to show when soft timeout is reached while waiting for LLM response
+                      x-convai-client-override: true
+                      x-convai-language-override: true
+                  type: object
+                  description: Configuration for soft timeout functionality. Provides immediate feedback during longer LLM
+                    responses.
+              type: object
+              description: Configuration for turn detection
+            tts:
+              example:
+                similarity_boost: 0.8
+                speed: 1.0
+                stability: 0.5
+                voice_id: cjVigY5qzO86Huf0OWal
+              properties:
+                voice_id:
+                  type: string
+                  description: The voice ID to use for TTS
+                  x-convai-client-override: true
+                  x-convai-language-override: true
+                stability:
+                  type: number
+                  description: The stability of generated speech
+                  x-convai-client-override: true
+                speed:
+                  type: number
+                  description: The speed of generated speech
+                  x-convai-client-override: true
+                similarity_boost:
+                  type: number
+                  description: The similarity boost for generated speech
+                  x-convai-client-override: true
+              type: object
+              description: Configuration for conversational text to speech
+            conversation:
+              properties:
+                text_only:
+                  type: boolean
+                  description: If enabled audio will not be processed and only text will be used, use to avoid audio pricing.
+                  x-convai-client-override: true
+              type: object
+              description: Configuration for conversational events
+            agent:
+              example:
+                first_message: Hello, how can I help you today?
+                language: en
+                prompt:
+                  knowledge_base: []
+                  llm: gemini-2.0-flash-001
+                  prompt: You are a helpful assistant that can answer questions about the topic of the conversation.
+                  tool_ids: []
+              properties:
+                first_message:
+                  type: string
+                  description: If non-empty, the first message the agent will say. If empty, the agent waits for the user
+                    to start the discussion.
+                  x-convai-client-override: true
+                  x-convai-language-override: true
+                language:
+                  type: string
+                  description: Language of the agent - used for ASR and TTS
+                  x-convai-client-override: true
+                max_conversation_duration_message:
+                  type: string
+                  description: If non-empty, the message the agent will send when max conversation duration is reached.
+                  x-convai-client-override: true
+                  x-convai-language-override: true
+                prompt:
+                  example:
+                    knowledge_base: []
+                    llm: gemini-2.0-flash-001
+                    prompt: You are a helpful assistant that can answer questions about the topic of the conversation.
+                    tool_ids: []
+                  properties:
+                    prompt:
+                      type: string
+                      description: The prompt for the agent
+                      x-convai-client-override: true
+                    llm:
+                      enum:
+                      - gpt-4o-mini
+                      - gpt-4o
+                      - gpt-4
+                      - gpt-4-turbo
+                      - gpt-4.1
+                      - gpt-4.1-mini
+                      - gpt-4.1-nano
+                      - gpt-5
+                      - gpt-5.1
+                      - gpt-5.2
+                      - gpt-5.2-chat-latest
+                      - gpt-5.4
+                      - gpt-5.5
+                      - gpt-5-mini
+                      - gpt-5-nano
+                      - gpt-3.5-turbo
+                      - gemini-1.5-pro
+                      - gemini-1.5-flash
+                      - gemini-2.0-flash
+                      - gemini-2.0-flash-lite
+                      - gemini-2.5-flash-lite
+                      - gemini-2.5-flash
+                      - gemini-3-pro-preview
+                      - gemini-3-flash-preview
+                      - gemini-3.1-pro-preview
+                      - gemini-3.1-flash-lite-preview
+                      - gemini-3.5-flash
+                      - claude-sonnet-4-5
+                      - claude-opus-4-7
+                      - claude-sonnet-4-6
+                      - claude-sonnet-4
+                      - claude-haiku-4-5
+                      - claude-3-7-sonnet
+                      - claude-3-5-sonnet
+                      - claude-3-5-sonnet-v1
+                      - claude-3-haiku
+                      - grok-beta
+                      - custom-llm
+                      - qwen3-4b
+                      - qwen3-30b-a3b
+                      - qwen36-35b-a3b
+                      - gpt-oss-20b
+                      - gpt-oss-120b
+                      - glm-45-air-fp8
+                      - gemini-2.5-flash-preview-09-2025
+                      - gemini-2.5-flash-lite-preview-09-2025
+                      - gemini-2.5-flash-preview-05-20
+                      - gemini-2.5-flash-preview-04-17
+                      - gemini-2.5-flash-lite-preview-06-17
+                      - gemini-2.0-flash-lite-001
+                      - gemini-2.0-flash-001
+                      - gemini-1.5-flash-002
+                      - gemini-1.5-flash-001
+                      - gemini-1.5-pro-002
+                      - gemini-1.5-pro-001
+                      - claude-sonnet-4@20250514
+                      - claude-sonnet-4-5@20250929
+                      - claude-haiku-4-5@20251001
+                      - claude-3-7-sonnet@20250219
+                      - claude-3-5-sonnet@20240620
+                      - claude-3-5-sonnet-v2@20241022
+                      - claude-3-haiku@20240307
+                      - gpt-5-2025-08-07
+                      - gpt-5.1-2025-11-13
+                      - gpt-5.2-2025-12-11
+                      - gpt-5.4-2026-03-05
+                      - gpt-5.5-2026-04-23
+                      - gpt-5-mini-2025-08-07
+                      - gpt-5-nano-2025-08-07
+                      - gpt-4.1-2025-04-14
+                      - gpt-4.1-mini-2025-04-14
+                      - gpt-4.1-nano-2025-04-14
+                      - gpt-4o-mini-2024-07-18
+                      - gpt-4o-2024-11-20
+                      - gpt-4o-2024-08-06
+                      - gpt-4o-2024-05-13
+                      - gpt-4-0613
+                      - gpt-4-0314
+                      - gpt-4-turbo-2024-04-09
+                      - gpt-3.5-turbo-0125
+                      - gpt-3.5-turbo-1106
+                      - watt-tool-8b
+                      - watt-tool-70b
+                      type: string
+                      description: The LLM to query with the prompt and the chat history. If using data residency, the LLM
+                        must be supported in the data residency environment
+                      x-convai-client-override: true
+                    tool_ids:
+                      items:
+                        type: string
+                      type: array
+                      description: A list of IDs of tools used by the agent
+                      x-convai-client-override: true
+                    native_mcp_server_ids:
+                      items:
+                        type: string
+                      type: array
+                      description: A list of Native MCP server ids to be used by the agent
+                      x-convai-client-override: true
+                    knowledge_base:
+                      items:
+                        example:
+                          id: '123'
+                          name: My Knowledge Base
+                          type: file
+                          usage_mode: auto
+                        properties:
+                          type:
+                            enum:
+                            - file
+                            - url
+                            - text
+                            - folder
+                            type: string
+                            description: The type of the knowledge base
+                          name:
+                            description: The name of the knowledge base
+                            type: string
+                          id:
+                            description: The ID of the knowledge base
+                            type: string
+                          usage_mode:
+                            enum:
+                            - prompt
+                            - auto
+                            type: string
+                            default: auto
+                            description: The usage mode of the knowledge base
+                        required:
+                        - type
+                        - name
+                        - id
+                        type: object
+                      type: array
+                      description: A list of knowledge bases to be used by the agent
+                      x-convai-client-override: true
+                  type: object
+                  description: The prompt for the agent
+              type: object
+              description: Agent specific configuration
+          type: object
+        custom_llm_extra_body:
+          additionalProperties: true
+          type: object
+        user_id:
+          type: string
+          description: ID of the end user participating in this conversation (for agent owner's user identification)
+        source_info:
+          description: Information about the source of conversation initiation
+          properties:
+            source:
+              description: Source of the conversation initiation
+              enum:
+              - unknown
+              - android_sdk
+              - node_js_sdk
+              - react_native_sdk
+              - react_sdk
+              - js_sdk
+              - python_sdk
+              - widget
+              - sip_trunk
+              - twilio
+              - genesys
+              - swift_sdk
+              - whatsapp
+              - flutter_sdk
+              - zendesk_integration
+              - slack_integration
+              - template_preview
+              type: string
+            version:
+              maxLength: 50
+              type: string
+              description: The SDK version number
+          type: object
+        branch_id:
+          type: string
+          description: ID of the agent branch to use for this conversation
+        environment:
+          type: string
+          description: Environment to use for resolving environment variables
+        starting_workflow_node_id:
+          type: string
+          description: If set, start the workflow at this node id instead of the default entry
+        dynamic_variables:
+          additionalProperties:
+            anyOf:
+            - type: string
+            - type: number
+            - type: integer
+            - type: boolean
+            - items:
+                anyOf:
+                - type: string
+                - type: integer
+                - type: number
+                - type: boolean
+                - items:
+                    $ref: '#/components/schemas/DynamicVariableNestedValueType'
+                  type: array
+                - type: 'null'
+              type: array
+            - type: 'null'
+          type: object
+        type:
+          x-fern-type: literal<"conversation_initiation_client_data">
+      type: object
