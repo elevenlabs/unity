@@ -21,7 +21,7 @@ var library = (function() {
 
 //#endregion
 
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/BaseConnection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/BaseConnection.js
 	var BaseConnection = class {
 		queue = [];
 		disconnectionDetails = null;
@@ -79,13 +79,13 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/assert.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/assert.js
 	function isJsonObject(value) {
 		return value != null && typeof value === "object" && !Array.isArray(value);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/errors.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/errors.js
 	async function extractApiErrorMessage(response) {
 		try {
 			const body = await response.json();
@@ -110,18 +110,18 @@ var library = (function() {
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/version.js
-	const PACKAGE_VERSION = "1.10.0";
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/version.js
+	const PACKAGE_VERSION = "1.11.0";
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/sourceInfo.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/sourceInfo.js
 	let sourceInfo = Object.freeze({
 		name: "js_sdk",
 		version: PACKAGE_VERSION
 	});
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/events.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/events.js
 	function isValidSocketEvent(event) {
 		return !!event.type;
 	}
@@ -22044,7 +22044,7 @@ var library = (function() {
 	const ONE_MINUTE_IN_MILLISECONDS = 60 * ONE_SECOND_IN_MILLISECONDS;
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/overrides.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/overrides.js
 	const CONVERSATION_INITIATION_CLIENT_DATA_TYPE = "conversation_initiation_client_data";
 	function constructOverrides(config) {
 		const overridesEvent = { type: CONVERSATION_INITIATION_CLIENT_DATA_TYPE };
@@ -22078,7 +22078,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/audio.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/audio.js
 	function arrayBufferToBase64(b) {
 		const buffer = new Uint8Array(b);
 		return btoa(String.fromCharCode(...buffer));
@@ -22092,7 +22092,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/volumeProvider.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/volumeProvider.js
 	const NO_VOLUME = {
 		getVolume: () => 0,
 		getByteFrequencyData: () => {}
@@ -22121,7 +22121,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/WebRTCAudioAdapter.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/WebRTCAudioAdapter.js
 	let audioAdapterFactory;
 	/**
 	* Register a factory that creates a {@link WebRTCAudioAdapter} for each
@@ -22137,7 +22137,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebRTCConnection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebRTCConnection.js
 	const DEFAULT_LIVEKIT_WS_URL = "wss://livekit.rtc.elevenlabs.io";
 	const HTTPS_API_ORIGIN = "https://api.elevenlabs.io";
 	const AUDIO_VOLUME_THRESHOLD = .01;
@@ -22476,7 +22476,7 @@ var library = (function() {
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/VoiceSessionSetup.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/VoiceSessionSetup.js
 /**
 	* The active session setup strategy.
 	* Defaults to undefined — set by platform-specific entrypoints on import.
@@ -22506,7 +22506,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/createWorkletModuleLoader.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/createWorkletModuleLoader.js
 	const URLCache = /* @__PURE__ */ new Map();
 	function createWorkletModuleLoader(name, sourceCode) {
 		return async (worklet, path) => {
@@ -22539,7 +22539,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioConcatProcessor.generated.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioConcatProcessor.generated.js
 	const loadAudioConcatProcessor = createWorkletModuleLoader("audioConcatProcessor", `/*
  * ulaw decoding logic taken from the wavefile library
  * https://github.com/rochars/wavefile/blob/master/lib/codecs/mulaw.js
@@ -22647,7 +22647,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 `);
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/addLibsamplerateModule.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/addLibsamplerateModule.js
 	const LIBSAMPLERATE_JS = "https://cdn.jsdelivr.net/npm/@alexanderolsen/libsamplerate-js@2.1.2/dist/libsamplerate.worklet.js";
 	async function addLibsamplerateModule(context, customPath) {
 		const libsamplerateUrl = customPath || LIBSAMPLERATE_JS;
@@ -22655,7 +22655,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/calculateVolume.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/calculateVolume.js
 /**
 	* Calculate a scalar volume level (0–1) from byte frequency data.
 	*
@@ -22670,7 +22670,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/volumeProvider.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/volumeProvider.js
 	function createAnalyserVolumeProvider(analyser, sampleRate) {
 		const binCount = analyser.frequencyBinCount;
 		let rawData;
@@ -22692,7 +22692,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/compatibility.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/compatibility.js
 	function isIosDevice() {
 		return [
 			"iPad Simulator",
@@ -22708,7 +22708,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/output.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/output.js
 	function maybePrimeIosPlayback({ sampleRate, format, worklet, audioElement }) {
 		if (!isIosDevice()) return;
 		const primeFrameCount = Math.floor(sampleRate * 100 / 1e3);
@@ -22848,7 +22848,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/rawAudioProcessor.generated.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/rawAudioProcessor.generated.js
 	const loadRawAudioProcessor = createWorkletModuleLoader("rawAudioProcessor", `/*
  * ulaw encoding logic taken from the wavefile library
  * https://github.com/rochars/wavefile/blob/master/lib/codecs/mulaw.js
@@ -22980,7 +22980,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 `);
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/input.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/input.js
 	const defaultConstraints = {
 		echoCancellation: true,
 		noiseSuppression: true,
@@ -23137,7 +23137,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebSocketConnection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebSocketConnection.js
 	const MAIN_PROTOCOL = "convai";
 	const WSS_API_ORIGIN = "wss://api.elevenlabs.io";
 	const WSS_API_PATHNAME = "/v1/convai/conversation?agent_id=";
@@ -23279,7 +23279,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachInputToConnection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachInputToConnection.js
 	function attachInputToConnection(input, connection) {
 		const listener = (event) => {
 			const rawAudioPcmData = event.data[0];
@@ -23292,7 +23292,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.js
 	function attachConnectionToOutput(connection, output) {
 		const listener = (event) => {
 			output.playAudio(base64ToArrayBuffer(event.audio_base_64));
@@ -23304,7 +23304,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/ConnectionFactory.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/ConnectionFactory.js
 	function determineConnectionType(config) {
 		const hasSignedUrl = "signedUrl" in config && config.signedUrl;
 		if (hasSignedUrl && config.connectionType === "webrtc") throw new Error("signedUrl only supports websocket connections. Remove connectionType or set it to 'websocket'.");
@@ -23323,7 +23323,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/applyDelay.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/applyDelay.js
 /**
 	* Resolves a platform-specific delay from a DelayConfig.
 	* The `platform` parameter is determined by the caller (e.g. via
@@ -23344,7 +23344,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioUnlock.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioUnlock.js
 	const STASH_TTL_MS = 3e4;
 	const UNLOCK_EVENTS = [
 		"touchstart",
@@ -23409,7 +23409,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/VoiceSessionSetup.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/VoiceSessionSetup.js
 	function detectPlatform() {
 		if (isAndroidDevice()) return "android";
 		if (isIosDevice()) return "ios";
@@ -23524,7 +23524,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	setSetupStrategy(webSessionSetup);
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/webAudioAdapter.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/webAudioAdapter.js
 /**
 	* Web implementation of {@link WebRTCAudioAdapter}.
 	*
@@ -23628,7 +23628,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/microphone.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/microphone.js
 /**
 	* Platform-agnostic microphone streaming interface for Scribe.
 	*
@@ -23642,7 +23642,7 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/scribeAudioProcessor.generated.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/scribeAudioProcessor.generated.js
 	const loadScribeAudioProcessor = createWorkletModuleLoader("scribeAudioProcessor", `/*
  * Scribe Audio Processor for converting microphone audio to PCM16 format
  * Supports resampling for browsers like Firefox that don't support
@@ -23752,7 +23752,7 @@ registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
 `);
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/scribeMicrophone.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/scribeMicrophone.js
 	const TARGET_SAMPLE_RATE = 16e3;
 	/**
 	* Web implementation of Scribe microphone streaming.
@@ -23798,7 +23798,7 @@ registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/connection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/connection.js
 /**
 	* Events emitted by the RealtimeConnection.
 	*/
@@ -23845,7 +23845,7 @@ registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
 	})(RealtimeEvents || (RealtimeEvents = {}));
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/scribe.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/scribe.js
 	var AudioFormat;
 	(function(AudioFormat) {
 		AudioFormat["PCM_8000"] = "pcm_8000";
@@ -23863,7 +23863,7 @@ registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
 	})(CommitStrategy || (CommitStrategy = {}));
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.10.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/index.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/index.js
 	installIosAudioUnlockListener();
 	setWebRTCAudioAdapterFactory(() => new WebAudioAdapter());
 	setScribeMicrophoneSetup(webScribeMicrophoneSetup);
@@ -23886,8 +23886,43 @@ registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
 	const $EL_ConnectionFactories__postset = "Object.keys(_EL_ConnectionFactories).forEach(function(k){_EL_RegisterFactory(k,_EL_ConnectionFactories[k]);});";
 
 //#endregion
+//#region src/connection/audio-glue.ts
+	var audio_glue_exports = /* @__PURE__ */ __exportAll({
+		$EL_AudioGlueFactories: () => $EL_AudioGlueFactories,
+		$EL_AudioGlueFactories__deps: () => $EL_AudioGlueFactories__deps,
+		$EL_AudioGlueFactories__postset: () => $EL_AudioGlueFactories__postset,
+		withoutAudioPayload: () => withoutAudioPayload
+	});
+	function withoutAudioPayload(callback) {
+		return (event) => {
+			if (event.type === "audio") {
+				const { audio_base_64: _stripped, ...restAudioEvent } = event.audio_event;
+				callback({
+					...event,
+					audio_event: restAudioEvent
+				});
+			} else callback(event);
+		};
+	}
+	const $EL_AudioGlueFactories = { attachDefaultAudio: (...args) => {
+		const [connection, input, output, bridgeCallback] = args;
+		const detachIn = attachInputToConnection(input, connection);
+		const detachOut = attachConnectionToOutput(connection, output);
+		connection.onMessage(withoutAudioPayload(bridgeCallback));
+		return () => {
+			detachIn();
+			detachOut();
+		};
+	} };
+	const $EL_AudioGlueFactories__deps = ["$EL_RegisterFactory"];
+	const $EL_AudioGlueFactories__postset = "Object.keys(_EL_AudioGlueFactories).forEach(function(k){_EL_RegisterFactory(k,_EL_AudioGlueFactories[k]);});";
+
+//#endregion
 //#region src/connection/index.ts
-	const library = { ...factories_exports };
+	const library = {
+		...factories_exports,
+		...audio_glue_exports
+	};
 
 //#endregion
 return library;

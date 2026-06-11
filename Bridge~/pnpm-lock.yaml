@@ -8,8 +8,8 @@ importers:
   .:
     dependencies:
       "@elevenlabs/client":
-        specifier: ^1.10.0
-        version: 1.10.0(@types/dom-mediacapture-record@1.0.22)
+        specifier: ^1.11.0
+        version: 1.11.0(@types/dom-mediacapture-record@1.0.22)
     devDependencies:
       "@eslint/js":
         specifier: ^9.0.0
@@ -46,10 +46,10 @@ packages:
         integrity: sha512-wJ8ReQbHxsAfXhrf9ixl0aYbZorRuOWpBNzm8pL8ftmSxQx/wnJD5Eg861NwJU/czy2VXFIebCeZnZrI9rktIQ==,
       }
 
-  "@elevenlabs/client@1.10.0":
+  "@elevenlabs/client@1.11.0":
     resolution:
       {
-        integrity: sha512-a8OIuULCwpodN//aIV5G/eS9r0AFTJmrrt2a1G0rnRkxs0Kh9lha00lGLfURsYec7litrBerEznQvkMuKw3fGA==,
+        integrity: sha512-gx4qrGr/Tymq5dIDS1RYOxkul1rj4xcFSZbaMSkAyynoUekD7iDARlWwQf064ObDyrJiegbwYSvJlNzwF9VwZQ==,
       }
 
   "@elevenlabs/types@0.14.0":
@@ -1786,7 +1786,7 @@ packages:
 snapshots:
   "@bufbuild/protobuf@1.10.1": {}
 
-  "@elevenlabs/client@1.10.0(@types/dom-mediacapture-record@1.0.22)":
+  "@elevenlabs/client@1.11.0(@types/dom-mediacapture-record@1.0.22)":
     dependencies:
       "@elevenlabs/types": 0.14.0
       livekit-client: 2.16.1(@types/dom-mediacapture-record@1.0.22)

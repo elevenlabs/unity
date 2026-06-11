@@ -1,8 +1,8 @@
 // Tests for connection factory registrations (task 2.2).
 //
 // Strategy:
-//   1. Mock @elevenlabs/client and the platform-web sub-paths so no real
-//      WebSocket / WebRTC / MediaDevice code runs.
+//   1. Mock @elevenlabs/client and @elevenlabs/client/internal/unity so no
+//      real WebSocket / WebRTC / MediaDevice code runs.
 //   2. Set up the same Emscripten-global stubs used by the primitives e2e test.
 //   3. Manually register the $EL_ConnectionFactories entries with the
 //      primitives-layer $EL_RegisterFactory (bypassing the jslib __postset,
@@ -55,22 +55,19 @@ vi.mock("@elevenlabs/client", () => {
   };
 });
 
-vi.mock("@elevenlabs/client/dist/platform/web/input.js", () => {
+vi.mock("@elevenlabs/client/internal/unity", () => {
   const mockInput = {
     isMuted: vi.fn().mockReturnValue(false),
     close: vi.fn().mockResolvedValue(undefined),
     getVolume: vi.fn().mockReturnValue(0),
   };
-  return { MediaDeviceInput: { create: vi.fn().mockResolvedValue(mockInput) } };
-});
-
-vi.mock("@elevenlabs/client/dist/platform/web/output.js", () => {
   const mockOutput = {
     setVolume: vi.fn(),
     close: vi.fn().mockResolvedValue(undefined),
     getVolume: vi.fn().mockReturnValue(0),
   };
   return {
+    MediaDeviceInput: { create: vi.fn().mockResolvedValue(mockInput) },
     MediaDeviceOutput: { create: vi.fn().mockResolvedValue(mockOutput) },
   };
 });
@@ -84,8 +81,10 @@ import {
   WebRTCConnection,
   createConnection,
 } from "@elevenlabs/client";
-import { MediaDeviceInput } from "@elevenlabs/client/dist/platform/web/input.js";
-import { MediaDeviceOutput } from "@elevenlabs/client/dist/platform/web/output.js";
+import {
+  MediaDeviceInput,
+  MediaDeviceOutput,
+} from "@elevenlabs/client/internal/unity";
 
 // ---------------------------------------------------------------------------
 // Emscripten-global stub helpers (mirrors the e2e.test.ts setup).

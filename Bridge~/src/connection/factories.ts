@@ -11,15 +11,14 @@ import {
   WebRTCConnection,
   createConnection,
   type SessionConfig,
-  type AudioWorkletConfig,
-  type InputConfig,
 } from "@elevenlabs/client";
-import { MediaDeviceInput } from "@elevenlabs/client/dist/platform/web/input.js";
-import { MediaDeviceOutput } from "@elevenlabs/client/dist/platform/web/output.js";
-import type { FormatConfig, OutputConfig } from "./types.js";
-
-type InputCreateConfig = FormatConfig & InputConfig & AudioWorkletConfig;
-type OutputCreateConfig = FormatConfig & OutputConfig & AudioWorkletConfig;
+import {
+  MediaDeviceInput,
+  MediaDeviceOutput,
+  type MediaDeviceInputConfig,
+  type MediaDeviceOutputConfig,
+  type WebRTCConnectionConfig,
+} from "@elevenlabs/client/internal/unity";
 
 // $EL_ConnectionFactories is a jslib library entry (non-function). Emscripten
 // hoists it as _EL_ConnectionFactories in the runtime so the __postset below
@@ -39,14 +38,12 @@ export const $EL_ConnectionFactories: Record<
   createWebSocketConnection: (config) =>
     WebSocketConnection.create(config as SessionConfig),
   createWebRTCConnection: (config) =>
-    WebRTCConnection.create(
-      config as Parameters<typeof WebRTCConnection.create>[0],
-    ),
+    WebRTCConnection.create(config as WebRTCConnectionConfig),
   createConnection: (config) => createConnection(config as SessionConfig),
   createMediaDeviceInput: (config) =>
-    MediaDeviceInput.create(config as InputCreateConfig),
+    MediaDeviceInput.create(config as MediaDeviceInputConfig),
   createMediaDeviceOutput: (config) =>
-    MediaDeviceOutput.create(config as OutputCreateConfig),
+    MediaDeviceOutput.create(config as MediaDeviceOutputConfig),
 };
 
 // Tells Emscripten that _EL_RegisterFactory must be defined before the
