@@ -75,7 +75,8 @@ function substituteFernLiterals(node: unknown, visited: WeakSet<object>): void {
     if (required.size > 0) node.required = [...required];
   }
 
-  for (const value of Object.values(node)) substituteFernLiterals(value, visited);
+  for (const value of Object.values(node))
+    substituteFernLiterals(value, visited);
 }
 
 substituteFernLiterals(spec, new WeakSet());
@@ -157,9 +158,7 @@ function collectPayloads(direction: Direction): Payload[] {
   // After parser resolution, `oneOf` holds the inlined message objects (each
   // with `.payload` already inlined). Single-message channels skip `oneOf`.
   const messages: RawMessage[] =
-    "oneOf" in msg && msg.oneOf
-      ? msg.oneOf
-      : [msg as RawMessage];
+    "oneOf" in msg && msg.oneOf ? msg.oneOf : [msg as RawMessage];
 
   const results: Payload[] = [];
   for (const message of messages) {
@@ -231,63 +230,79 @@ function isCollection(csType: string): boolean {
 // JsonConverter<T> classes, which is more invasive than we want.
 // Override the property renderer to emit [JsonPropertyName] + a standard
 // auto-property, with init-only literal default for `const` properties.
-const protocolPreset: CSharpPreset = {
-  class: {
-    self({ renderer, content }) {
-      renderer.dependencyManager.addDependency(
-        "using System.Text.Json.Serialization;",
-      );
-      return content;
+// The `class.self` hook strips Modelina's default `partial` and, for top-level
+// event types, injects the discriminated-union base class.
+function makeProtocolPreset(
+  baseClass: string,
+  topLevelNames: Set<string>,
+): CSharpPreset {
+  return {
+    class: {
+      self({ renderer, model, content }) {
+        renderer.dependencyManager.addDependency(
+          "using System.Text.Json.Serialization;",
+        );
+        // Default `defaultSelf()` produces `public partial class Name { ... }`.
+        // Drop `partial`, and for top-level event types inject the base class.
+        const suffix = topLevelNames.has(model.name) ? ` : ${baseClass}` : "";
+        return content.replace(
+          new RegExp(`public partial class ${model.name}\\b`),
+          `public class ${model.name}${suffix}`,
+        );
+      },
+      property({ renderer, property }) {
+        const jsonName = property.unconstrainedPropertyName;
+        let propName = toPascalCase(jsonName);
+        // C# CS0542: a property cannot share its enclosing type's name.
+        // `renderer.model` is protected, but it's the ConstrainedObjectModel
+        // for the current class; cast to access `.name` from the preset.
+        const enclosingName = (
+          renderer as unknown as { model: { name: string } }
+        ).model.name;
+        if (propName === enclosingName) propName = `${propName}Data`;
+
+        const csType = property.property.type;
+        const isRequired = property.required;
+        const attr = `[JsonPropertyName("${jsonName}")]`;
+
+        // const literal → init-only string property with the literal default.
+        const constOpt = property.property.options.const;
+        if (constOpt && constOpt.value !== undefined) {
+          // Modelina stores the const value as a JSON-encoded string token,
+          // e.g. '"foo"'. Unwrap if needed.
+          const raw = constOpt.value;
+          const literal =
+            typeof raw === "string" && raw.startsWith('"') && raw.endsWith('"')
+              ? JSON.parse(raw)
+              : String(raw);
+          return `${attr}\npublic string ${propName} { get; init; } = "${literal}";`;
+        }
+
+        // Nullability: optional non-primitive → append `?`; required reference
+        // → suppress CS8618 via `= null!`.
+        const nullableSuffix =
+          !isRequired && !csType.endsWith("?") && !isPrimitive(csType)
+            ? "?"
+            : "";
+        const renderedType = `${csType}${nullableSuffix}`;
+
+        let initializer = "";
+        if (isRequired) {
+          if (csType === "string") initializer = ' = ""';
+          else if (csType === "int" || csType === "long") initializer = " = 0";
+          else if (csType === "float" || csType === "double")
+            initializer = " = 0";
+          else if (csType === "bool") initializer = " = false";
+          else if (isCollection(csType)) initializer = " = new()";
+          else if (!isPrimitive(csType)) initializer = " = null!";
+        }
+
+        const semicolon = initializer ? ";" : "";
+        return `${attr}\npublic ${renderedType} ${propName} { get; set; }${initializer}${semicolon}`;
+      },
     },
-    property({ renderer, property }) {
-      const jsonName = property.unconstrainedPropertyName;
-      let propName = toPascalCase(jsonName);
-      // C# CS0542: a property cannot share its enclosing type's name.
-      // `renderer.model` is protected, but it's the ConstrainedObjectModel for
-      // the current class; cast to access `.name` from the preset.
-      const enclosingName = (renderer as unknown as { model: { name: string } })
-        .model.name;
-      if (propName === enclosingName) propName = `${propName}Data`;
-
-      const csType = property.property.type;
-      const isRequired = property.required;
-      const attr = `[JsonPropertyName("${jsonName}")]`;
-
-      // const literal → init-only string property with the literal default.
-      const constOpt = property.property.options.const;
-      if (constOpt && constOpt.value !== undefined) {
-        // Modelina stores the const value as a JSON-encoded string token,
-        // e.g. '"foo"'. Unwrap if needed.
-        const raw = constOpt.value;
-        const literal =
-          typeof raw === "string" && raw.startsWith('"') && raw.endsWith('"')
-            ? JSON.parse(raw)
-            : String(raw);
-        return `${attr}\npublic string ${propName} { get; init; } = "${literal}";`;
-      }
-
-      // Nullability: optional non-primitive → append `?`; required reference
-      // → suppress CS8618 via `= null!`.
-      const nullableSuffix =
-        !isRequired && !csType.endsWith("?") && !isPrimitive(csType) ? "?" : "";
-      const renderedType = `${csType}${nullableSuffix}`;
-
-      let initializer = "";
-      if (isRequired) {
-        if (csType === "string") initializer = ' = ""';
-        else if (csType === "int" || csType === "long") initializer = " = 0";
-        else if (csType === "float" || csType === "double")
-          initializer = " = 0";
-        else if (csType === "bool") initializer = " = false";
-        else if (isCollection(csType)) initializer = " = new()";
-        else if (!isPrimitive(csType)) initializer = " = null!";
-      }
-
-      const semicolon = initializer ? ";" : "";
-      return `${attr}\npublic ${renderedType} ${propName} { get; set; }${initializer}${semicolon}`;
-    },
-  },
-};
+  };
+}
 
 // ---- Generate ----
 
@@ -296,21 +311,22 @@ interface GenerateResult {
   models: OutputModel[];
 }
 
-const generator = new CSharpGenerator({
-  presets: [protocolPreset],
-  collectionType: "List",
-  autoImplementedProperties: true,
-  handleNullable: true,
-  processorOptions: {
-    interpreter: {
-      ignoreAdditionalProperties: true,
-    },
-  },
-});
-
 async function generateForPayloads(
   payloads: Payload[],
+  baseClass: string,
 ): Promise<GenerateResult[]> {
+  const topLevelNames = new Set(payloads.map((p) => p.name));
+  const generator = new CSharpGenerator({
+    presets: [makeProtocolPreset(baseClass, topLevelNames)],
+    collectionType: "List",
+    autoImplementedProperties: true,
+    handleNullable: true,
+    processorOptions: {
+      interpreter: {
+        ignoreAdditionalProperties: true,
+      },
+    },
+  });
   const results: GenerateResult[] = [];
   for (const { name, schema } of payloads) {
     const models = await generator.generate(schema);
@@ -320,23 +336,25 @@ async function generateForPayloads(
   return results;
 }
 
-const incomingResults = await generateForPayloads(incoming);
-const outgoingResults = await generateForPayloads(outgoing);
+const incomingResults = await generateForPayloads(
+  incoming,
+  "IncomingSocketEvent",
+);
+const outgoingResults = await generateForPayloads(
+  outgoing,
+  "OutgoingSocketEvent",
+);
 
 // ---- Aggregate into files ----
 
-function dedupeModels(
-  results: GenerateResult[],
-): { allModels: OutputModel[]; topLevel: Set<string> } {
+function dedupeModels(results: GenerateResult[]): OutputModel[] {
   const allModels = new Map<string, OutputModel>();
-  const topLevel = new Set<string>();
-  for (const { rootName, models } of results) {
-    topLevel.add(rootName);
+  for (const { models } of results) {
     for (const m of models) {
       if (!allModels.has(m.modelName)) allModels.set(m.modelName, m);
     }
   }
-  return { allModels: [...allModels.values()], topLevel };
+  return [...allModels.values()];
 }
 
 function indent(s: string, n = 1): string {
@@ -347,7 +365,7 @@ function indent(s: string, n = 1): string {
 }
 
 function emitFile(baseClass: string, results: GenerateResult[]): string {
-  const { allModels, topLevel } = dedupeModels(results);
+  const allModels = dedupeModels(results);
 
   const usings = new Set<string>(["using System.Collections.Generic;"]);
   for (const m of allModels) {
@@ -356,23 +374,7 @@ function emitFile(baseClass: string, results: GenerateResult[]): string {
     }
   }
 
-  const classBodies = allModels.map((m) => {
-    let body = m.result;
-    if (topLevel.has(m.modelName)) {
-      // Modelina emits `public partial class Name {` — inject the base class.
-      body = body.replace(
-        new RegExp(`public (partial )?class ${m.modelName}\\b(?! :)`),
-        `public class ${m.modelName} : ${baseClass}`,
-      );
-    } else {
-      // Strip `partial` from nested types too, for consistency.
-      body = body.replace(
-        new RegExp(`public partial class ${m.modelName}\\b`),
-        `public class ${m.modelName}`,
-      );
-    }
-    return indent(body);
-  });
+  const classBodies = allModels.map((m) => indent(m.result));
 
   return [
     "// <auto-generated />",
