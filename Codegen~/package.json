@@ -1,0 +1,24 @@
+{
+  "name": "elevenlabs-codegen-dev",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "generate": "node src/generate-protocol-dtos.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^25.9.2",
+    "eslint": "^9.0.0",
+    "globals": "^17.6.0",
+    "prettier": "^3.0.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@asyncapi/parser": "^3.6.0"
+  }
+}
