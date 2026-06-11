@@ -83,18 +83,18 @@ there or from the `browser` entrypoint that triggers their registration).
 
 Identified gaps:
 
-1. **Default-mode audio event stripping.** We need the C# Conversation to see audio events (for `event_id` / interruption / mode tracking) without the base64 payload duplicating into the JS↔C# string channel. **Status: solvable inside the `attachDefaultAudio` JS helper without an SDK change** — the helper monkey-patches `connection.onMessage` so that the `BridgeCallback` C# subscribes after the helper runs receives audio events with `audio_base_64` removed. Documented as an ordering constraint: subscribe to `onMessage` *after* calling `attachDefaultAudio`.
-2. **WebRTC PCM extraction for Unity-routed audio (v0.3).** Already designed: `setWebRTCAudioAdapterFactory` is the slot. **Status: no SDK change needed for v0.1**; a Unity-specific adapter lands with v0.3.
-3. **Late event registration.** Not a gap — the C# `Conversation` owns the message router and exposes standard `.NET` events with `+=` / `-=` semantics from day one. The JS-side connection's single `onMessage` callback is wired once at session start via a `BridgeCallback`, and the C# router fans out into the user's subscribed events. (This was a Plan A constraint, where the C# façade had to pass callbacks into `@elevenlabs/client`'s `Conversation` constructor; Plan B's architecture removes the constraint entirely.)
+1. **Concrete `MediaDeviceInput` / `MediaDeviceOutput` not in `package.json#exports`.** Task 2.2 needs the concrete platform classes (`MediaDeviceInput`, `MediaDeviceOutput`) plus the `attachInputToConnection` / `attachConnectionToOutput` audio-wiring helpers. None of these were in the SDK's `exports` map. **Resolved by [elevenlabs/packages#835](https://github.com/elevenlabs/packages/pull/835), shipped in `@elevenlabs/client@1.11.0`** as a new `./internal/unity` sub-path export. The PR also promotes the anonymous config-intersection types to named exports (`MediaDeviceInputConfig`, `MediaDeviceOutputConfig`, `WebRTCConnectionConfig`). Brief at [`client-sdk-exports-for-plan-b.md`](./client-sdk-exports-for-plan-b.md).
+2. **Default-mode audio event stripping.** The C# Conversation needs `audio` events (for `event_id` / interruption / mode tracking) without the base64 payload crossing into the JS↔C# string channel on every chunk. **Status: solved Unity-side** — `audio-glue.ts` ships a pure `withoutAudioPayload` callback wrapper that's composed at subscribe time (`connection.onMessage(withoutAudioPayload(bridgeCallback))`) inside the `attachDefaultAudio` factory. No connection mutation, no ordering constraint, no SDK addition required beyond the primitives shipped by 1.11.0.
+3. **WebRTC PCM extraction for Unity-routed audio (v0.3).** Already designed: `setWebRTCAudioAdapterFactory` is the slot (also re-exported from `@elevenlabs/client/internal/unity` since 1.11.0). **Status: no SDK change needed for v0.1**; a Unity-specific adapter lands with v0.3.
+4. **Late event registration.** Not a gap — the C# `Conversation` owns the message router and exposes standard `.NET` events with `+=` / `-=` semantics from day one. The JS-side connection's single `onMessage` callback is wired once at session start via a `BridgeCallback`, and the C# router fans out into the user's subscribed events. (This was a Plan A constraint, where the C# façade had to pass callbacks into `@elevenlabs/client`'s `Conversation` constructor; Plan B's architecture removes the constraint entirely.)
 
 No upstream PRs block Plan B's v0.1.
 
 ### Local SDK iteration workflow
 
-Some Plan B tasks (notably 2.3's `attachDefaultAudio` monkey-patch, and any
-deeper integration discovered in Phases 4-5) will likely want small tweaks
-to `@elevenlabs/client` before the change is ready to upstream. To avoid
-maintaining a hard fork:
+Future Plan B tasks (e.g. any deeper integration discovered in Phases 4-5)
+may want small tweaks to `@elevenlabs/client` before the change is ready
+to upstream. To avoid maintaining a hard fork:
 
 1. **While iterating**, use a pnpm `overrides` entry in
    `Bridge~/package.json` pointing at a local checkout (`link:../../packages/packages/client`
@@ -108,19 +108,18 @@ maintaining a hard fork:
    `@elevenlabs/client` version ships, bump the dep version and delete
    the patch.
 
-Where a tweak adds *new exports* rather than modifying existing ones
-(e.g. exposing a primitive `MediaDeviceInput` / `MediaDeviceOutput` that
-the SDK currently keeps internal, or surfacing an `attachDefaultAudio`
-helper), the preferred upstream shape is a dedicated entrypoint — either
-an `internal-unity` export condition (so the SDK can keep the symbol off
-the public surface) or an explicit sub-path export like
-`@elevenlabs/client/unity`. Both forms let the Rolldown bundler resolve
-the right runtime file *and* let tsc resolve the matching `.d.ts`, which
-the `browser` condition currently doesn't (Rolldown picks `dist/platform/web/index.js`
-at bundle time while tsc walks `dist/index.d.ts` for types — patches
-that touch only the runtime path won't get type-checked). A first-class
-entrypoint is also a smaller, less-controversial upstream PR than
-loosening the existing `index.ts` exports.
+Where a tweak adds *new exports* rather than modifying existing ones,
+the preferred upstream shape is to extend the existing
+`@elevenlabs/client/internal/unity` sub-path entrypoint (added in 1.11.0
+via [#835](https://github.com/elevenlabs/packages/pull/835); see
+[`client-sdk-exports-for-plan-b.md`](./client-sdk-exports-for-plan-b.md)).
+That entrypoint is shape-stable for Unity SDK use only, lives under the
+`/internal/...` namespace by convention so it carries no semver
+guarantees, and uses a dedicated source file so tree-shaking has no
+chance of pulling unrelated SDK code into the WebGL bundle. Add the
+symbol there with `export {}` for runtime values or `export type {}`
+for type-only re-exports; bump the dep version once the SDK release
+ships.
 
 ## Disposition of in-flight plans
 
@@ -145,10 +144,12 @@ agent loops. Phases 4–7 unblock once the Unity license is active.
 
 The bulk of the frontloaded work. Output: a second `.jslib` artifact under
 `Plugins/WebGL/`, bundled from new TypeScript sources, that registers
-factories with the primitive layer at module init and exposes the
-`attachDefaultAudio` composition helper. **No new `EL_*` DllImport entry
-points** — everything goes through `$EL_RegisterFactory` and is consumed via
-the generic `JsObject` primitive from C#.
+factories with the primitive layer at module init and exposes a Unity-local
+`attachDefaultAudio` composition factory (which wraps the SDK's
+`attach*` primitives + a pure audio-payload-stripping callback wrapper).
+**No new `EL_*` DllImport entry points** — everything goes through
+`$EL_RegisterFactory` and is consumed via the generic `JsObject` primitive
+from C#.
 
 - [x] **2.1 — Dependency + scaffold.** `pnpm --dir Bridge~ add @elevenlabs/client`. Create `Bridge~/src/connection/` with `factories.ts`, `audio-glue.ts`, `types.ts`, `index.ts`. `types.ts` mirrors the SDK's exported `SessionConfig`, `FormatConfig`, `InputConfig`, `OutputConfig`, `DisconnectionDetails` shapes via composition (`Pick`/`extends`) so SDK bumps ripple through tsc. Wire `pnpm run build:connection` / `verify:connection` paralleling the existing primitives scripts; commit the (initially near-empty) `Plugins/WebGL/ElevenLabsConnection.jslib`. Document the new commands in `.claude/CLAUDE.md`.
 - [x] **2.2 — Factory registrations.** `factories.ts` calls `$EL_RegisterFactory(name, fn)` for each SDK class at module init:
@@ -161,9 +162,9 @@ the generic `JsObject` primitive from C#.
   Return shape isn't declared here — each C# call site picks it via `<T>` (e.g. `JsBridge.InvokeFactoryAsync<JsObject>("createWebSocketConnection", config)`). The dispatcher's per-call `returnShape` int does the encoding. Same for object methods: `BridgedWebSocketConnection.SendAsync(...)` calls `connection.CallAsync("sendMessage", ...)` (non-generic, shape void); a method that returns a function-handle uses `CallAsync<JsFunction>(...)`. No JS-side method-shape table.
 
   Vitest: mock `@elevenlabs/client`, exercise each factory through `$EL_InvokeFactory` (or its TS-side equivalent in tests), assert the returned `JsObject` handle is valid and its methods dispatch through correctly.
-- [ ] **2.3 — `attachDefaultAudio` helper factory.** `audio-glue.ts` registers `attachDefaultAudio(connection, input, output)` as a factory. The function returns a JS detach closure; C# consumes it via `JsBridge.InvokeFactoryAsync<JsFunction>("attachDefaultAudio", ...)` so the dispatcher allocates a `JsFunction` handle for the returned closure. Implementation calls `attachInputToConnection(input, connection)` and `attachConnectionToOutput(connection, output)` AND monkey-patches `connection.onMessage` so any later subscriber receives `audio` events with `audio_base_64` stripped. Documented ordering constraint: subscribe to `connection.onMessage` *after* calling this helper. The returned detach function reverses both attachments and the monkey-patch. Vitest: an input PCM event mock flows through to `connection.sendMessage`; an `audio` event from the connection mock reaches `output.playAudio` with original bytes; a subscriber added after `attachDefaultAudio` receives the event with `audio_base_64` removed.
-- [ ] **2.4 — Bundling + lifecycle init.** `index.ts` aggregates the registrations into the library object. Bundled via the shared `bundle-jslib.ts` toolchain to `Plugins/WebGL/ElevenLabsConnection.jslib`. The factory registrations need to run *after* the primitives layer is initialised and *before* any C# call — pick the right Emscripten hook (`__postset` per-factory or a single `__init` postset that walks them all). Vitest verifies the bundled jslib invokes the registrations on load.
-- [ ] **2.5 — End-to-end Vitest.** Mock `@elevenlabs/client`, mock the primitives' SendMessage. Drive a full happy-path session from a test: invoke `createWebSocketConnection` → invoke `createMediaDeviceInput` + `createMediaDeviceOutput` → invoke `attachDefaultAudio` → subscribe via `BridgeCallback` mocks → fire mock incoming messages → assert the callbacks receive correctly-stripped events → invoke `JsFunction.Call` for the detach handle → assert teardown.
+- [x] **2.3 — `attachDefaultAudio` helper factory.** `audio-glue.ts` registers `attachDefaultAudio(connection, input, output, bridgeCallback)` as a factory. The function returns a JS detach closure; C# consumes it via `JsBridge.InvokeFactoryAsync<JsFunction>("attachDefaultAudio", ...)` so the dispatcher allocates a `JsFunction` handle for the returned closure. Implementation calls `attachInputToConnection(input, connection)`, `attachConnectionToOutput(connection, output)`, and `connection.onMessage(withoutAudioPayload(bridgeCallback))` — where `withoutAudioPayload` is a Unity-local pure callback wrapper that strips `audio_event.audio_base_64` from `audio` events (composed at subscribe time, no monkey-patching of the connection). The returned detach function reverses both `attach*` calls (the `onMessage` subscription tears down when the C# side disposes the connection, which calls `connection.close()`). Scope: WebSocket connections only — WebRTC has input/output pre-wired by livekit-client and skips this factory. Vitest: 8 tests across `audio-glue.test.ts` — pure-function correctness of `withoutAudioPayload` (strip, pass-through, no mutation, independent wrappers) plus dispatcher-driven factory cases (registration, composition, audio-stripping in the subscribed callback, detach handle teardown).
+- [ ] **2.4 — Bundling + lifecycle init.** `index.ts` aggregates the registrations into the library object — both `factories` and `audio-glue` modules are spread in, and the bundle ships their `__postset` declarations. Bundled via the shared `bundle-jslib.ts` toolchain to `Plugins/WebGL/ElevenLabsConnection.jslib`. **Remaining work:** verify the factory registrations actually run *after* the primitives layer is initialised and *before* any C# call at Unity runtime. Tests register manually via `$EL_RegisterFactory`, bypassing the `__postset` timing question — that needs a Unity smoke check (Phase 6) to confirm, or an explicit lifecycle hook (`Module.onRuntimeInitialized`) if `__postset` ordering across two jslibs proves unreliable.
+- [ ] **2.5 — End-to-end Vitest.** Mock `@elevenlabs/client`, mock the primitives' SendMessage. Drive a full happy-path session from a single test: invoke `createWebSocketConnection` → invoke `createMediaDeviceInput` + `createMediaDeviceOutput` → invoke `attachDefaultAudio` → fire mock incoming messages → assert the bridge callback receives correctly-stripped events → invoke `JsFunction.Call` for the detach handle → assert teardown. Partial coverage already exists: `factories.test.ts` exercises each factory in isolation, `audio-glue.test.ts` exercises the `attachDefaultAudio` factory + the callback wrapper. Task 2.5 unifies them into a single end-to-end flow.
 
 ### Phase 3 — Protocol DTO codegen (Unity-free, optional pre-Unity)
 
@@ -243,7 +244,7 @@ with `&&`.
 
 ## Open questions
 
-1. **Factory registration timing in Emscripten.** The Phase 2 factories need to be registered with the primitives' `$EL_Factories` table after the primitives module loads and before any C# call. Emscripten offers `__postset` per-merge and `Module.onRuntimeInitialized` — pick the right hook so the connection jslib's registrations land in a deterministic order behind the primitives'. Resolve in Phase 2.4.
+1. **Factory registration timing in Emscripten.** The Phase 2 factories (both `factories.ts` and `audio-glue.ts`) need to be registered with the primitives' `$EL_Factories` table after the primitives module loads and before any C# call. Current shape ships `__postset` per-library entry; tests register manually so the timing question is untouched there. Emscripten also offers `Module.onRuntimeInitialized` if `__postset` ordering across two jslibs (`ElevenLabsBridge.jslib` for primitives, `ElevenLabsConnection.jslib` for factories) proves unreliable at runtime. Resolves in Phase 2.4 once Unity smoke check (Phase 6) confirms or contradicts the `__postset` approach.
 2. **Should `IConnection.Send` take a typed event union, or a serialised string?** Typed gives compile-time safety, but means the C# Conversation builds the event then `BridgedWebSocketConnection.Send` serialises and the JS dispatcher rehydrates. Untyped means the Conversation serialises once and the JS side hands the raw string straight to `connection.sendMessage`. Lean typed for native parity, but worth a second look in Phase 4.
 3. **What happens if the user calls a method during a transient disconnect?** JS SDK behaviour varies by method. Plan B's C# Conversation should make this consistent — likely "throw `InvalidOperationException`" rather than silently drop. Decide in Phase 4.
 4. **Repository structure: in `elevenlabs/packages` or standalone?** Still open from the RFC. Plan B's WebGL bundle depends on `@elevenlabs/client`, which slightly tilts toward in-monorepo. Doesn't block any phase.
@@ -254,21 +255,4 @@ The tasks below are appended during implementation as new work is discovered.
 They are not yet approved for execution — promote them into a numbered phase
 task above once agreed.
 
-- [ ] **Remove deep-import workaround once `@elevenlabs/client` exports `MediaDeviceInput` / `MediaDeviceOutput` upstream.** Task 2.2 needs the concrete `MediaDeviceInput` / `MediaDeviceOutput` classes from `@elevenlabs/client/dist/platform/web/{input,output}.js`, but those sub-paths are not in the SDK's package `exports` map. To get tsc, Vitest, and Rolldown to resolve them today, three workarounds were added:
-  1. `Bridge~/src/connection/platform-web.d.ts` — ambient `declare module` stubs for the two deep sub-paths so tsc accepts the imports.
-  2. `Bridge~/vitest.config.ts` — `resolve.alias` entries pointing each deep path at the corresponding file in `node_modules` so Vite (Vitest's resolver) bypasses the exports check at test time.
-  3. `Bridge~/build/bundle-jslib.ts` — equivalent `resolve.alias` entries for Rolldown so the production jslib bundle resolves them too.
-
-  The cleanest upstream fix (per [Local SDK iteration workflow](#local-sdk-iteration-workflow)) is to expose the two classes through a first-class entrypoint — either:
-  - **a `@elevenlabs/client/unity` sub-path export** that re-exports `MediaDeviceInput`, `MediaDeviceOutput`, and (later) the `attachDefaultAudio` helper, or
-  - **broadening the existing `./internal` export** to a directory pattern (e.g. `"./internal/*": "./dist/internal/*"`) and moving the symbols into that namespace, or
-  - **adding `MediaDeviceInput` / `MediaDeviceOutput` to the existing `./internal` re-exports in `dist/internal.{js,d.ts}`** (smallest change — `./internal` is already declared as a single file, no new export entry needed in `package.json`).
-
-  Once a `@elevenlabs/client` release ships any of those:
-  1. Replace the deep imports in `factories.ts` with the new public entrypoint.
-  2. Delete `Bridge~/src/connection/platform-web.d.ts`.
-  3. Delete the `resolve.alias` block in `Bridge~/vitest.config.ts`.
-  4. Delete the `deepImportAliases` block in `Bridge~/build/bundle-jslib.ts`.
-  5. Rebuild and re-run `verify:connection` to confirm parity.
-
-  Tracking: open an upstream PR against `elevenlabs/packages` for the chosen shape; once merged and released, bump the dep version and execute the cleanup above in a single follow-up commit.
+- [x] **Remove deep-import workaround once `@elevenlabs/client` exports `MediaDeviceInput` / `MediaDeviceOutput` upstream.** Resolved by [elevenlabs/packages#835](https://github.com/elevenlabs/packages/pull/835) shipping in `@elevenlabs/client@1.11.0` as a new `./internal/unity` sub-path export, then consumed Unity-side in the cleanup commit that also implements Task 2.3. The spec that drove the SDK PR is in [`client-sdk-exports-for-plan-b.md`](./client-sdk-exports-for-plan-b.md). All three workarounds (ambient `.d.ts`, Vite alias, Rolldown alias) deleted; `factories.ts` now imports from `@elevenlabs/client/internal/unity` along with the three named config-type aliases (`MediaDeviceInputConfig`, `MediaDeviceOutputConfig`, `WebRTCConnectionConfig`).
