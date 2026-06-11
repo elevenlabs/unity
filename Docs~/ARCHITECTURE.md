@@ -27,7 +27,7 @@ game runs.
 │    IConnection            — mirrors @elevenlabs/client BaseConnection    │
 │    IInputController       — mirrors @elevenlabs/client InputController   │
 │    IOutputController      — mirrors @elevenlabs/client OutputController  │
-│    Protocol DTOs          — codegen from OpenAPI (incoming + outgoing)   │
+│    Protocol DTOs          — codegen from AsyncAPI (incoming + outgoing)  │
 └──────────────────────────────────────────────────────────────────────────┘
             │                                              │
             │  #if !UNITY_WEBGL                            │  #if UNITY_WEBGL
@@ -70,7 +70,7 @@ are behind the three abstractions below.
 The public surface mirrors `@elevenlabs/client`'s `Conversation` conceptually
 but is idiomatic C# (standard `event` keyword with `+=` / `-=`; `Awaitable<T>`
 for async methods; `IDisposable` for cleanup). Wire-level message shapes come
-from the same OpenAPI spec the JS SDK consumes, so the two clients stay in
+from the same AsyncAPI spec the JS SDK consumes, so the two clients stay in
 lock-step at the protocol layer.
 
 Event subscribers register and deregister freely at any time. The C# `Conversation`
@@ -166,7 +166,7 @@ Latency cost of Unity-routed mode: ~1 frame on the audio path.
 ## Protocol DTOs
 
 Both `IConnection` implementations speak the same `IncomingSocketEvent` /
-`OutgoingSocketEvent` union. We codegen these C# DTOs from the OpenAPI spec
+`OutgoingSocketEvent` union. We codegen these C# DTOs from the AsyncAPI spec
 (same source the JS SDK consumes), commit the generated output, and gate
 freshness in CI. The same generated DTOs are used by `BridgedWebSocketConnection`
 when (de)serializing payloads that cross the jslib boundary.

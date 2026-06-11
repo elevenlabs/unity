@@ -44,7 +44,7 @@ SDK exposes 4 narrow classes vs. 1 sprawling `Conversation`.
 ## What stays the same
 
 - **The Bridge~/build/bundle-jslib.ts toolchain.** Reused for the new `ElevenLabsConnection.jslib` artifact.
-- **The RFC's codegen approach.** Protocol DTOs are still generated from OpenAPI. They're now used by *both* implementations of `IConnection`, not just native.
+- **The RFC's codegen approach.** Protocol DTOs are still generated from the upstream spec (AsyncAPI — the RFC mislabeled it OpenAPI; vendored locally per Phase 3.1). They're now used by *both* implementations of `IConnection`, not just native.
 - **The RFC's distribution plan, roadmap milestones, and risk inventory.** Plan B is an internal architectural pivot, not a product-level change.
 
 ## The bridging primitives this plan uses
@@ -172,9 +172,10 @@ The C# Conversation in Phase 4 needs typed incoming/outgoing message DTOs.
 We can defer this and use untyped JSON if codegen pushes the schedule, but
 landing it now means Phase 4 starts with the right types in hand.
 
-- [ ] **3.1 — Generator scaffold.** TypeScript-based generator under `Bridge~/build/` reading the OpenAPI spec and emitting C# classes for `IncomingSocketEvent` / `OutgoingSocketEvent` unions and their nested payload types.
-- [ ] **3.2 — Output target.** Generated files committed under `Runtime/Core/Protocol/`. CSharpier-formatted; freshness gate via `verify:protocol-dtos` script.
-- [ ] **3.3 — Allocation/AOT discipline.** Generator output uses `System.Text.Json` source-generated serialization (IL2CPP-friendly) or Newtonsoft.Json — decide once we can compile in Unity. Until then, the generator emits a debug-only `Console.WriteLine` round-trip test we can run with `dotnet run` to confirm parse/emit symmetry.
+- [ ] **3.1 — Vendor the AsyncAPI spec.** Copy `docs/convai-asyncapi.yml` from the private `elevenlabs/xi` repo into `Codegen~/schemas/convai-asyncapi.yml`. Record the source commit hash in a sibling `README.md` so future re-syncs are reproducible. Vendoring decouples Unity SDK releases from `@elevenlabs/client` release cadence — protocol changes can land here without waiting for a JS SDK publish. The cross-repo sync workflow that keeps this file fresh is listed under "Pending Human Approval".
+- [ ] **3.2 — Generator scaffold.** New `Codegen~/` pnpm project (parallel to `Bridge~/` — own `package.json`, own deps, own `pnpm install`). TypeScript-based generator under `Codegen~/src/` reading the vendored AsyncAPI spec at `Codegen~/schemas/convai-asyncapi.yml` and emitting C# classes for `IncomingSocketEvent` / `OutgoingSocketEvent` unions and their nested payload types. Scripts mirror the `Bridge~` pattern: `pnpm --dir Codegen~ run generate` / `pnpm --dir Codegen~ run verify:protocol-dtos`. Document the new commands in `.claude/CLAUDE.md`.
+- [ ] **3.3 — Output target.** Generated files committed under `Runtime/Core/Protocol/`. CSharpier-formatted; freshness gate via `verify:protocol-dtos` script.
+- [ ] **3.4 — Allocation/AOT discipline.** Generator output uses `System.Text.Json` source-generated serialization (IL2CPP-friendly) or Newtonsoft.Json — decide once we can compile in Unity. Until then, the generator emits a debug-only `Console.WriteLine` round-trip test we can run with `dotnet run` to confirm parse/emit symmetry.
 
 This phase can be deferred to overlap with Phase 4 if Phases 1–2 are slow.
 
@@ -255,4 +256,5 @@ The tasks below are appended during implementation as new work is discovered.
 They are not yet approved for execution — promote them into a numbered phase
 task above once agreed.
 
+- [ ] **Set up a spec-sync workflow in `elevenlabs/xi`.** GitHub Action on the `xi` repo that watches `docs/convai-asyncapi.yml` and opens a PR against this repo updating `Codegen~/schemas/convai-asyncapi.yml` (with the new source commit hash recorded in the sibling `README.md`). Lives outside this repo but the acceptance check is here: a change to the xi spec produces a PR here that, when merged, triggers Phase 3 codegen and updates the committed DTOs. Until this workflow is in place, the vendored spec is updated manually.
 - [x] **Remove deep-import workaround once `@elevenlabs/client` exports `MediaDeviceInput` / `MediaDeviceOutput` upstream.** Resolved by [elevenlabs/packages#835](https://github.com/elevenlabs/packages/pull/835) shipping in `@elevenlabs/client@1.11.0` as a new `./internal/unity` sub-path export, then consumed Unity-side in the cleanup commit that also implements Task 2.3. The spec that drove the SDK PR is in [`client-sdk-exports-for-plan-b.md`](./client-sdk-exports-for-plan-b.md). All three workarounds (ambient `.d.ts`, Vite alias, Rolldown alias) deleted; `factories.ts` now imports from `@elevenlabs/client/internal/unity` along with the three named config-type aliases (`MediaDeviceInputConfig`, `MediaDeviceOutputConfig`, `WebRTCConnectionConfig`).
