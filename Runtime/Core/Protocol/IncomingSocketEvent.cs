@@ -18,7 +18,7 @@ namespace ElevenLabs.Protocol
     public class ConversationInitiationMetadata : IncomingSocketEvent
     {
         [JsonPropertyName("conversation_initiation_metadata_event")]
-        public ConversationInitiationMetadataEvent ConversationInitiationMetadataEvent { get; set; } = null!;
+        public ConversationInitiationMetadataEvent ConversationInitiationMetadataEventData { get; set; } = null!;
 
         public class ConversationInitiationMetadataEvent
         {
@@ -36,7 +36,7 @@ namespace ElevenLabs.Protocol
     public class AgentResponseComplete : IncomingSocketEvent
     {
         [JsonPropertyName("agent_response_complete_event")]
-        public AgentResponseCompleteEvent AgentResponseCompleteEvent { get; set; } = null!;
+        public AgentResponseCompleteEvent AgentResponseCompleteEventData { get; set; } = null!;
 
         public class AgentResponseCompleteEvent
         {
@@ -48,7 +48,7 @@ namespace ElevenLabs.Protocol
     public class UserTranscript : IncomingSocketEvent
     {
         [JsonPropertyName("user_transcription_event")]
-        public UserTranscriptionEvent UserTranscriptionEvent { get; set; } = null!;
+        public UserTranscriptionEvent UserTranscriptionEventData { get; set; } = null!;
 
         public class UserTranscriptionEvent
         {
@@ -63,7 +63,7 @@ namespace ElevenLabs.Protocol
     public class AgentResponse : IncomingSocketEvent
     {
         [JsonPropertyName("agent_response_event")]
-        public AgentResponseEvent AgentResponseEvent { get; set; } = null!;
+        public AgentResponseEvent AgentResponseEventData { get; set; } = null!;
 
         public class AgentResponseEvent
         {
@@ -78,7 +78,7 @@ namespace ElevenLabs.Protocol
     public class AgentResponseCorrection : IncomingSocketEvent
     {
         [JsonPropertyName("agent_response_correction_event")]
-        public AgentResponseCorrectionEvent AgentResponseCorrectionEvent { get; set; } = null!;
+        public AgentResponseCorrectionEvent AgentResponseCorrectionEventData { get; set; } = null!;
 
         public class AgentResponseCorrectionEvent
         {
@@ -96,7 +96,7 @@ namespace ElevenLabs.Protocol
     public class AudioResponse : IncomingSocketEvent
     {
         [JsonPropertyName("audio_event")]
-        public AudioEvent AudioEvent { get; set; } = null!;
+        public AudioEvent AudioEventData { get; set; } = null!;
 
         public class AudioEvent
         {
@@ -107,10 +107,10 @@ namespace ElevenLabs.Protocol
             public int EventId { get; set; } = 0;
 
             [JsonPropertyName("alignment")]
-            public Alignment? Alignment { get; set; };
+            public Alignment? AlignmentData { get; set; }
 
             [JsonPropertyName("is_final")]
-            public bool? IsFinal { get; set; };
+            public bool? IsFinal { get; set; }
 
             public class Alignment
             {
@@ -129,7 +129,7 @@ namespace ElevenLabs.Protocol
     public class Interruption : IncomingSocketEvent
     {
         [JsonPropertyName("interruption_event")]
-        public InterruptionEvent InterruptionEvent { get; set; } = null!;
+        public InterruptionEvent InterruptionEventData { get; set; } = null!;
 
         public class InterruptionEvent
         {
@@ -141,7 +141,7 @@ namespace ElevenLabs.Protocol
     public class VadScore : IncomingSocketEvent
     {
         [JsonPropertyName("vad_score_event")]
-        public VadScoreEvent VadScoreEvent { get; set; } = null!;
+        public VadScoreEvent VadScoreEventData { get; set; } = null!;
 
         public class VadScoreEvent
         {
@@ -194,7 +194,7 @@ namespace ElevenLabs.Protocol
             public bool IsError { get; set; } = false;
 
             [JsonPropertyName("is_blocked")]
-            public bool? IsBlocked { get; set; };
+            public bool? IsBlocked { get; set; }
 
             [JsonPropertyName("event_id")]
             public int EventId { get; set; } = 0;
@@ -206,14 +206,14 @@ namespace ElevenLabs.Protocol
             public string FullToolResult { get; set; } = "";
 
             [JsonPropertyName("truncated")]
-            public bool? Truncated { get; set; };
+            public bool? Truncated { get; set; }
         }
     }
 
     public class Ping : IncomingSocketEvent
     {
         [JsonPropertyName("ping_event")]
-        public PingEvent PingEvent { get; set; } = null!;
+        public PingEvent PingEventData { get; set; } = null!;
 
         public class PingEvent
         {
@@ -221,7 +221,7 @@ namespace ElevenLabs.Protocol
             public int EventId { get; set; } = 0;
 
             [JsonPropertyName("ping_ms")]
-            public int? PingMs { get; set; };
+            public int? PingMs { get; set; }
         }
     }
 }

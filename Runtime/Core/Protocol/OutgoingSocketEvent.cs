@@ -25,7 +25,7 @@ namespace ElevenLabs.Protocol
         public string Type { get; init; } = "user_message";
 
         [JsonPropertyName("text")]
-        public string? Text { get; set; };
+        public string? Text { get; set; }
     }
 
     public class UserActivity : OutgoingSocketEvent
@@ -40,24 +40,24 @@ namespace ElevenLabs.Protocol
         public string Type { get; init; } = "multimodal_message";
 
         [JsonPropertyName("text")]
-        public Text? Text { get; set; };
+        public Text? TextData { get; set; }
 
         [JsonPropertyName("file")]
-        public File? File { get; set; };
+        public File? FileData { get; set; }
 
         public class Text
         {
             [JsonPropertyName("type")]
-            public string? Type { get; set; };
+            public string? Type { get; set; }
 
             [JsonPropertyName("text")]
-            public string? TextData { get; set; };
+            public string? TextData { get; set; }
         }
 
         public class File
         {
             [JsonPropertyName("type")]
-            public string? Type { get; set; };
+            public string? Type { get; set; }
 
             [JsonPropertyName("file_id")]
             public string FileId { get; set; } = "";
@@ -88,7 +88,7 @@ namespace ElevenLabs.Protocol
         public bool IsError { get; set; } = false;
 
         [JsonPropertyName("error_type")]
-        public string? ErrorType { get; set; };
+        public string? ErrorType { get; set; }
     }
 
     public class ContextualUpdate : OutgoingSocketEvent
@@ -103,28 +103,28 @@ namespace ElevenLabs.Protocol
     public class ConversationInitiationClientData : OutgoingSocketEvent
     {
         [JsonPropertyName("conversation_config_override")]
-        public ConversationConfigOverride? ConversationConfigOverride { get; set; };
+        public ConversationConfigOverride? ConversationConfigOverrideData { get; set; }
 
         [JsonPropertyName("custom_llm_extra_body")]
-        public Dictionary<string, object>? CustomLlmExtraBody { get; set; };
+        public Dictionary<string, object>? CustomLlmExtraBody { get; set; }
 
         [JsonPropertyName("user_id")]
-        public string? UserId { get; set; };
+        public string? UserId { get; set; }
 
         [JsonPropertyName("source_info")]
-        public SourceInfo? SourceInfo { get; set; };
+        public SourceInfo? SourceInfoData { get; set; }
 
         [JsonPropertyName("branch_id")]
-        public string? BranchId { get; set; };
+        public string? BranchId { get; set; }
 
         [JsonPropertyName("environment")]
-        public string? Environment { get; set; };
+        public string? Environment { get; set; }
 
         [JsonPropertyName("starting_workflow_node_id")]
-        public string? StartingWorkflowNodeId { get; set; };
+        public string? StartingWorkflowNodeId { get; set; }
 
         [JsonPropertyName("dynamic_variables")]
-        public Dictionary<string, object>? DynamicVariables { get; set; };
+        public Dictionary<string, object>? DynamicVariables { get; set; }
 
         [JsonPropertyName("type")]
         public string Type { get; init; } = "conversation_initiation_client_data";
@@ -132,80 +132,80 @@ namespace ElevenLabs.Protocol
         public class ConversationConfigOverride
         {
             [JsonPropertyName("turn")]
-            public Turn? Turn { get; set; };
+            public Turn? TurnData { get; set; }
 
             [JsonPropertyName("tts")]
-            public Tts? Tts { get; set; };
+            public Tts? TtsData { get; set; }
 
             [JsonPropertyName("conversation")]
-            public Conversation? Conversation { get; set; };
+            public Conversation? ConversationData { get; set; }
 
             [JsonPropertyName("agent")]
-            public Agent? Agent { get; set; };
+            public Agent? AgentData { get; set; }
 
             public class Turn
             {
                 [JsonPropertyName("soft_timeout_config")]
-                public SoftTimeoutConfig? SoftTimeoutConfig { get; set; };
+                public SoftTimeoutConfig? SoftTimeoutConfigData { get; set; }
 
                 public class SoftTimeoutConfig
                 {
                     [JsonPropertyName("message")]
-                    public string? Message { get; set; };
+                    public string? Message { get; set; }
                 }
             }
 
             public class Tts
             {
                 [JsonPropertyName("voice_id")]
-                public string? VoiceId { get; set; };
+                public string? VoiceId { get; set; }
 
                 [JsonPropertyName("stability")]
-                public float? Stability { get; set; };
+                public float? Stability { get; set; }
 
                 [JsonPropertyName("speed")]
-                public float? Speed { get; set; };
+                public float? Speed { get; set; }
 
                 [JsonPropertyName("similarity_boost")]
-                public float? SimilarityBoost { get; set; };
+                public float? SimilarityBoost { get; set; }
             }
 
             public class Conversation
             {
                 [JsonPropertyName("text_only")]
-                public bool? TextOnly { get; set; };
+                public bool? TextOnly { get; set; }
             }
 
             public class Agent
             {
                 [JsonPropertyName("first_message")]
-                public string? FirstMessage { get; set; };
+                public string? FirstMessage { get; set; }
 
                 [JsonPropertyName("language")]
-                public string? Language { get; set; };
+                public string? Language { get; set; }
 
                 [JsonPropertyName("max_conversation_duration_message")]
-                public string? MaxConversationDurationMessage { get; set; };
+                public string? MaxConversationDurationMessage { get; set; }
 
                 [JsonPropertyName("prompt")]
-                public Prompt? Prompt { get; set; };
+                public Prompt? PromptData { get; set; }
 
                 public class Prompt
                 {
                     [JsonPropertyName("prompt")]
-                    public string? PromptData { get; set; };
+                    public string? PromptData { get; set; }
 
                     [JsonPropertyName("llm")]
-                    public string? Llm { get; set; };
+                    public string? Llm { get; set; }
 
                     [JsonPropertyName("tool_ids")]
-                    public List<string>? ToolIds { get; set; };
+                    public List<string>? ToolIds { get; set; }
 
                     [JsonPropertyName("native_mcp_server_ids")]
-                    public List<string>? NativeMcpServerIds { get; set; };
+                    public List<string>? NativeMcpServerIds { get; set; }
 
                     [JsonPropertyName("knowledge_base")]
-                    public List<KnowledgeBaseItem>? KnowledgeBase { get; set; };
+                    public List<KnowledgeBaseItem>? KnowledgeBase { get; set; }
 
                     public class KnowledgeBaseItem
                     {
@@ -219,7 +219,7 @@ namespace ElevenLabs.Protocol
                         public string Id { get; set; } = "";
 
                         [JsonPropertyName("usage_mode")]
-                        public string? UsageMode { get; set; };
+                        public string? UsageMode { get; set; }
                     }
                 }
             }
@@ -228,10 +228,10 @@ namespace ElevenLabs.Protocol
         public class SourceInfo
         {
             [JsonPropertyName("source")]
-            public string? Source { get; set; };
+            public string? Source { get; set; }
 
             [JsonPropertyName("version")]
-            public string? Version { get; set; };
+            public string? Version { get; set; }
         }
     }
 }

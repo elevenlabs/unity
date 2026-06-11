@@ -110,5 +110,8 @@ Bridge~/node_modules/
 # TypeScript composite outDir; only ever created if tsc is invoked without --noEmit
 Bridge~/dist/
 
+# Codegen~ is Unity-ignored; allow the round-trip test project file despite the *.csproj rule above
+!Codegen~/round-trip/round-trip.csproj
+
 # Allow project-level Claude context despite global gitignore rules
 !.claude/CLAUDE.md

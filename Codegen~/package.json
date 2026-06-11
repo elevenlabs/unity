@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "generate": "node src/generate-protocol-dtos.ts && dotnet csharpier format ../Runtime/Core/Protocol/",
-    "verify:protocol-dtos": "pnpm run generate && git diff --exit-code -- ../Runtime/Core/Protocol/"
+    "round-trip": "dotnet run --project round-trip/",
+    "verify:protocol-dtos": "pnpm run generate && git diff --exit-code -- ../Runtime/Core/Protocol/ round-trip/Program.cs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
