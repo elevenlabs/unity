@@ -8,7 +8,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "generate": "node src/generate-protocol-dtos.ts",
+    "generate": "node src/generate-protocol-dtos.ts && dotnet csharpier format ../Runtime/Core/Protocol/",
     "verify:protocol-dtos": "pnpm run generate && git diff --exit-code -- ../Runtime/Core/Protocol/"
   },
   "devDependencies": {
