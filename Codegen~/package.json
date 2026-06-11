@@ -8,7 +8,8 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "generate": "node src/generate-protocol-dtos.ts"
+    "generate": "node src/generate-protocol-dtos.ts",
+    "verify:protocol-dtos": "pnpm run generate && git diff --exit-code -- ../Runtime/Core/Protocol/"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
