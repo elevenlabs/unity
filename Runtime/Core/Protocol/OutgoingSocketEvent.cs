@@ -9,9 +9,7 @@ using System.Text.Json.Serialization;
 
 namespace ElevenLabs.Protocol
 {
-    public abstract class OutgoingSocketEvent
-    {
-    }
+    public abstract class OutgoingSocketEvent { }
 
     public class UserAudioChunk : OutgoingSocketEvent
     {
@@ -40,28 +38,28 @@ namespace ElevenLabs.Protocol
         public string Type { get; init; } = "multimodal_message";
 
         [JsonPropertyName("text")]
-        public Text? TextData { get; set; }
+        public Text? Text { get; set; }
 
         [JsonPropertyName("file")]
-        public File? FileData { get; set; }
+        public File? File { get; set; }
+    }
 
-        public class Text
-        {
-            [JsonPropertyName("type")]
-            public string? Type { get; set; }
+    public class Text
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; init; } = "user_message";
 
-            [JsonPropertyName("text")]
-            public string? TextData { get; set; }
-        }
+        [JsonPropertyName("text")]
+        public string? TextData { get; set; }
+    }
 
-        public class File
-        {
-            [JsonPropertyName("type")]
-            public string? Type { get; set; }
+    public class File
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; init; } = "file_input";
 
-            [JsonPropertyName("file_id")]
-            public string FileId { get; set; } = "";
-        }
+        [JsonPropertyName("file_id")]
+        public string FileId { get; set; } = "";
     }
 
     public class Pong : OutgoingSocketEvent
@@ -103,16 +101,16 @@ namespace ElevenLabs.Protocol
     public class ConversationInitiationClientData : OutgoingSocketEvent
     {
         [JsonPropertyName("conversation_config_override")]
-        public ConversationConfigOverride? ConversationConfigOverrideData { get; set; }
+        public ConversationConfigOverride? ConversationConfigOverride { get; set; }
 
         [JsonPropertyName("custom_llm_extra_body")]
-        public Dictionary<string, object>? CustomLlmExtraBody { get; set; }
+        public Dictionary<string, dynamic>? CustomLlmExtraBody { get; set; }
 
         [JsonPropertyName("user_id")]
         public string? UserId { get; set; }
 
         [JsonPropertyName("source_info")]
-        public SourceInfo? SourceInfoData { get; set; }
+        public SourceInfo? SourceInfo { get; set; }
 
         [JsonPropertyName("branch_id")]
         public string? BranchId { get; set; }
@@ -124,114 +122,114 @@ namespace ElevenLabs.Protocol
         public string? StartingWorkflowNodeId { get; set; }
 
         [JsonPropertyName("dynamic_variables")]
-        public Dictionary<string, object>? DynamicVariables { get; set; }
+        public Dictionary<string, dynamic>? DynamicVariables { get; set; }
 
         [JsonPropertyName("type")]
         public string Type { get; init; } = "conversation_initiation_client_data";
+    }
 
-        public class ConversationConfigOverride
-        {
-            [JsonPropertyName("turn")]
-            public Turn? TurnData { get; set; }
+    public class ConversationConfigOverride
+    {
+        [JsonPropertyName("turn")]
+        public ConversationConfigOverrideTurn? Turn { get; set; }
 
-            [JsonPropertyName("tts")]
-            public Tts? TtsData { get; set; }
+        [JsonPropertyName("tts")]
+        public ConversationConfigOverrideTts? Tts { get; set; }
 
-            [JsonPropertyName("conversation")]
-            public Conversation? ConversationData { get; set; }
+        [JsonPropertyName("conversation")]
+        public ConversationConfigOverrideConversation? Conversation { get; set; }
 
-            [JsonPropertyName("agent")]
-            public Agent? AgentData { get; set; }
+        [JsonPropertyName("agent")]
+        public ConversationConfigOverrideAgent? Agent { get; set; }
+    }
 
-            public class Turn
-            {
-                [JsonPropertyName("soft_timeout_config")]
-                public SoftTimeoutConfig? SoftTimeoutConfigData { get; set; }
+    public class ConversationConfigOverrideTurn
+    {
+        [JsonPropertyName("soft_timeout_config")]
+        public ConversationConfigOverrideTurnSoftTimeoutConfig? SoftTimeoutConfig { get; set; }
+    }
 
-                public class SoftTimeoutConfig
-                {
-                    [JsonPropertyName("message")]
-                    public string? Message { get; set; }
-                }
-            }
+    public class ConversationConfigOverrideTurnSoftTimeoutConfig
+    {
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
+    }
 
-            public class Tts
-            {
-                [JsonPropertyName("voice_id")]
-                public string? VoiceId { get; set; }
+    public class ConversationConfigOverrideTts
+    {
+        [JsonPropertyName("voice_id")]
+        public string? VoiceId { get; set; }
 
-                [JsonPropertyName("stability")]
-                public float? Stability { get; set; }
+        [JsonPropertyName("stability")]
+        public double? Stability { get; set; }
 
-                [JsonPropertyName("speed")]
-                public float? Speed { get; set; }
+        [JsonPropertyName("speed")]
+        public double? Speed { get; set; }
 
-                [JsonPropertyName("similarity_boost")]
-                public float? SimilarityBoost { get; set; }
-            }
+        [JsonPropertyName("similarity_boost")]
+        public double? SimilarityBoost { get; set; }
+    }
 
-            public class Conversation
-            {
-                [JsonPropertyName("text_only")]
-                public bool? TextOnly { get; set; }
-            }
+    public class ConversationConfigOverrideConversation
+    {
+        [JsonPropertyName("text_only")]
+        public bool? TextOnly { get; set; }
+    }
 
-            public class Agent
-            {
-                [JsonPropertyName("first_message")]
-                public string? FirstMessage { get; set; }
+    public class ConversationConfigOverrideAgent
+    {
+        [JsonPropertyName("first_message")]
+        public string? FirstMessage { get; set; }
 
-                [JsonPropertyName("language")]
-                public string? Language { get; set; }
+        [JsonPropertyName("language")]
+        public string? Language { get; set; }
 
-                [JsonPropertyName("max_conversation_duration_message")]
-                public string? MaxConversationDurationMessage { get; set; }
+        [JsonPropertyName("max_conversation_duration_message")]
+        public string? MaxConversationDurationMessage { get; set; }
 
-                [JsonPropertyName("prompt")]
-                public Prompt? PromptData { get; set; }
+        [JsonPropertyName("prompt")]
+        public ConversationConfigOverrideAgentPrompt? Prompt { get; set; }
+    }
 
-                public class Prompt
-                {
-                    [JsonPropertyName("prompt")]
-                    public string? PromptData { get; set; }
+    public class ConversationConfigOverrideAgentPrompt
+    {
+        [JsonPropertyName("prompt")]
+        public string? Prompt { get; set; }
 
-                    [JsonPropertyName("llm")]
-                    public string? Llm { get; set; }
+        [JsonPropertyName("llm")]
+        public string? Llm { get; set; }
 
-                    [JsonPropertyName("tool_ids")]
-                    public List<string>? ToolIds { get; set; }
+        [JsonPropertyName("tool_ids")]
+        public IEnumerable<string>? ToolIds { get; set; }
 
-                    [JsonPropertyName("native_mcp_server_ids")]
-                    public List<string>? NativeMcpServerIds { get; set; }
+        [JsonPropertyName("native_mcp_server_ids")]
+        public IEnumerable<string>? NativeMcpServerIds { get; set; }
 
-                    [JsonPropertyName("knowledge_base")]
-                    public List<KnowledgeBaseItem>? KnowledgeBase { get; set; }
+        [JsonPropertyName("knowledge_base")]
+        public IEnumerable<ConversationConfigOverrideAgentPromptKnowledgeBaseItem>? KnowledgeBase { get; set; }
+    }
 
-                    public class KnowledgeBaseItem
-                    {
-                        [JsonPropertyName("type")]
-                        public string Type { get; set; } = "";
+    public class ConversationConfigOverrideAgentPromptKnowledgeBaseItem
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = "";
 
-                        [JsonPropertyName("name")]
-                        public string Name { get; set; } = "";
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = "";
 
-                        [JsonPropertyName("id")]
-                        public string Id { get; set; } = "";
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = "";
 
-                        [JsonPropertyName("usage_mode")]
-                        public string? UsageMode { get; set; }
-                    }
-                }
-            }
-        }
+        [JsonPropertyName("usage_mode")]
+        public string? UsageMode { get; set; }
+    }
 
-        public class SourceInfo
-        {
-            [JsonPropertyName("source")]
-            public string? Source { get; set; }
+    public class SourceInfo
+    {
+        [JsonPropertyName("source")]
+        public string? Source { get; set; }
 
-            [JsonPropertyName("version")]
-            public string? Version { get; set; }
-        }
+        [JsonPropertyName("version")]
+        public string? Version { get; set; }
     }
 }

@@ -2,314 +2,414 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { Parser, fromFile } from "@asyncapi/parser";
+import {
+  CSharpGenerator,
+  type CSharpPreset,
+  type OutputModel,
+} from "@asyncapi/modelina";
 
+// ---- Paths ----
 const here = dirname(fileURLToPath(import.meta.url));
 const specPath = resolve(here, "../schemas/convai-asyncapi.yml");
-const outputDir = resolve(here, "../../Runtime/Core/Protocol");
+const protocolDir = resolve(here, "../../Runtime/Core/Protocol");
+const roundTripDir = resolve(here, "../round-trip");
 
-// ---- Local types for traversing the parser-resolved spec ----
-// document.json() returns the spec with all $refs inlined by @asyncapi/parser.
+// ---- Load and preprocess spec ----
 
-interface RawSchema {
-  type?: string | string[];
-  properties?: Record<string, RawSchema>;
-  required?: string[];
-  enum?: unknown[];
-  items?: RawSchema;
-  additionalProperties?: boolean | RawSchema;
-  anyOf?: RawSchema[];
-  $ref?: string; // may remain for circular references
-  nullable?: boolean;
-  const?: unknown;
-  "x-fern-type"?: string;
-  "x-parser-schema-id"?: string;
+// @asyncapi/parser resolves all $refs into the document, so each payload is
+// self-contained by the time we hand it to Modelina. (Earlier we did this
+// inlining by hand; the parser is the same tool the JS SDK uses for codegen.)
+const parser = new Parser();
+const { document, diagnostics } = await fromFile(parser, specPath).parse();
+for (const d of diagnostics) {
+  if (d.severity <= 1) {
+    const where = d.path?.join(".") ?? "";
+    process.stderr.write(
+      `[severity=${d.severity}] ${d.message}${where ? ` (${where})` : ""}\n`,
+    );
+  }
+}
+if (!document) {
+  process.stderr.write(`Failed to parse ${specPath}\n`);
+  process.exit(1);
+}
+const spec = document.json() as Record<string, unknown>;
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// The parser-resolved document has shared subtrees (and cyclical $refs for
+// recursive schemas like DynamicVariableNestedValueType), so a naive recursion
+// either loops forever or rewrites the same node multiple times. Each
+// preprocessing pass guards itself with a WeakSet of already-visited objects.
+
+// Rewrite Fern's `x-fern-type: literal<"foo">` to vanilla JSON Schema
+// { type: "string", const: "foo" } and mark the property required.
+function substituteFernLiterals(node: unknown, visited: WeakSet<object>): void {
+  if (Array.isArray(node)) {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const item of node) substituteFernLiterals(item, visited);
+    return;
+  }
+  if (!isObject(node)) return;
+  if (visited.has(node)) return;
+  visited.add(node);
+
+  if (isObject(node.properties)) {
+    const required = new Set<string>(
+      Array.isArray(node.required) ? (node.required as string[]) : [],
+    );
+    for (const [propName, propSchema] of Object.entries(node.properties)) {
+      if (!isObject(propSchema)) continue;
+      const fernType = propSchema["x-fern-type"];
+      if (typeof fernType !== "string") continue;
+      const match = fernType.match(/^literal<"(.+)">$/);
+      if (!match) continue;
+      propSchema.type = "string";
+      propSchema.const = match[1];
+      delete propSchema["x-fern-type"];
+      required.add(propName);
+    }
+    if (required.size > 0) node.required = [...required];
+  }
+
+  for (const value of Object.values(node)) substituteFernLiterals(value, visited);
+}
+
+substituteFernLiterals(spec, new WeakSet());
+
+// Modelina generates a C# `enum` (with extension methods) for any string field
+// that has an `enum:` constraint. That changes the public API and requires a
+// JsonStringEnumConverter to round-trip correctly. Strip the constraint so
+// these fields stay plain `string` — server-side validation is the source of
+// truth for allowed values anyway.
+function stripStringEnums(node: unknown, visited: WeakSet<object>): void {
+  if (Array.isArray(node)) {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const item of node) stripStringEnums(item, visited);
+    return;
+  }
+  if (!isObject(node)) return;
+  if (visited.has(node)) return;
+  visited.add(node);
+  if (node.type === "string" && Array.isArray(node.enum)) delete node.enum;
+  for (const value of Object.values(node)) stripStringEnums(value, visited);
+}
+
+stripStringEnums(spec, new WeakSet());
+
+// The parser inlines $refs via shared object references, which produces true
+// cycles for recursive schemas (e.g. DynamicVariableNestedValueType). Modelina
+// stringifies the input internally, so any cycle in the payload kills it.
+// Deep-clone each payload, replacing cyclic back-references with `{}` so
+// Modelina sees a free-form object at the cycle boundary.
+function breakCycles(node: unknown, ancestors: Set<object>): unknown {
+  if (Array.isArray(node)) {
+    if (ancestors.has(node)) return [];
+    ancestors.add(node);
+    const cloned = node.map((item) => breakCycles(item, ancestors));
+    ancestors.delete(node);
+    return cloned;
+  }
+  if (!isObject(node)) return node;
+  if (ancestors.has(node)) return {};
+  ancestors.add(node);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) out[k] = breakCycles(v, ancestors);
+  ancestors.delete(node);
+  return out;
+}
+
+// ---- Collect payloads per direction ----
+
+type Direction = "incoming" | "outgoing";
+
+interface Payload {
+  name: string;
+  schema: Record<string, unknown>;
 }
 
 interface RawMessage {
   name?: string;
-  payload?: RawSchema;
+  payload?: Record<string, unknown>;
 }
 
-interface RawSpec {
-  channels: Record<
-    string,
-    {
-      publish?: { message: { oneOf?: RawMessage[] } | RawMessage };
-      subscribe?: { message: { oneOf?: RawMessage[] } | RawMessage };
-    }
-  >;
+interface ChannelOp {
+  message?: { oneOf?: RawMessage[] } | RawMessage;
 }
+
+interface Channel {
+  publish?: ChannelOp;
+  subscribe?: ChannelOp;
+}
+
+function collectPayloads(direction: Direction): Payload[] {
+  const channels = (spec as { channels: Record<string, Channel> }).channels;
+  const channel = Object.values(channels)[0];
+  // AsyncAPI 2.x publisher's PoV: publish = client → server (outgoing).
+  const op = channel?.[direction === "outgoing" ? "publish" : "subscribe"];
+  const msg = op?.message;
+  if (!msg) return [];
+
+  // After parser resolution, `oneOf` holds the inlined message objects (each
+  // with `.payload` already inlined). Single-message channels skip `oneOf`.
+  const messages: RawMessage[] =
+    "oneOf" in msg && msg.oneOf
+      ? msg.oneOf
+      : [msg as RawMessage];
+
+  const results: Payload[] = [];
+  for (const message of messages) {
+    const payload = message.payload;
+    if (!payload) continue;
+    // The parser stamps `x-parser-schema-id` on each schema using the
+    // components.schemas key — that's the name we want for the model.
+    const schemaId = payload["x-parser-schema-id"];
+    const name =
+      typeof schemaId === "string" && !schemaId.startsWith("<")
+        ? schemaId
+        : (message.name ?? "");
+    if (!name) continue;
+    // Break cycles (see breakCycles comment) and inject $id so Modelina names
+    // the root model. Nested types are named from their containing property by
+    // Modelina's default constraint.
+    const safe = breakCycles(payload, new Set()) as Record<string, unknown>;
+    results.push({ name, schema: { ...safe, $id: name } });
+  }
+  return results;
+}
+
+const incoming = collectPayloads("incoming");
+const outgoing = collectPayloads("outgoing");
+
+console.log(
+  `Incoming (${incoming.length}): ${incoming.map((p) => p.name).join(", ")}`,
+);
+console.log(
+  `Outgoing (${outgoing.length}): ${outgoing.map((p) => p.name).join(", ")}`,
+);
 
 // ---- Helpers ----
 
-function toPascalCase(snakeCase: string): string {
-  return snakeCase
-    .split("_")
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+function toPascalCase(s: string): string {
+  return s
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("");
 }
 
-// C# forbids a property with the same name as its containing class.
-function csPropName(propName: string, className: string): string {
-  const pascal = toPascalCase(propName);
-  return pascal === className ? `${pascal}Data` : pascal;
+const PRIMITIVE_TYPES = new Set([
+  "string",
+  "int",
+  "long",
+  "short",
+  "byte",
+  "float",
+  "double",
+  "decimal",
+  "bool",
+  "char",
+]);
+
+function isPrimitive(csType: string): boolean {
+  const base = csType.replace(/\?$/, "");
+  return PRIMITIVE_TYPES.has(base);
 }
 
-function getLiteralValue(xFernType: string): string | null {
-  const m = xFernType.match(/^literal<"(.+)">$/);
-  return m ? m[1] : null;
+function isCollection(csType: string): boolean {
+  return csType.startsWith("List<") || csType.startsWith("Dictionary<");
 }
 
-function getMessagePairs(
-  spec: RawSpec,
-  direction: "publish" | "subscribe",
-): Array<{ name: string; schema: RawSchema }> {
-  const channel = Object.values(spec.channels)[0];
-  const op = channel?.[direction];
-  if (!op?.message) return [];
+// ---- Custom Modelina preset ----
 
-  const messages: RawMessage[] =
-    "oneOf" in op.message
-      ? (op.message.oneOf ?? [])
-      : [op.message as RawMessage];
+// Modelina's default class renderer emits `public T name { get; set; }` without
+// JSON attributes; the bundled JsonSerializerPreset emits per-class
+// JsonConverter<T> classes, which is more invasive than we want.
+// Override the property renderer to emit [JsonPropertyName] + a standard
+// auto-property, with init-only literal default for `const` properties.
+const protocolPreset: CSharpPreset = {
+  class: {
+    self({ renderer, content }) {
+      renderer.dependencyManager.addDependency(
+        "using System.Text.Json.Serialization;",
+      );
+      return content;
+    },
+    property({ renderer, property }) {
+      const jsonName = property.unconstrainedPropertyName;
+      let propName = toPascalCase(jsonName);
+      // C# CS0542: a property cannot share its enclosing type's name.
+      // `renderer.model` is protected, but it's the ConstrainedObjectModel for
+      // the current class; cast to access `.name` from the preset.
+      const enclosingName = (renderer as unknown as { model: { name: string } })
+        .model.name;
+      if (propName === enclosingName) propName = `${propName}Data`;
 
-  return messages.flatMap((msg) => {
-    const schema = msg.payload as RawSchema | undefined;
-    if (!schema) return [];
-    const schemaId = schema["x-parser-schema-id"];
-    const name =
-      schemaId && !schemaId.startsWith("<") ? schemaId : (msg.name ?? "");
-    if (!name) return [];
-    return [{ name, schema }];
-  });
-}
+      const csType = property.property.type;
+      const isRequired = property.required;
+      const attr = `[JsonPropertyName("${jsonName}")]`;
 
-// ---- C# type resolution ----
-
-interface TypeResult {
-  csType: string;
-  /** Nested class declarations to splice into the parent class body. */
-  extraDecls: string[];
-}
-
-// Returns a safe nested class name, avoiding collision with the parent class name.
-// (C# forbids a nested type with the same name as the enclosing type.)
-function nestedClassName(propName: string, parentClassName: string): string {
-  const pascal = toPascalCase(propName);
-  return pascal === parentClassName ? `${pascal}Payload` : pascal;
-}
-
-function resolveItemType(
-  propName: string,
-  items: RawSchema | undefined,
-  nestLevel: number,
-  parentClassName: string,
-): TypeResult {
-  if (!items) return { csType: "object", extraDecls: [] };
-  // $ref remaining after inlining = circular ref; treat as object
-  if (items.$ref) return { csType: "object", extraDecls: [] };
-  if (items.anyOf) return { csType: "object", extraDecls: [] };
-  const t = Array.isArray(items.type) ? items.type[0] : items.type;
-  if (t === "string") return { csType: "string", extraDecls: [] };
-  if (t === "integer") return { csType: "int", extraDecls: [] };
-  if (t === "number") return { csType: "float", extraDecls: [] };
-  if (t === "boolean") return { csType: "bool", extraDecls: [] };
-  if (t === "object" && items.properties) {
-    const itemClass = `${nestedClassName(propName, parentClassName)}Item`;
-    const decl = emitClass(itemClass, items, null, nestLevel);
-    return { csType: itemClass, extraDecls: [decl] };
-  }
-  return { csType: "object", extraDecls: [] };
-}
-
-function resolveType(
-  propName: string,
-  schema: RawSchema,
-  isRequired: boolean,
-  nestLevel: number,
-  parentClassName: string,
-): TypeResult {
-  const q = !isRequired || schema.nullable ? "?" : "";
-
-  // $ref remaining after inlining = circular ref; treat as object
-  if (schema.$ref) return { csType: `object${q}`, extraDecls: [] };
-  if (schema.anyOf) return { csType: `object${q}`, extraDecls: [] };
-  if (schema.const !== undefined)
-    return { csType: `string${q}`, extraDecls: [] };
-
-  const t = Array.isArray(schema.type)
-    ? schema.type[0]
-    : (schema.type ?? "object");
-
-  if (t === "string") return { csType: `string${q}`, extraDecls: [] };
-  if (t === "integer") return { csType: `int${q}`, extraDecls: [] };
-  if (t === "number") return { csType: `float${q}`, extraDecls: [] };
-  if (t === "boolean") return { csType: `bool${q}`, extraDecls: [] };
-
-  if (t === "array") {
-    const itemResult = resolveItemType(
-      propName,
-      schema.items,
-      nestLevel,
-      parentClassName,
-    );
-    return {
-      csType: `List<${itemResult.csType}>${q}`,
-      extraDecls: itemResult.extraDecls,
-    };
-  }
-
-  if (t === "object") {
-    if (
-      schema.additionalProperties === true ||
-      (schema.additionalProperties &&
-        typeof schema.additionalProperties === "object")
-    ) {
-      return { csType: `Dictionary<string, object>${q}`, extraDecls: [] };
-    }
-    if (schema.properties) {
-      const nested = nestedClassName(propName, parentClassName);
-      const decl = emitClass(nested, schema, null, nestLevel);
-      return { csType: `${nested}${q}`, extraDecls: [decl] };
-    }
-    return { csType: `object${q}`, extraDecls: [] };
-  }
-
-  return { csType: `object${q}`, extraDecls: [] };
-}
-
-function csDefault(csType: string, isRequired: boolean): string {
-  if (!isRequired) return "";
-  const base = csType.endsWith("?") ? csType.slice(0, -1) : csType;
-  if (base === "string") return ' = ""';
-  if (base === "int" || base === "float") return " = 0";
-  if (base === "bool") return " = false";
-  if (base.startsWith("List<")) return " = new()";
-  if (base.startsWith("Dictionary<")) return " = new()";
-  return " = null!"; // required reference type
-}
-
-// ---- Class emitter ----
-
-function emitClass(
-  className: string,
-  schema: RawSchema,
-  baseClass: string | null,
-  indentLevel: number,
-  direction?: "incoming" | "outgoing",
-): string {
-  const i = (n: number) => "    ".repeat(n);
-  const lines: string[] = [];
-  const deferred: string[] = [];
-
-  lines.push(
-    `${i(indentLevel)}public class ${className}${baseClass ? ` : ${baseClass}` : ""}`,
-  );
-  lines.push(`${i(indentLevel)}{`);
-
-  const props = schema.properties ?? {};
-  const requiredSet = new Set(schema.required ?? []);
-
-  for (const [propName, propSchema] of Object.entries(props)) {
-    const isRequired = requiredSet.has(propName);
-    const fernType = propSchema["x-fern-type"] as string | undefined;
-
-    if (fernType) {
-      const literal = getLiteralValue(fernType);
-      if (literal) {
-        if (direction === "incoming") continue; // Type is inherited from the base class
-        lines.push(`${i(indentLevel + 1)}[JsonPropertyName("${propName}")]`);
-        lines.push(
-          `${i(indentLevel + 1)}public string ${csPropName(propName, className)} { get; init; } = "${literal}";`,
-        );
-        lines.push("");
-        continue;
+      // const literal → init-only string property with the literal default.
+      const constOpt = property.property.options.const;
+      if (constOpt && constOpt.value !== undefined) {
+        // Modelina stores the const value as a JSON-encoded string token,
+        // e.g. '"foo"'. Unwrap if needed.
+        const raw = constOpt.value;
+        const literal =
+          typeof raw === "string" && raw.startsWith('"') && raw.endsWith('"')
+            ? JSON.parse(raw)
+            : String(raw);
+        return `${attr}\npublic string ${propName} { get; init; } = "${literal}";`;
       }
-    }
 
-    const result = resolveType(
-      propName,
-      propSchema,
-      isRequired,
-      indentLevel + 1,
-      className,
-    );
-    const def = csDefault(result.csType, isRequired);
-    const basePropName = csPropName(propName, className);
-    // CS0102: C# forbids a property and a nested type from sharing the same name in the same class.
-    // When this property generates a nested class (extraDecls.length > 0) and the property name
-    // equals the nested class name, append "Data" to disambiguate the property.
-    const baseTypeName = result.csType.replace(/\?$/, "");
-    const finalPropName =
-      result.extraDecls.length > 0 && basePropName === baseTypeName
-        ? `${basePropName}Data`
-        : basePropName;
-    lines.push(`${i(indentLevel + 1)}[JsonPropertyName("${propName}")]`);
-    // Only emit ";" when there is an initializer expression; a bare auto-property ends with "}"
-    lines.push(
-      `${i(indentLevel + 1)}public ${result.csType} ${finalPropName} { get; set; }${def}${def ? ";" : ""}`,
-    );
-    lines.push("");
-    deferred.push(...result.extraDecls);
-  }
+      // Nullability: optional non-primitive → append `?`; required reference
+      // → suppress CS8618 via `= null!`.
+      const nullableSuffix =
+        !isRequired && !csType.endsWith("?") && !isPrimitive(csType) ? "?" : "";
+      const renderedType = `${csType}${nullableSuffix}`;
 
-  while (lines.at(-1) === "") lines.pop();
+      let initializer = "";
+      if (isRequired) {
+        if (csType === "string") initializer = ' = ""';
+        else if (csType === "int" || csType === "long") initializer = " = 0";
+        else if (csType === "float" || csType === "double")
+          initializer = " = 0";
+        else if (csType === "bool") initializer = " = false";
+        else if (isCollection(csType)) initializer = " = new()";
+        else if (!isPrimitive(csType)) initializer = " = null!";
+      }
 
-  for (const decl of deferred) {
-    lines.push("");
-    lines.push(decl);
-  }
+      const semicolon = initializer ? ";" : "";
+      return `${attr}\npublic ${renderedType} ${propName} { get; set; }${initializer}${semicolon}`;
+    },
+  },
+};
 
-  lines.push(`${i(indentLevel)}}`);
-  return lines.join("\n");
+// ---- Generate ----
+
+interface GenerateResult {
+  rootName: string;
+  models: OutputModel[];
 }
 
-// ---- File emitter ----
+const generator = new CSharpGenerator({
+  presets: [protocolPreset],
+  collectionType: "List",
+  autoImplementedProperties: true,
+  handleNullable: true,
+  processorOptions: {
+    interpreter: {
+      ignoreAdditionalProperties: true,
+    },
+  },
+});
 
-function emitFile(
-  baseClass: string,
-  pairs: Array<{ name: string; schema: RawSchema }>,
-  direction: "incoming" | "outgoing",
-): string {
-  const parts: string[] = [
+async function generateForPayloads(
+  payloads: Payload[],
+): Promise<GenerateResult[]> {
+  const results: GenerateResult[] = [];
+  for (const { name, schema } of payloads) {
+    const models = await generator.generate(schema);
+    const root = models.find((m) => m.modelName === name) ?? models[0];
+    results.push({ rootName: root?.modelName ?? name, models });
+  }
+  return results;
+}
+
+const incomingResults = await generateForPayloads(incoming);
+const outgoingResults = await generateForPayloads(outgoing);
+
+// ---- Aggregate into files ----
+
+function dedupeModels(
+  results: GenerateResult[],
+): { allModels: OutputModel[]; topLevel: Set<string> } {
+  const allModels = new Map<string, OutputModel>();
+  const topLevel = new Set<string>();
+  for (const { rootName, models } of results) {
+    topLevel.add(rootName);
+    for (const m of models) {
+      if (!allModels.has(m.modelName)) allModels.set(m.modelName, m);
+    }
+  }
+  return { allModels: [...allModels.values()], topLevel };
+}
+
+function indent(s: string, n = 1): string {
+  return s
+    .split("\n")
+    .map((line) => (line ? "    ".repeat(n) + line : line))
+    .join("\n");
+}
+
+function emitFile(baseClass: string, results: GenerateResult[]): string {
+  const { allModels, topLevel } = dedupeModels(results);
+
+  const usings = new Set<string>(["using System.Collections.Generic;"]);
+  for (const m of allModels) {
+    for (const dep of m.dependencies) {
+      if (dep.trim().startsWith("using ")) usings.add(dep.trim());
+    }
+  }
+
+  const classBodies = allModels.map((m) => {
+    let body = m.result;
+    if (topLevel.has(m.modelName)) {
+      // Modelina emits `public partial class Name {` — inject the base class.
+      body = body.replace(
+        new RegExp(`public (partial )?class ${m.modelName}\\b(?! :)`),
+        `public class ${m.modelName} : ${baseClass}`,
+      );
+    } else {
+      // Strip `partial` from nested types too, for consistency.
+      body = body.replace(
+        new RegExp(`public partial class ${m.modelName}\\b`),
+        `public class ${m.modelName}`,
+      );
+    }
+    return indent(body);
+  });
+
+  return [
     "// <auto-generated />",
     "// Source: Codegen~/schemas/convai-asyncapi.yml",
     "// Generator: pnpm --dir Codegen~ run generate",
     "",
     "#nullable enable",
     "",
-    "using System.Collections.Generic;",
-    "using System.Text.Json.Serialization;",
+    ...[...usings].sort(),
     "",
     "namespace ElevenLabs.Protocol",
     "{",
     `    public abstract class ${baseClass}`,
     "    {",
-  ];
-
-  if (direction === "incoming") {
-    parts.push(`        [JsonPropertyName("type")]`);
-    parts.push(`        public string Type { get; set; } = "";`);
-  }
-
-  parts.push("    }");
-
-  for (const { name, schema } of pairs) {
-    parts.push("");
-    parts.push(emitClass(name, schema, baseClass, 1, direction));
-  }
-
-  parts.push("}");
-  return parts.join("\n") + "\n";
+    "    }",
+    "",
+    classBodies.join("\n\n"),
+    "}",
+    "",
+  ].join("\n");
 }
 
-// ---- Round-trip test emitter ----
+mkdirSync(protocolDir, { recursive: true });
+const incomingPath = resolve(protocolDir, "IncomingSocketEvent.cs");
+const outgoingPath = resolve(protocolDir, "OutgoingSocketEvent.cs");
+writeFileSync(incomingPath, emitFile("IncomingSocketEvent", incomingResults));
+writeFileSync(outgoingPath, emitFile("OutgoingSocketEvent", outgoingResults));
+console.log(`Wrote ${incomingPath}`);
+console.log(`Wrote ${outgoingPath}`);
 
-function emitRoundTripProgram(
-  incomingNames: string[],
-  outgoingNames: string[],
-): string {
-  const lines: string[] = [
+// ---- Round-trip program ----
+
+mkdirSync(roundTripDir, { recursive: true });
+const roundTripPath = resolve(roundTripDir, "Program.cs");
+writeFileSync(
+  roundTripPath,
+  [
     "// <auto-generated />",
     "// Source: Codegen~/schemas/convai-asyncapi.yml",
     "// Generator: pnpm --dir Codegen~ run generate",
@@ -335,78 +435,16 @@ function emitRoundTripProgram(
     "}",
     "",
     "// --- IncomingSocketEvent subtypes ---",
-    ...incomingNames.map(
-      (name) => `Console.WriteLine(Roundtrip(new ${name}()));`,
-    ),
+    ...incoming.map((p) => `Console.WriteLine(Roundtrip(new ${p.name}()));`),
     "",
     "// --- OutgoingSocketEvent subtypes ---",
-    ...outgoingNames.map(
-      (name) => `Console.WriteLine(Roundtrip(new ${name}()));`,
-    ),
+    ...outgoing.map((p) => `Console.WriteLine(Roundtrip(new ${p.name}()));`),
     "",
     'Console.WriteLine("All round-trips passed.");',
-  ];
-  return lines.join("\n") + "\n";
-}
-
-// ---- Main ----
-
-const parser = new Parser();
-const { document, diagnostics } = await fromFile(parser, specPath).parse();
-
-for (const d of diagnostics) {
-  if (d.severity <= 1) {
-    const where = d.path?.join(".") ?? "";
-    process.stderr.write(
-      `[severity=${d.severity}] ${d.message}${where ? ` (${where})` : ""}\n`,
-    );
-  }
-}
-
-if (!document) {
-  process.stderr.write(`Failed to parse ${specPath}\n`);
-  process.exit(1);
-}
-
-const rawSpec = document.json() as unknown as RawSpec;
-
-const incomingPairs = getMessagePairs(rawSpec, "subscribe");
-const outgoingPairs = getMessagePairs(rawSpec, "publish");
-
-console.log(
-  `Incoming (${incomingPairs.length}): ${incomingPairs.map((p) => p.name).join(", ")}`,
-);
-console.log(
-  `Outgoing (${outgoingPairs.length}): ${outgoingPairs.map((p) => p.name).join(", ")}`,
-);
-
-mkdirSync(outputDir, { recursive: true });
-
-const incomingPath = resolve(outputDir, "IncomingSocketEvent.cs");
-writeFileSync(
-  incomingPath,
-  emitFile("IncomingSocketEvent", incomingPairs, "incoming"),
-);
-console.log(`Wrote ${incomingPath}`);
-
-const outgoingPath = resolve(outputDir, "OutgoingSocketEvent.cs");
-writeFileSync(
-  outgoingPath,
-  emitFile("OutgoingSocketEvent", outgoingPairs, "outgoing"),
-);
-console.log(`Wrote ${outgoingPath}`);
-
-const roundTripDir = resolve(here, "../round-trip");
-mkdirSync(roundTripDir, { recursive: true });
-const roundTripPath = resolve(roundTripDir, "Program.cs");
-writeFileSync(
-  roundTripPath,
-  emitRoundTripProgram(
-    incomingPairs.map((p) => p.name),
-    outgoingPairs.map((p) => p.name),
-  ),
+    "",
+  ].join("\n"),
 );
 console.log(`Wrote ${roundTripPath}`);
 
-const info = document.info();
-console.log(`Done — ${info.title()} v${info.version()}`);
+const info = (spec as { info?: { title?: string; version?: string } }).info;
+console.log(`Done — ${info?.title ?? "<no title>"} v${info?.version ?? "?"}`);
