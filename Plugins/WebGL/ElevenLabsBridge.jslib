@@ -21,19 +21,6 @@ var library = (function() {
 
 //#endregion
 
-//#region src/primitives/bridge-name.ts
-	var bridge_name_exports = /* @__PURE__ */ __exportAll({
-		$EL_BridgeName: () => "",
-		EL_SetBridgeName: () => EL_SetBridgeName,
-		EL_SetBridgeName__deps: () => EL_SetBridgeName__deps
-	});
-	const $EL_BridgeName = "";
-	const EL_SetBridgeName__deps = ["$EL_BridgeName"];
-	function EL_SetBridgeName(namePtr) {
-		_EL_BridgeName = UTF8ToString(namePtr);
-	}
-
-//#endregion
 //#region src/primitives/log.ts
 	var log_exports = /* @__PURE__ */ __exportAll({ $EL_Log: () => $EL_Log });
 	function $EL_Log(level, scope, msg) {
@@ -337,7 +324,6 @@ var library = (function() {
 //#endregion
 //#region src/primitives/index.ts
 	const library = {
-		...bridge_name_exports,
 		...log_exports,
 		...registries_exports,
 		...marshalling_exports,

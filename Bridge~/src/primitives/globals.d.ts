@@ -1,15 +1,8 @@
 // Ambient declarations for runtime globals that Unity injects but @types/emscripten
-// doesn't cover: SendMessage (Unity-specific) and the hoisted _EL_* globals that
-// Unity creates from $-prefixed mergeInto entries when another function lists them
-// in its __deps array. UTF8ToString is already declared by @types/emscripten.
+// doesn't cover: the hoisted _EL_* globals that Unity creates from $-prefixed
+// mergeInto entries when another function lists them in its __deps array.
+// UTF8ToString is already declared by @types/emscripten.
 
-declare function SendMessage(
-  gameObject: string,
-  method: string,
-  value: string,
-): void;
-
-declare let _EL_BridgeName: string;
 declare function _EL_Log(
   level: "info" | "warn" | "error",
   scope: string,
@@ -67,5 +60,24 @@ declare const Module: EmscriptenModule & { wasmTable?: WebAssembly.Table };
 declare let _EL_SettlePtr: number;
 declare let _EL_CallbackPtr: number;
 
-// Emscripten heap allocation — available globally in the jslib runtime.
+// DynCall macro entry points — at runtime these are the implementations the
+// `{{{ makeDynCall('sig', 'fnVar') }}}` macro expands to, but in TypeScript we
+// type them as named functions so the source compiles before the bundler's
+// substitute-make-dyncall plugin (Phase 2.5.6) rewrites the call sites. The
+// signature characters follow Emscripten's convention: `v` = void return,
+// `i` = i32 argument.
+declare function dynCall_viii(
+  fnPtr: number,
+  arg0: number,
+  arg1: number,
+  arg2: number,
+): void;
+declare function dynCall_vii(fnPtr: number, arg0: number, arg1: number): void;
+
+// Emscripten heap allocation + UTF-8 string materialisation — available
+// globally in the jslib runtime. `stringToNewUTF8` allocates a fresh heap
+// buffer and writes a null-terminated UTF-8 encoding of the JS string; the
+// caller owns the buffer and must `_free` it once the DynCall has returned.
 declare function _malloc(size: number): number;
+declare function _free(ptr: number): void;
+declare function stringToNewUTF8(str: string): number;
