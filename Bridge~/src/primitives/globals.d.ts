@@ -56,5 +56,16 @@ declare function _EL_Settle(
   payload: string,
 ): void;
 
+// The Emscripten module object — available as a runtime global in jslib context.
+// @types/emscripten declares EmscriptenModule as an interface but does not
+// expose a global `Module` variable; Unity's Emscripten runtime does.
+declare const Module: EmscriptenModule & { wasmTable?: WebAssembly.Table };
+
+// Function-pointer slots for the DynCall bridge channels (function-pointers.ts).
+// Initialised to 0; set once at bridge startup by EL_SetSettleCallback /
+// EL_SetInvokeCallbackPtr before any async or callback operation can fire.
+declare let _EL_SettlePtr: number;
+declare let _EL_CallbackPtr: number;
+
 // Emscripten heap allocation — available globally in the jslib runtime.
 declare function _malloc(size: number): number;
