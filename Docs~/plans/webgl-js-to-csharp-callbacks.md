@@ -99,7 +99,25 @@ This means "start with `SendMessage`, migrate hot paths later" is a low-risk str
 
 ---
 
-## Decision for the ElevenLabs Unity SDK (v0.1)
+## Revised decision (2026-06-12)
+
+**Adopt `makeDynCall` + `[MonoPInvokeCallback]` for the v0.1 settlement and callback channels — no SendMessage call site survives.** The full rationale, wire protocol, and implementation details live in [dyncall-migration.md](./dyncall-migration.md); the short version:
+
+- `Module.dynCall_*` is deprecated in Unity 6 in favour of the `makeDynCall` macro ([Unity deprecation doc](https://docs.unity3d.com/6000.0/Documentation/Manual/web-interacting-browser-deprecated.html)).
+- Enabling Unity's recommended `Use WebAssembly.Table` publishing setting makes the old `dynCall_*` API unavailable, so going straight to `makeDynCall` is the forward-compatible path.
+- The migration is cheapest right now: Phase 2 of [generic-bridge-primitives.md](./generic-bridge-primitives.md) (JS side) is done with exactly two SendMessage call sites; Phase 3 (C# side) hasn't started. After Phase 3 ships, the same migration also costs a MonoBehaviour-dispatch teardown, a `BridgeMessageParser` removal, and a test-harness rewrite.
+
+The comparison table above is still valid as evidence — the trade-offs each mechanism carries haven't changed. What flipped is the "when does each win" calculus for *this* project, given the deprecation direction and the inflection point.
+
+Consumers now have a hard requirement: enable **Player Settings → WebGL → Publishing Settings → Use WebAssembly.Table**. The bridge enforces it in two layers (build-time `IPreprocessBuildWithReport` + runtime first-call try/catch) — see [dyncall-migration.md](./dyncall-migration.md) for the details and the consumer-impact mitigations.
+
+The "Plan to revisit at v0.3 (audio path)" item below is partially obsolete: the SendMessage→DynCall migration that v0.3 anticipated is now happening at v0.1. The audio-path work at v0.3 still needs binary-payload DynCall variants (separate signatures, separate entry points) for PCM frames at 40+ Hz, but the SendMessage hop is no longer the bottleneck driving that work.
+
+The original v0.1 decision is preserved below for historical context.
+
+---
+
+## Decision for the ElevenLabs Unity SDK (v0.1) — original (superseded 2026-06-12)
 
 **Adopt `SendMessage` for all three bridge primitives.** Reasoning:
 
