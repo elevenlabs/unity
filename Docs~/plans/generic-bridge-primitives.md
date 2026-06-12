@@ -180,20 +180,11 @@ Unity's [`Awaitable` / `AwaitableCompletionSource<T>`](https://docs.unity3d.com/
 Consumers who want UniTask can wrap via `ToUniTask()`. This pins the
 **minimum Unity version to 2023.1+ (Unity 6 LTS)**.
 
-### SendMessage timing — assumed synchronous
+### JS→C# dispatch timing — synchronous by construction
 
-Unity's docs don't specify SendMessage timing. Community evidence (WebSocket
-bridges that immediately `_free` payload memory after SendMessage; production
-audio bridges) indicates that **SendMessage delivers synchronously when called
-from within a jslib callback**, including from `Promise.then`, `setTimeout`,
-and `WebSocket.onmessage` handlers. The C# method runs inline before the next
-JS statement.
+**Superseded 2026-06-12** by the DynCall migration (see [dyncall-migration.md](./dyncall-migration.md) and Phase 2.5 below). The timing concern that motivated this subsection no longer applies: a wasm function-pointer call invoked via `{{{ makeDynCall('sig', 'fnVar') }}}` is a direct synchronous call into IL2CPP — the C# method runs inline before the next JS statement, by construction. The JS side `_free`s the UTF-8 payload buffer immediately after the DynCall returns, which depends on this synchronous-return contract; the contract is now a property of the wasm runtime, not an empirically observed `SendMessage` behaviour.
 
-If this assumption breaks in a future Unity version, the fix is local: add a
-one-frame queue at the dispatch layer. The registry and handler lookup don't
-change.
-
-A frame-count assertion test in the first WebGL build confirms the assumption.
+The original subsection (assumed-synchronous `SendMessage` with a planned frame-count assertion test) is preserved in git history at the commit prior to task 3 of the DynCall migration.
 
 ### Error handling
 
@@ -532,16 +523,39 @@ Tasks within this phase are mostly parallelisable.
 - [x] **2.6 — Index aggregation + bundling.** `index.ts` re-exports via namespace imports + spread; `pnpm run build:primitives` emits `Plugins/WebGL/ElevenLabsBridge.jslib`. `pnpm run verify:primitives` rebuilds + `git diff --exit-code`. Existing CLAUDE.md command documentation updated to match the new shape.
 - [x] **2.7 — Sample factory for end-to-end test.** A throwaway `mathFactory` registered in a Vitest setup file (returns an object with `add(a, b)` sync, `addAsync(a, b)` async, `pi` property, `addTickListener(callback)` returning a `removeListener` function). End-to-end Vitest exercises every primitive surface against it — factory invocation (shape `object`), sync method (shape `value`), async method (shape `value`), property read, callback registration with `BridgeCallback`, function-handle round-trip via `removeListener` (shape `function`), dispose. Not shipped; just used for cross-cutting coverage. Resolved open question #2 in the process: return shapes are passed per-call as ints rather than declared at registration time.
 
+### Phase 2.5 — DynCall migration of the JS settlement and callback channels (Unity-free, Vitest-covered)
+
+Lands between Phase 2 (done) and Phase 3 (not started). Replaces the two `SendMessage` call sites — `$EL_Settle` and `$EL_InvokeCallback` — with wasm function pointers invoked via the `{{{ makeDynCall('sig', 'fnVar') }}}` macro. The C# side does not change in this phase; the new entry points it will need (`EL_SetSettleCallback`, `EL_SetInvokeCallbackPtr`, `EL_ProbeWasmTable`) ship as JS stubs that will be wired in revised Phase 3.
+
+See [dyncall-migration.md](./dyncall-migration.md) for the full design rationale (wire protocol, AST-based macro substitution, two-layer `Use WebAssembly.Table` enforcement, consumer-impact mitigations). Tasks in this phase are sized as one commit each — **do not squash**; per-task commit granularity is the SendMessage-fallback contingency mitigation.
+
+- [ ] **2.5.1 — Add `Bridge~/src/primitives/function-pointers.ts`.** New module exporting `$EL_SettlePtr = 0`, `$EL_CallbackPtr = 0` (hoisted to globals via Unity's `$` convention), plus `EL_SetSettleCallback(ptr)`, `EL_SetInvokeCallbackPtr(ptr)`, and `EL_ProbeWasmTable()` entry points. Vitest: each setter writes to the right global; probe returns 1 when `Module.wasmTable` is in scope, 0 otherwise.
+- [ ] **2.5.2 — Delete `Bridge~/src/primitives/bridge-name.ts`** and update `globals.d.ts`: remove `_EL_BridgeName` and `SendMessage` ambient declarations; add `dynCall_viii`, `dynCall_vii`, `_EL_SettlePtr`, `_EL_CallbackPtr`, `stringToNewUTF8`, `_free`.
+- [ ] **2.5.3 — Rewrite `Bridge~/src/primitives/promise-settle.ts`.** New body uses `dynCall_viii(_EL_SettlePtr, promiseId, statusCode, payloadPtr)` with `statusCode` of `0` for ok / `1` for err; JS allocates the UTF-8 payload via `stringToNewUTF8`, calls DynCall, then `_free`s in `finally`. Vitest mocks `dynCall_viii` / `stringToNewUTF8` / `_free` / `_EL_SettlePtr`; asserts call args and free-after-call ordering.
+- [ ] **2.5.4 — Rewrite `Bridge~/src/primitives/callbacks.ts`.** Mirror of 2.5.3 with the `vii` signature (`handle`, `payloadPtr`). Same memory-lifetime contract and test shape.
+- [ ] **2.5.5 — Update `Bridge~/src/primitives/index.ts`.** Swap `import * as bridgeName from "./bridge-name"` for `import * as functionPointers from "./function-pointers"`; spread in place of `bridgeName`.
+- [ ] **2.5.6 — Add Rolldown transform plugin + regenerate `Plugins/WebGL/ElevenLabsBridge.jslib`.** New `Bridge~/build/substitute-make-dyncall.ts` exports a Rolldown plugin that uses `this.parse(code)` in `transform` to walk the AST, locates `CallExpression` nodes with `callee.name` matching `/^dynCall_[vif]+$/` and a first argument that's an `Identifier` starting with `_EL_`, and rewrites via `MagicString` to `{{{ makeDynCall('<sig>', '<varName>') }}}(<rest>)`. Wired into `bundle-jslib.ts`'s `rolldown({ plugins: [...] })` call. Plugin has its own unit tests (plain int args, nested `JSON.stringify`, multi-line, zero-arg, non-`_EL_` negative case). Then `pnpm --dir Bridge~ run build:primitives` regenerates the `.jslib`; commit it. `pnpm --dir Bridge~ run verify:primitives` passes. Spot-check: exactly **two** `{{{ makeDynCall(...) }}}` macro sites in the regenerated file, **zero** `SendMessage(...)` calls.
+
 ### Phase 3 — C# primitive layer (requires Unity)
 
-- [ ] **3.1 — DllImport declarations.** `ElevenLabsBridgeNative.cs` — every `EL_*` entry point, `#if UNITY_WEBGL && !UNITY_EDITOR` real bodies and throwing stubs otherwise (matches the existing convention).
+Phase 3 was redesigned on 2026-06-12 around the DynCall path (see [dyncall-migration.md](./dyncall-migration.md)). Headline changes vs. the original v0.1 plan: the dispatch entry point is a static `BridgeStaticCallbacks` class with `[AOT.MonoPInvokeCallback]` static methods (not a MonoBehaviour with `SendMessage` targets); the `WebGLBridge` MonoBehaviour and `BridgeMessageParser` are deleted; consumers must enable `Use WebAssembly.Table` (enforced at build time + runtime).
+
+- [ ] **3.0 — `BridgeStaticCallbacks` static class.** New `Runtime/WebGL/BridgeStaticCallbacks.cs` with two non-generic explicit delegate types (`SettleCallback`, `InvokeCallback` — `Action<...>` is rejected by IL2CPP with `[MonoPInvokeCallback]`), two static delegate fields for GC safety, two `[AOT.MonoPInvokeCallback]`-decorated static methods reading payload via `Marshal.PtrToStringUTF8(payloadPtr)` before returning, and a `[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]` static initializer that registers both function pointers, runs the `EL_ProbeWasmTable` runtime probe (warn-only on false), wraps the first DynCall in a try/catch for the authoritative `ReferenceError`-as-`BridgeException` signal, and subscribes `Application.quitting` for best-effort teardown. A `Runtime/WebGL/link.xml` preserves the whole type so IL2CPP stripping doesn't eat the function-pointer-only static methods on release builds.
+- [ ] **3.1 — DllImport declarations.** `ElevenLabsBridgeNative.cs` — every `EL_*` entry point including the new `EL_SetSettleCallback(IntPtr)`, `EL_SetInvokeCallbackPtr(IntPtr)`, `EL_ProbeWasmTable() -> int` from Phase 2.5.1; the legacy `EL_SetBridgeName` is removed. `#if UNITY_WEBGL && !UNITY_EDITOR` real bodies and throwing stubs otherwise (matches the existing convention).
 - [ ] **3.2 — Registries (C# side).** `Internal/Registries.cs` — promise registry (`Dictionary<int, AwaitableCompletionSource<string>>`), callback registry (`Dictionary<int, Action<string>>`). Atomic lookup-then-remove on settle/dispatch/dispose. Edit-mode tests for first-wins behaviour.
 - [ ] **3.3 — Marshalling (C# side).** `Marshalling/BridgeArgEncoder.cs` and `BridgeValueDecoder.cs`. Encoder walks `params object[]`, emits JSON with `$ref` / `$fn` / `$cb` markers based on runtime type. Decoder reads JSON returns and produces primitives, `JsObject`, `JsFunction`. Edit-mode tests round-trip each shape.
 - [ ] **3.4 — `JsBridge` static entry point.** `InvokeFactoryAsync<T>` / `InvokeFactory<T>` async/sync overloads. Internally allocates a promise ID (async) or marshals and calls the sync DllImport. Returns deserialised `T` (including `JsObject` / `JsFunction` as `T`).
 - [ ] **3.5 — `JsObject` + `JsFunction`.** `CallAsync<T>` / `Call<T>` / `Get<T>` overloads; `Dispose` calls `EL_ObjectRelease` / `EL_FunctionRelease`. Finalizer logs a warning via `BridgeLog` if dispose wasn't called. Edit-mode tests against stubbed DllImports.
-- [ ] **3.6 — `BridgeCallback`.** `Wrap(Action<string>)` + typed overload allocates a handle and registers the delegate. `Dispose` removes the registry entry. Wires `WebGLBridge.OnCallbackInvoked` to `BridgeCallbackRegistry.Dispatch`. Edit-mode tests for wrap / invoke / dispose, including "invocation after dispose silently no-ops."
-- [ ] **3.7 — Wire `WebGLBridge.OnPromiseSettled`.** Replaces the Phase-1 stub; routes to the promise registry. Edit-mode tests: settle resolves the `AwaitableCompletionSource`; err raises `BridgeException`.
+- [ ] **3.6 — `BridgeCallback`.** `Wrap(Action<string>)` + typed overload allocates a handle and registers the delegate. `Dispose` removes the registry entry. Wires `BridgeStaticCallbacks.OnCallbackInvokedFromJs` (from task 3.0) to the callback registry's `Dispatch`. Edit-mode tests for wrap / invoke / dispose, including "invocation after dispose silently no-ops."
+- [ ] **3.7 — Wire `BridgeStaticCallbacks.OnSettleFromJs` to the promise registry.** Routes the `(promiseId, statusCode, payloadPtr)` DynCall args into the promise registry — `statusCode == 0` resolves the `AwaitableCompletionSource<string>` with the payload; `statusCode == 1` raises `BridgeException`. Replaces the v0.1-plan's `WebGLBridge.OnPromiseSettled` MonoBehaviour `SendMessage` target. Edit-mode tests cover both paths.
 - [ ] **3.8 — XML doc comments** on every public type and member.
+
+Follow-up tasks landing alongside the C# work (see [dyncall-migration.md](./dyncall-migration.md) tasks 11a, 12, 13, 15):
+
+- Editor build preprocessor enforcing `Use WebAssembly.Table` at build time (`Editor/BridgeBuildPreprocessor.cs`).
+- Delete `Runtime/WebGL/WebGLBridge.cs` (replaced by `BridgeStaticCallbacks`).
+- Delete `Runtime/WebGL/BridgeMessageParser.cs` (typed DynCall args make string parsing unnecessary).
+- README updates documenting the `Use WebAssembly.Table` requirement and the .NET Standard 2.1 API compatibility level.
 
 ### Phase 4 — WebGL smoke test (requires Unity)
 
