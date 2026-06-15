@@ -4,6 +4,9 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { Parser, fromFile } from "@asyncapi/parser";
 import {
   CSharpGenerator,
+  ConstrainedObjectModel,
+  ConstrainedObjectPropertyModel,
+  ConstrainedReferenceModel,
   type CSharpPreset,
   type OutputModel,
 } from "@asyncapi/modelina";
@@ -458,6 +461,178 @@ function emitIncomingDispatcher(payloads: Payload[]): string {
 const dispatcherPath = resolve(protocolDir, "IncomingEventDispatcher.g.cs");
 writeFileSync(dispatcherPath, emitIncomingDispatcher(incoming));
 console.log(`Wrote ${dispatcherPath}`);
+
+// ---- Per-event args records (sibling of the DTO + dispatcher files) ----
+
+// Emits one flat `record {WireType}Args` per incoming wire payload plus a
+// `IncomingEventArgsExtensions.ToArgs(this WireType e)` extension. Conversation
+// subscribes to the dispatcher's wire-typed events and re-raises idiomatic
+// user-facing events whose payloads are these args records — the codegen
+// provides building blocks; combining, suppression, side effects, and event
+// naming stay hand-written in Conversation.
+//
+// Transformation rule (per the Phase 3 spec in plan-b.md):
+//  - Strip the redundant `type` property.
+//  - If exactly one property remains and it's a reference to a nested object,
+//    flatten that inner object's fields onto the args record. Otherwise copy
+//    the non-`type` properties as-is.
+//  - Field names verbatim from the inner type (no renaming heuristic) —
+//    Conversation can rename at its own surface.
+//  - Nested complex types (e.g. AudioEventAlignment) are reused from the wire
+//    DTO file by name, not re-emitted.
+//  - `ToArgs()` uses named arguments so spec-driven field reordering doesn't
+//    silently miswire constructor positions.
+//
+// Implementation: introspects each top-level wire payload's already-emitted
+// Modelina ConstrainedObjectModel; reuses its property names, C# types,
+// nullability rules, and reference targets. No re-running Modelina against a
+// transformed schema, no hand-rolled JSON-Schema → C# mapping — that keeps
+// the args output zero-drift from the DTO output by construction.
+
+// Two wire types currently hit the same wrapper/envelope name-clash bug as
+// the DTO output (3.4 in plan-b.md): the generated wrapper class collides
+// with the inner type and renames the property to `…Data`. Until that bug is
+// fixed at the wire layer, the args generator skips these and Conversation
+// hand-writes their mapping.
+const SKIPPED_ARGS = new Set([
+  "ClientToolCall",
+  "AgentToolResponseFullPayload",
+]);
+
+interface ArgsField {
+  name: string;
+  csType: string;
+}
+
+interface ArgsRecord {
+  wireType: string;
+  recordName: string;
+  fields: ArgsField[];
+  // C# property name of the inner wrapper on the wire DTO, e.g.
+  // "AgentResponseEvent" for AgentResponse. Undefined when not flattened.
+  innerProperty?: string;
+}
+
+function csPropName(
+  enclosing: string,
+  p: ConstrainedObjectPropertyModel,
+): string {
+  let name = toPascalCase(p.unconstrainedPropertyName);
+  if (name === enclosing) name = `${name}Data`;
+  return name;
+}
+
+function csPropType(p: ConstrainedObjectPropertyModel): string {
+  const baseType = p.property.type;
+  if (!p.required && !baseType.endsWith("?") && !isPrimitive(baseType)) {
+    return `${baseType}?`;
+  }
+  return baseType;
+}
+
+function buildArgsRecord(wireModel: OutputModel): ArgsRecord | null {
+  const obj = wireModel.model;
+  if (!(obj instanceof ConstrainedObjectModel)) return null;
+  const wireType = obj.name;
+  if (SKIPPED_ARGS.has(wireType)) return null;
+
+  const nonType = Object.values(obj.properties).filter(
+    (p) => p.unconstrainedPropertyName !== "type",
+  );
+
+  // Flatten when the only remaining property points to a nested object DTO.
+  if (nonType.length === 1) {
+    const wrapper = nonType[0];
+    const wrapperProp = wrapper.property;
+    if (wrapperProp instanceof ConstrainedReferenceModel) {
+      const inner = wrapperProp.ref;
+      if (inner instanceof ConstrainedObjectModel) {
+        const innerCsName = csPropName(wireType, wrapper);
+        const fields: ArgsField[] = Object.values(inner.properties).map(
+          (ip) => ({
+            name: csPropName(inner.name, ip),
+            csType: csPropType(ip),
+          }),
+        );
+        return {
+          wireType,
+          recordName: `${wireType}Args`,
+          fields,
+          innerProperty: innerCsName,
+        };
+      }
+    }
+  }
+
+  // Otherwise copy the non-type properties as-is.
+  const fields: ArgsField[] = nonType.map((p) => ({
+    name: csPropName(wireType, p),
+    csType: csPropType(p),
+  }));
+  return { wireType, recordName: `${wireType}Args`, fields };
+}
+
+function emitIncomingArgs(
+  payloads: Payload[],
+  results: GenerateResult[],
+): string {
+  const modelByName = new Map<string, OutputModel>();
+  for (const { models } of results) {
+    for (const m of models)
+      if (!modelByName.has(m.modelName)) modelByName.set(m.modelName, m);
+  }
+
+  const records: ArgsRecord[] = [];
+  for (const { name } of payloads) {
+    const wireModel = modelByName.get(name);
+    if (!wireModel) continue;
+    const rec = buildArgsRecord(wireModel);
+    if (rec) records.push(rec);
+  }
+
+  const recordDecls = records.map((rec) => {
+    const params = rec.fields.map((f) => `${f.csType} ${f.name}`).join(", ");
+    return `    public record ${rec.recordName}(${params});`;
+  });
+
+  const extensionMethods = records.map((rec) => {
+    const args = rec.fields
+      .map((f) => {
+        const access = rec.innerProperty
+          ? `e.${rec.innerProperty}.${f.name}`
+          : `e.${f.name}`;
+        return `${f.name}: ${access}`;
+      })
+      .join(", ");
+    return [
+      `        public static ${rec.recordName} ToArgs(this ${rec.wireType} e) =>`,
+      `            new(${args});`,
+    ].join("\n");
+  });
+
+  return [
+    "// <auto-generated />",
+    "// Source: Codegen~/schemas/convai-asyncapi.yml",
+    "// Generator: pnpm --dir Codegen~ run generate",
+    "",
+    "#nullable enable",
+    "",
+    "namespace ElevenLabs.Protocol",
+    "{",
+    recordDecls.join("\n\n"),
+    "",
+    "    public static class IncomingEventArgsExtensions",
+    "    {",
+    extensionMethods.join("\n\n"),
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+}
+
+const argsPath = resolve(protocolDir, "IncomingEventArgs.g.cs");
+writeFileSync(argsPath, emitIncomingArgs(incoming, incomingResults));
+console.log(`Wrote ${argsPath}`);
 
 // ---- Round-trip program ----
 
