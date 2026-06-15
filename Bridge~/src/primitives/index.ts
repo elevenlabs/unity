@@ -11,6 +11,7 @@
 // ... return {...} })();` — a clean single assignment that the appended
 // `mergeInto(LibraryManager.library, library);` footer then consumes.
 
+import * as functionPointers from "./function-pointers";
 import * as log from "./log";
 import * as registries from "./registries";
 import * as marshalling from "./marshalling";
@@ -19,6 +20,7 @@ import * as promiseSettle from "./promise-settle";
 import * as dispatcher from "./dispatcher";
 
 const library = {
+  ...functionPointers,
   ...log,
   ...registries,
   ...marshalling,
