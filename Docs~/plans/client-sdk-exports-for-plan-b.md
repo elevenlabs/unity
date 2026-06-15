@@ -1,5 +1,18 @@
 # `@elevenlabs/client` exports needed for the Unity SDK (Plan B)
 
+> **Status: ✅ Complete (2026-06-15).** Upstream PR
+> [elevenlabs/packages#835](https://github.com/elevenlabs/packages/pull/835)
+> shipped in `@elevenlabs/client@1.11.0` adding the `./internal/unity`
+> sub-path export. Unity-side cleanup landed: `factories.ts` imports from
+> `@elevenlabs/client/internal/unity` (with the three named config-type
+> aliases), `Bridge~/src/connection/platform-web.d.ts` is deleted, the
+> `resolve.alias` block is gone from `Bridge~/vitest.config.ts`, the
+> `deepImportAliases` block is gone from `Bridge~/build/bundle-jslib.ts`,
+> and `audio-glue.ts` composes `withoutAudioPayload` + `attachDefaultAudio`
+> over the SDK's `attachInputToConnection` / `attachConnectionToOutput`.
+> Document retained as the record of the upstream surface contract and the
+> rationale for `./internal/unity` as the entrypoint name.
+
 > **Audience.** An agent working in the `elevenlabs/packages` monorepo
 > (`packages/client/`). The author of this document is the Unity SDK
 > (`elevenlabs/unity`), maintained by the same person who
