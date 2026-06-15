@@ -11,6 +11,7 @@
 import { rolldown } from "rolldown";
 import { writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
+import { substituteMakeDyncall } from "./substitute-make-dyncall.ts";
 
 const args = process.argv.slice(2);
 if (args.length !== 2) {
@@ -21,6 +22,7 @@ const [entry, output] = args.map((p) => resolve(p));
 
 const bundle = await rolldown({
   input: entry,
+  plugins: [substituteMakeDyncall()],
 });
 
 try {

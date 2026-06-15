@@ -21,6 +21,31 @@ var library = (function() {
 
 //#endregion
 
+//#region src/primitives/function-pointers.ts
+	var function_pointers_exports = /* @__PURE__ */ __exportAll({
+		$EL_CallbackPtr: () => 0,
+		$EL_SettlePtr: () => 0,
+		EL_ProbeWasmTable: () => EL_ProbeWasmTable,
+		EL_SetInvokeCallbackPtr: () => EL_SetInvokeCallbackPtr,
+		EL_SetInvokeCallbackPtr__deps: () => EL_SetInvokeCallbackPtr__deps,
+		EL_SetSettleCallback: () => EL_SetSettleCallback,
+		EL_SetSettleCallback__deps: () => EL_SetSettleCallback__deps
+	});
+	const $EL_SettlePtr = 0;
+	const $EL_CallbackPtr = 0;
+	const EL_SetSettleCallback__deps = ["$EL_SettlePtr"];
+	function EL_SetSettleCallback(ptr) {
+		_EL_SettlePtr = ptr;
+	}
+	const EL_SetInvokeCallbackPtr__deps = ["$EL_CallbackPtr"];
+	function EL_SetInvokeCallbackPtr(ptr) {
+		_EL_CallbackPtr = ptr;
+	}
+	function EL_ProbeWasmTable() {
+		return typeof Module.wasmTable !== "undefined" ? 1 : 0;
+	}
+
+//#endregion
 //#region src/primitives/log.ts
 	var log_exports = /* @__PURE__ */ __exportAll({ $EL_Log: () => $EL_Log });
 	function $EL_Log(level, scope, msg) {
@@ -137,9 +162,14 @@ var library = (function() {
 		$EL_InvokeCallback: () => $EL_InvokeCallback,
 		$EL_InvokeCallback__deps: () => $EL_InvokeCallback__deps
 	});
-	const $EL_InvokeCallback__deps = ["$EL_BridgeName"];
+	const $EL_InvokeCallback__deps = ["$EL_CallbackPtr"];
 	function $EL_InvokeCallback(handle, payload) {
-		SendMessage(_EL_BridgeName, "OnCallbackInvoked", handle + ":" + payload);
+		const payloadPtr = stringToNewUTF8(payload);
+		try {
+			{{{ makeDynCall('vii', '_EL_CallbackPtr') }}}(handle, payloadPtr);
+		} finally {
+			_free(payloadPtr);
+		}
 	}
 
 //#endregion
@@ -148,9 +178,15 @@ var library = (function() {
 		$EL_Settle: () => $EL_Settle,
 		$EL_Settle__deps: () => $EL_Settle__deps
 	});
-	const $EL_Settle__deps = ["$EL_BridgeName"];
+	const $EL_Settle__deps = ["$EL_SettlePtr"];
 	function $EL_Settle(promiseId, status, payload) {
-		SendMessage(_EL_BridgeName, "OnPromiseSettled", promiseId + ":" + status + ":" + payload);
+		const statusCode = status === "ok" ? 0 : 1;
+		const payloadPtr = stringToNewUTF8(payload);
+		try {
+			{{{ makeDynCall('viii', '_EL_SettlePtr') }}}(promiseId, statusCode, payloadPtr);
+		} finally {
+			_free(payloadPtr);
+		}
 	}
 
 //#endregion
@@ -324,6 +360,7 @@ var library = (function() {
 //#endregion
 //#region src/primitives/index.ts
 	const library = {
+		...function_pointers_exports,
 		...log_exports,
 		...registries_exports,
 		...marshalling_exports,

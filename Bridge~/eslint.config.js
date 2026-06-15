@@ -4,7 +4,7 @@ import globals from "globals";
 export default [
   js.configs.recommended,
   {
-    files: ["build/**/*.{ts,mjs,js}"],
+    files: ["build/**/*.{mjs,js}"],
     languageOptions: {
       globals: { ...globals.node },
     },
