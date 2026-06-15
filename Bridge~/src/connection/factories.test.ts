@@ -123,6 +123,14 @@ beforeEach(() => {
   vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
   vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
   vi.stubGlobal("_EL_Settle", $EL_Settle);
+  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("dynCall_viii", vi.fn());
+  vi.stubGlobal(
+    "stringToNewUTF8",
+    vi.fn(() => nextPtr++),
+  );
+  vi.stubGlobal("_free", vi.fn());
+  // SendMessage still used by callbacks.ts (not yet rewritten to DynCall).
   vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
   vi.stubGlobal("SendMessage", vi.fn());
 
@@ -145,17 +153,22 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Helper: last SendMessage payload from the settled promise channel.
+// Helper: reconstruct "promiseId:status:payload" from the last DynCall settle.
 // ---------------------------------------------------------------------------
 
 type ElGlobals = typeof globalThis & {
   SendMessage: ReturnType<typeof vi.fn>;
+  dynCall_viii: ReturnType<typeof vi.fn>;
+  stringToNewUTF8: ReturnType<typeof vi.fn>;
 };
 const g = globalThis as ElGlobals;
 
-function lastSendMessage(): string {
-  const calls = g.SendMessage.mock.calls;
-  return calls[calls.length - 1][2] as string;
+function lastSettleMessage(): string {
+  const idx = g.dynCall_viii.mock.calls.length - 1;
+  const [, promiseId, statusCode] = g.dynCall_viii.mock.calls[idx];
+  const status = statusCode === 0 ? "ok" : "err";
+  const payload = g.stringToNewUTF8.mock.calls[idx][0] as string;
+  return `${promiseId as number}:${status}:${payload}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +205,7 @@ describe("createWebSocketConnection factory", () => {
     );
     await Promise.resolve();
 
-    const msg = lastSendMessage();
+    const msg = lastSettleMessage();
     expect(msg).toMatch(/^1:ok:\{"\$ref":\d+\}$/);
   });
 
@@ -204,7 +217,7 @@ describe("createWebSocketConnection factory", () => {
       1,
     );
     await Promise.resolve();
-    const handle = JSON.parse(lastSendMessage().slice("1:ok:".length))
+    const handle = JSON.parse(lastSettleMessage().slice("1:ok:".length))
       .$ref as number;
 
     g.SendMessage.mockClear();
@@ -218,7 +231,7 @@ describe("createWebSocketConnection factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe("2:ok:null");
+    expect(lastSettleMessage()).toBe("2:ok:null");
 
     const mockWsConn = await vi.mocked(WebSocketConnection.create).mock
       .results[0].value;
@@ -236,7 +249,7 @@ describe("createWebSocketConnection factory", () => {
       1,
     );
     await Promise.resolve();
-    const handle = JSON.parse(lastSendMessage().slice("1:ok:".length))
+    const handle = JSON.parse(lastSettleMessage().slice("1:ok:".length))
       .$ref as number;
 
     EL_ObjectRelease(handle);
@@ -269,7 +282,7 @@ describe("createWebRTCConnection factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toMatch(/^10:ok:\{"\$ref":\d+\}$/);
+    expect(lastSettleMessage()).toMatch(/^10:ok:\{"\$ref":\d+\}$/);
   });
 });
 
@@ -295,7 +308,7 @@ describe("createConnection factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toMatch(/^20:ok:\{"\$ref":\d+\}$/);
+    expect(lastSettleMessage()).toMatch(/^20:ok:\{"\$ref":\d+\}$/);
   });
 });
 
@@ -321,7 +334,7 @@ describe("createMediaDeviceInput factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toMatch(/^30:ok:\{"\$ref":\d+\}$/);
+    expect(lastSettleMessage()).toMatch(/^30:ok:\{"\$ref":\d+\}$/);
   });
 
   it("dispatches isMuted via EL_ObjectCallAsync", async () => {
@@ -332,7 +345,7 @@ describe("createMediaDeviceInput factory", () => {
       30,
     );
     await Promise.resolve();
-    const handle = JSON.parse(lastSendMessage().slice("30:ok:".length))
+    const handle = JSON.parse(lastSettleMessage().slice("30:ok:".length))
       .$ref as number;
 
     g.SendMessage.mockClear();
@@ -347,7 +360,7 @@ describe("createMediaDeviceInput factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe("31:ok:false");
+    expect(lastSettleMessage()).toBe("31:ok:false");
   });
 });
 
@@ -373,7 +386,7 @@ describe("createMediaDeviceOutput factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toMatch(/^40:ok:\{"\$ref":\d+\}$/);
+    expect(lastSettleMessage()).toMatch(/^40:ok:\{"\$ref":\d+\}$/);
   });
 
   it("dispatches setVolume via EL_ObjectCallAsync", async () => {
@@ -384,7 +397,7 @@ describe("createMediaDeviceOutput factory", () => {
       40,
     );
     await Promise.resolve();
-    const handle = JSON.parse(lastSendMessage().slice("40:ok:".length))
+    const handle = JSON.parse(lastSettleMessage().slice("40:ok:".length))
       .$ref as number;
 
     g.SendMessage.mockClear();
@@ -398,7 +411,7 @@ describe("createMediaDeviceOutput factory", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe("41:ok:null");
+    expect(lastSettleMessage()).toBe("41:ok:null");
 
     const mockOutput = await vi.mocked(MediaDeviceOutput.create).mock.results[0]
       .value;

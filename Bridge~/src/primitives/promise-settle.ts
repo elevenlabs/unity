@@ -1,30 +1,22 @@
 // Settle helper for the bridge wire protocol.
 //
-// $EL_Settle(promiseId, status, payload) fires a SendMessage to the Unity bridge
-// GameObject, delivering `promiseId + ':' + status + ':' + payload` to the
-// OnPromiseSettled C# handler. Every async entry point calls this on resolution
-// or rejection; the C# registry routes the message to the waiting
-// AwaitableCompletionSource<string> by promise ID.
+// $EL_Settle(promiseId, status, payload) invokes the C#-registered settle
+// function pointer via dynCall_viii. statusCode is 0 for "ok" / 1 for "err".
+// JS allocates a UTF-8 payload buffer via stringToNewUTF8 and frees it once
+// the DynCall returns — the call is synchronous by construction on the wasm
+// call stack so the C# handler has finished reading the buffer before _free runs.
 
-// Local stubs for the SendMessage-era globals. The ambient declarations were
-// removed from globals.d.ts in task 2.5.2; this file is rewritten in task 2.5.3
-// to use the DynCall channel, at which point these stubs disappear.
-declare function SendMessage(
-  gameObject: string,
-  method: string,
-  value: string,
-): void;
-declare const _EL_BridgeName: string;
-
-export const $EL_Settle__deps = ["$EL_BridgeName"];
+export const $EL_Settle__deps = ["$EL_SettlePtr"];
 export function $EL_Settle(
   promiseId: number,
   status: "ok" | "err",
   payload: string,
 ): void {
-  SendMessage(
-    _EL_BridgeName,
-    "OnPromiseSettled",
-    promiseId + ":" + status + ":" + payload,
-  );
+  const statusCode = status === "ok" ? 0 : 1;
+  const payloadPtr = stringToNewUTF8(payload);
+  try {
+    dynCall_viii(_EL_SettlePtr, promiseId, statusCode, payloadPtr);
+  } finally {
+    _free(payloadPtr);
+  }
 }

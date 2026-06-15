@@ -161,6 +161,14 @@ beforeEach(() => {
   vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
   vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
   vi.stubGlobal("_EL_Settle", $EL_Settle);
+  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("dynCall_viii", vi.fn());
+  vi.stubGlobal(
+    "stringToNewUTF8",
+    vi.fn(() => nextPtr++),
+  );
+  vi.stubGlobal("_free", vi.fn());
+  // SendMessage still used by callbacks.ts (not yet rewritten to DynCall).
   vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
   vi.stubGlobal("SendMessage", vi.fn());
 
@@ -182,12 +190,18 @@ beforeEach(() => {
 
 type ElGlobals = typeof globalThis & {
   SendMessage: ReturnType<typeof vi.fn>;
+  dynCall_viii: ReturnType<typeof vi.fn>;
+  stringToNewUTF8: ReturnType<typeof vi.fn>;
 };
 const g = globalThis as ElGlobals;
 
-function lastSendMessage(): string {
-  const calls = g.SendMessage.mock.calls;
-  return calls[calls.length - 1][2] as string;
+// Helper: reconstruct "promiseId:status:payload" from the last DynCall settle.
+function lastSettleMessage(): string {
+  const idx = g.dynCall_viii.mock.calls.length - 1;
+  const [, promiseId, statusCode] = g.dynCall_viii.mock.calls[idx];
+  const status = statusCode === 0 ? "ok" : "err";
+  const payload = g.stringToNewUTF8.mock.calls[idx][0] as string;
+  return `${promiseId as number}:${status}:${payload}`;
 }
 
 const SHAPE_FUNCTION = 2;
@@ -224,7 +238,7 @@ describe("attachDefaultAudio factory", () => {
       99,
     );
     return Promise.resolve().then(() => {
-      const msg = lastSendMessage();
+      const msg = lastSettleMessage();
       const match = msg.match(/^99:ok:\{"\$fn":(\d+)\}$/);
       if (!match) throw new Error(`unexpected settle payload: ${msg}`);
       return Number(match[1]);
@@ -299,6 +313,6 @@ describe("attachDefaultAudio factory", () => {
 
     expect(detachIn).toHaveBeenCalledTimes(1);
     expect(detachOut).toHaveBeenCalledTimes(1);
-    expect(lastSendMessage()).toBe("100:ok:null");
+    expect(lastSettleMessage()).toBe("100:ok:null");
   });
 });

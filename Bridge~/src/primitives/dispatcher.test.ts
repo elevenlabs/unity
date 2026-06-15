@@ -34,8 +34,10 @@ type ElGlobals = typeof globalThis & {
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
   _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
   _EL_NextHandleId: number;
-  _EL_BridgeName: string;
-  SendMessage: (go: string, method: string, value: string) => void;
+  _EL_SettlePtr: number;
+  dynCall_viii: ReturnType<typeof vi.fn>;
+  stringToNewUTF8: ReturnType<typeof vi.fn>;
+  _free: ReturnType<typeof vi.fn>;
 };
 
 const g = globalThis as ElGlobals;
@@ -78,10 +80,15 @@ beforeEach(() => {
   vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
   vi.stubGlobal("_EL_InvokeCallback", vi.fn()); // needed by $EL_Rehydrate for $cb markers
 
-  // Settlement (uses real implementation; assertions on SendMessage)
+  // Settlement (uses real implementation; assertions via DynCall mocks)
   vi.stubGlobal("_EL_Settle", $EL_Settle);
-  vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
-  vi.stubGlobal("SendMessage", vi.fn());
+  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("dynCall_viii", vi.fn());
+  vi.stubGlobal(
+    "stringToNewUTF8",
+    vi.fn(() => nextPtr++),
+  );
+  vi.stubGlobal("_free", vi.fn());
 
   // Emscripten heap simulation
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
@@ -96,9 +103,12 @@ beforeEach(() => {
   });
 });
 
-// Helper: extract the SendMessage value arg from the first call.
+// Helper: reconstruct "promiseId:status:payload" from the first DynCall settle.
 function settlementMessage(): string {
-  return (g.SendMessage as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+  const [, promiseId, statusCode] = g.dynCall_viii.mock.calls[0];
+  const status = statusCode === 0 ? "ok" : "err";
+  const payload = g.stringToNewUTF8.mock.calls[0][0] as string;
+  return `${promiseId as number}:${status}:${payload}`;
 }
 
 describe("EL_InvokeFactoryAsync", () => {

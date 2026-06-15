@@ -101,12 +101,18 @@ type ElGlobals = typeof globalThis & {
   SendMessage: ReturnType<typeof vi.fn>;
   _EL_Objects: Record<number, unknown>;
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+  dynCall_viii: ReturnType<typeof vi.fn>;
+  stringToNewUTF8: ReturnType<typeof vi.fn>;
 };
 const g = globalThis as ElGlobals;
 
-function lastSendMessage(): string {
-  const calls = g.SendMessage.mock.calls;
-  return calls[calls.length - 1][2] as string;
+// Helper: reconstruct "promiseId:status:payload" from the last DynCall settle.
+function lastSettleMessage(): string {
+  const idx = g.dynCall_viii.mock.calls.length - 1;
+  const [, promiseId, statusCode] = g.dynCall_viii.mock.calls[idx];
+  const status = statusCode === 0 ? "ok" : "err";
+  const payload = g.stringToNewUTF8.mock.calls[idx][0] as string;
+  return `${promiseId as number}:${status}:${payload}`;
 }
 
 // Extracts the numeric value after the second colon in a "pid:ok:{…}" message.
@@ -137,6 +143,14 @@ beforeEach(() => {
   vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
   vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
   vi.stubGlobal("_EL_Settle", $EL_Settle);
+  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("dynCall_viii", vi.fn());
+  vi.stubGlobal(
+    "stringToNewUTF8",
+    vi.fn(() => nextPtr++),
+  );
+  vi.stubGlobal("_free", vi.fn());
+  // SendMessage still used by callbacks.ts (not yet rewritten to DynCall).
   vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
   vi.stubGlobal("SendMessage", vi.fn());
 
@@ -192,7 +206,8 @@ async function startSession(): Promise<{
     1,
   );
   await Promise.resolve();
-  const connHandle = (parsePayload(lastSendMessage()) as { $ref: number }).$ref;
+  const connHandle = (parsePayload(lastSettleMessage()) as { $ref: number })
+    .$ref;
 
   EL_InvokeFactoryAsync(
     makePtr("createMediaDeviceInput"),
@@ -201,7 +216,7 @@ async function startSession(): Promise<{
     2,
   );
   await Promise.resolve();
-  const inputHandle = (parsePayload(lastSendMessage()) as { $ref: number })
+  const inputHandle = (parsePayload(lastSettleMessage()) as { $ref: number })
     .$ref;
 
   EL_InvokeFactoryAsync(
@@ -211,7 +226,7 @@ async function startSession(): Promise<{
     3,
   );
   await Promise.resolve();
-  const outputHandle = (parsePayload(lastSendMessage()) as { $ref: number })
+  const outputHandle = (parsePayload(lastSettleMessage()) as { $ref: number })
     .$ref;
 
   EL_InvokeFactoryAsync(
@@ -228,7 +243,8 @@ async function startSession(): Promise<{
     4,
   );
   await Promise.resolve();
-  const detachHandle = (parsePayload(lastSendMessage()) as { $fn: number }).$fn;
+  const detachHandle = (parsePayload(lastSettleMessage()) as { $fn: number })
+    .$fn;
 
   return { connHandle, inputHandle, outputHandle, detachHandle };
 }
@@ -333,7 +349,7 @@ describe("WebSocket session happy path", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe("5:ok:null");
+    expect(lastSettleMessage()).toBe("5:ok:null");
     const mockWsConn = await vi.mocked(WebSocketConnection.create).mock
       .results[0].value;
     expect(mockWsConn.sendMessage).toHaveBeenCalledWith({
@@ -361,7 +377,7 @@ describe("WebSocket session happy path", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe("6:ok:null");
+    expect(lastSettleMessage()).toBe("6:ok:null");
     expect(detachIn).toHaveBeenCalledTimes(1);
     expect(detachOut).toHaveBeenCalledTimes(1);
   });

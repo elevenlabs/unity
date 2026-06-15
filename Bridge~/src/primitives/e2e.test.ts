@@ -44,6 +44,10 @@ type ElGlobals = typeof globalThis & {
   _EL_NextHandleId: number;
   _EL_BridgeName: string;
   SendMessage: (go: string, method: string, value: string) => void;
+  _EL_SettlePtr: number;
+  dynCall_viii: ReturnType<typeof vi.fn>;
+  stringToNewUTF8: ReturnType<typeof vi.fn>;
+  _free: ReturnType<typeof vi.fn>;
 };
 
 const g = globalThis as ElGlobals;
@@ -102,6 +106,14 @@ beforeEach(() => {
   vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
 
   vi.stubGlobal("_EL_Settle", $EL_Settle);
+  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("dynCall_viii", vi.fn());
+  vi.stubGlobal(
+    "stringToNewUTF8",
+    vi.fn(() => nextPtr++),
+  );
+  vi.stubGlobal("_free", vi.fn());
+  // SendMessage is still used by callbacks.ts (not yet rewritten to DynCall).
   vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
   vi.stubGlobal("SendMessage", vi.fn());
 
@@ -119,9 +131,13 @@ beforeEach(() => {
   $EL_RegisterFactory("mathFactory", () => mathObj);
 });
 
-function lastSendMessage(): string {
-  const calls = (g.SendMessage as ReturnType<typeof vi.fn>).mock.calls;
-  return calls[calls.length - 1][2] as string;
+// Helper: reconstruct "promiseId:status:payload" from the last DynCall settle.
+function lastSettleMessage(): string {
+  const idx = g.dynCall_viii.mock.calls.length - 1;
+  const [, promiseId, statusCode] = g.dynCall_viii.mock.calls[idx];
+  const status = statusCode === 0 ? "ok" : "err";
+  const payload = g.stringToNewUTF8.mock.calls[idx][0] as string;
+  return `${promiseId as number}:${status}:${payload}`;
 }
 
 describe("mathFactory end-to-end", () => {
@@ -134,7 +150,7 @@ describe("mathFactory end-to-end", () => {
     );
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe('1:ok:{"$ref":1}');
+    expect(lastSettleMessage()).toBe('1:ok:{"$ref":1}');
     expect(g._EL_Objects[1]).toBe(mathObj);
   });
 
@@ -179,7 +195,7 @@ describe("mathFactory end-to-end", () => {
     await Promise.resolve();
     await Promise.resolve(); // extra tick for the inner Promise.resolve
 
-    expect(lastSendMessage()).toBe("2:ok:11");
+    expect(lastSettleMessage()).toBe("2:ok:11");
   });
 
   it("property read: pi returns Math.PI", async () => {
@@ -219,7 +235,7 @@ describe("mathFactory end-to-end", () => {
     await Promise.resolve();
 
     // Settlement carries the removeListener function handle
-    const settleMsg = lastSendMessage();
+    const settleMsg = lastSettleMessage();
     expect(settleMsg).toMatch(/^3:ok:\{"\$fn":\d+\}$/);
     const removeListenerHandle = JSON.parse(settleMsg.slice("3:ok:".length))
       .$fn as number;
@@ -259,7 +275,7 @@ describe("mathFactory end-to-end", () => {
     await Promise.resolve();
 
     const removeListenerHandle = JSON.parse(
-      lastSendMessage().slice("4:ok:".length),
+      lastSettleMessage().slice("4:ok:".length),
     ).$fn as number;
 
     (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
@@ -267,7 +283,7 @@ describe("mathFactory end-to-end", () => {
     EL_FunctionCallAsync(removeListenerHandle, makePtr("[]"), SHAPE_VOID, 5);
     await Promise.resolve();
 
-    expect(lastSendMessage()).toBe("5:ok:null");
+    expect(lastSettleMessage()).toBe("5:ok:null");
     expect(listeners.length).toBe(0);
   });
 
@@ -307,7 +323,7 @@ describe("mathFactory end-to-end", () => {
     );
     await Promise.resolve();
 
-    const fnHandle = JSON.parse(lastSendMessage().slice("6:ok:".length))
+    const fnHandle = JSON.parse(lastSettleMessage().slice("6:ok:".length))
       .$fn as number;
 
     EL_FunctionRelease(fnHandle);
