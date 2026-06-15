@@ -66,6 +66,14 @@ declare let _EL_CallbackPtr: number;
 // substitute-make-dyncall plugin (Phase 2.5.6) rewrites the call sites. The
 // signature characters follow Emscripten's convention: `v` = void return,
 // `i` = i32 argument.
+//
+// One `declare` per signature is intentional rather than a generic
+// `dynCall<S extends string>(sig: S, fnPtr, ...args)` with template-literal
+// arg derivation: it keeps per-call-site mocks in tests as separate spies
+// (`dynCall_viii` vs `dynCall_vii`), and lets the plugin treat the identifier
+// name as the statically-known sig instead of having to validate that the
+// first argument is a string literal. Revisit when adding a third signature
+// or if this channel gets extracted as a standalone library.
 declare function dynCall_viii(
   fnPtr: number,
   arg0: number,
