@@ -42,10 +42,10 @@ type ElGlobals = typeof globalThis & {
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
   _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
   _EL_NextHandleId: number;
-  _EL_BridgeName: string;
-  SendMessage: (go: string, method: string, value: string) => void;
   _EL_SettlePtr: number;
+  _EL_CallbackPtr: number;
   dynCall_viii: ReturnType<typeof vi.fn>;
+  dynCall_vii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
   _free: ReturnType<typeof vi.fn>;
 };
@@ -113,9 +113,8 @@ beforeEach(() => {
     vi.fn(() => nextPtr++),
   );
   vi.stubGlobal("_free", vi.fn());
-  // SendMessage is still used by callbacks.ts (not yet rewritten to DynCall).
-  vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
-  vi.stubGlobal("SendMessage", vi.fn());
+  vi.stubGlobal("_EL_CallbackPtr", 100);
+  vi.stubGlobal("dynCall_vii", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
   vi.stubGlobal("lengthBytesUTF8", (s: string) => s.length);
@@ -183,8 +182,6 @@ describe("mathFactory end-to-end", () => {
     await Promise.resolve();
     const mathHandle = 1;
 
-    (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
-
     EL_ObjectCallAsync(
       mathHandle,
       makePtr("addAsync"),
@@ -222,8 +219,6 @@ describe("mathFactory end-to-end", () => {
     await Promise.resolve();
     const mathHandle = 1;
 
-    (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
-
     const cbHandle = 2001;
     EL_ObjectCallAsync(
       mathHandle,
@@ -242,15 +237,14 @@ describe("mathFactory end-to-end", () => {
     expect(g._EL_Functions[removeListenerHandle]).toBeTypeOf("function");
     expect(listeners.length).toBe(1);
 
-    (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
-
-    // Tick — the rehydrated $cb closure fires SendMessage via _EL_InvokeCallback
+    // Tick — the rehydrated $cb closure fires _EL_InvokeCallback → dynCall_vii
     listeners[0](42);
-    expect(g.SendMessage).toHaveBeenCalledWith(
-      "__ElevenLabsBridge__",
-      "OnCallbackInvoked",
-      `${cbHandle}:42`,
+    expect(g.dynCall_vii).toHaveBeenCalledWith(
+      100,
+      cbHandle,
+      expect.any(Number),
     );
+    expect(g.stringToNewUTF8).toHaveBeenLastCalledWith("42");
   });
 
   it("function-handle round-trip: calling removeListener via EL_FunctionCallAsync removes the listener", async () => {
@@ -262,8 +256,6 @@ describe("mathFactory end-to-end", () => {
     );
     await Promise.resolve();
     const mathHandle = 1;
-
-    (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
     EL_ObjectCallAsync(
       mathHandle,
@@ -277,8 +269,6 @@ describe("mathFactory end-to-end", () => {
     const removeListenerHandle = JSON.parse(
       lastSettleMessage().slice("4:ok:".length),
     ).$fn as number;
-
-    (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
     EL_FunctionCallAsync(removeListenerHandle, makePtr("[]"), SHAPE_VOID, 5);
     await Promise.resolve();
@@ -311,8 +301,6 @@ describe("mathFactory end-to-end", () => {
     );
     await Promise.resolve();
     const mathHandle = 1;
-
-    (g.SendMessage as ReturnType<typeof vi.fn>).mockClear();
 
     EL_ObjectCallAsync(
       mathHandle,

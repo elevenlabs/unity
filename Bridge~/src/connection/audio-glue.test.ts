@@ -168,9 +168,8 @@ beforeEach(() => {
     vi.fn(() => nextPtr++),
   );
   vi.stubGlobal("_free", vi.fn());
-  // SendMessage still used by callbacks.ts (not yet rewritten to DynCall).
-  vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
-  vi.stubGlobal("SendMessage", vi.fn());
+  vi.stubGlobal("_EL_CallbackPtr", 100);
+  vi.stubGlobal("dynCall_vii", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
   vi.stubGlobal("lengthBytesUTF8", (s: string) => s.length);
@@ -189,7 +188,8 @@ beforeEach(() => {
 });
 
 type ElGlobals = typeof globalThis & {
-  SendMessage: ReturnType<typeof vi.fn>;
+  _EL_CallbackPtr: number;
+  dynCall_vii: ReturnType<typeof vi.fn>;
   dynCall_viii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
 };
@@ -270,20 +270,19 @@ describe("attachDefaultAudio factory", () => {
       e: IncomingSocketEvent,
     ) => void;
 
-    g.SendMessage.mockClear();
     wrapped({
       type: "audio",
       audio_event: { audio_base_64: "ZmFrZQ==", event_id: 5 },
     } as unknown as IncomingSocketEvent);
 
     // The {$cb:7} marker was rehydrated to a closure that fires
-    // _EL_InvokeCallback(7, JSON.stringify(arg)) → SendMessage with the
+    // _EL_InvokeCallback(7, JSON.stringify(arg)) → dynCall_vii with the
     // stripped event as payload.
-    const calls = g.SendMessage.mock.calls;
-    expect(calls).toHaveLength(1);
-    const payload = calls[0][2] as string;
-    expect(payload.startsWith("7:")).toBe(true);
-    const parsed = JSON.parse(payload.slice("7:".length)) as {
+    expect(g.dynCall_vii).toHaveBeenCalledWith(100, 7, expect.any(Number));
+    const payloadStr = g.stringToNewUTF8.mock.calls[
+      g.stringToNewUTF8.mock.calls.length - 1
+    ][0] as string;
+    const parsed = JSON.parse(payloadStr) as {
       type: string;
       audio_event: object;
     };

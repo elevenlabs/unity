@@ -98,9 +98,10 @@ function makePtr(s: string): number {
 }
 
 type ElGlobals = typeof globalThis & {
-  SendMessage: ReturnType<typeof vi.fn>;
   _EL_Objects: Record<number, unknown>;
   _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+  _EL_CallbackPtr: number;
+  dynCall_vii: ReturnType<typeof vi.fn>;
   dynCall_viii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
 };
@@ -150,9 +151,8 @@ beforeEach(() => {
     vi.fn(() => nextPtr++),
   );
   vi.stubGlobal("_free", vi.fn());
-  // SendMessage still used by callbacks.ts (not yet rewritten to DynCall).
-  vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
-  vi.stubGlobal("SendMessage", vi.fn());
+  vi.stubGlobal("_EL_CallbackPtr", 100);
+  vi.stubGlobal("dynCall_vii", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
   vi.stubGlobal("lengthBytesUTF8", (s: string) => s.length);
@@ -282,7 +282,6 @@ describe("WebSocket session happy path", () => {
       e: IncomingSocketEvent,
     ) => void;
 
-    g.SendMessage.mockClear();
     wrappedCb({
       type: "audio",
       audio_event: {
@@ -296,11 +295,15 @@ describe("WebSocket session happy path", () => {
       },
     } as unknown as IncomingSocketEvent);
 
-    const sendCalls = g.SendMessage.mock.calls;
-    expect(sendCalls).toHaveLength(1);
-    const rawPayload = sendCalls[0][2] as string;
-    expect(rawPayload.startsWith(`${CB_HANDLE}:`)).toBe(true);
-    const event = JSON.parse(rawPayload.slice(`${CB_HANDLE}:`.length)) as {
+    expect(g.dynCall_vii).toHaveBeenCalledWith(
+      100,
+      CB_HANDLE,
+      expect.any(Number),
+    );
+    const payloadStr = g.stringToNewUTF8.mock.calls[
+      g.stringToNewUTF8.mock.calls.length - 1
+    ][0] as string;
+    const event = JSON.parse(payloadStr) as {
       type: string;
       audio_event: { event_id: number };
     };
@@ -319,24 +322,26 @@ describe("WebSocket session happy path", () => {
       e: IncomingSocketEvent,
     ) => void;
 
-    g.SendMessage.mockClear();
     const interruption = {
       type: "interruption",
       interruption_event: { reason: "agent" },
     } as unknown as IncomingSocketEvent;
     wrappedCb(interruption);
 
-    const rawPayload = g.SendMessage.mock.calls[0][2] as string;
-    expect(rawPayload.startsWith(`${CB_HANDLE}:`)).toBe(true);
-    const event = JSON.parse(rawPayload.slice(`${CB_HANDLE}:`.length)) as {
-      type: string;
-    };
+    expect(g.dynCall_vii).toHaveBeenCalledWith(
+      100,
+      CB_HANDLE,
+      expect.any(Number),
+    );
+    const payloadStr = g.stringToNewUTF8.mock.calls[
+      g.stringToNewUTF8.mock.calls.length - 1
+    ][0] as string;
+    const event = JSON.parse(payloadStr) as { type: string };
     expect(event.type).toBe("interruption");
   });
 
   it("EL_ObjectCallAsync (step 6) dispatches sendMessage to the JS connection", async () => {
     const { connHandle } = await startSession();
-    g.SendMessage.mockClear();
 
     EL_ObjectCallAsync(
       connHandle,

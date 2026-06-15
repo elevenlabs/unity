@@ -1,22 +1,21 @@
 // Callback dispatch helper for the bridge wire protocol.
 //
-// $EL_InvokeCallback(handle, payload) fires a SendMessage to the Unity bridge
-// GameObject, delivering `handle + ':' + payload` to the OnCallbackInvoked
-// C# handler. JS never releases callback handles — the C# registry is the
-// authority on lifetime; closures that capture a handle may outlive the C#
-// registration and will silently no-op once the C# side has disposed the entry.
+// $EL_InvokeCallback(handle, payload) invokes the C#-registered callback
+// function pointer via dynCall_vii. JS allocates a UTF-8 payload buffer via
+// stringToNewUTF8 and frees it once the DynCall returns — the call is
+// synchronous by construction on the wasm call stack so the C# handler has
+// finished reading the buffer before _free runs.
+//
+// JS never releases callback handles — the C# registry is the authority on
+// lifetime; closures that capture a handle may outlive the C# registration
+// and will silently no-op once the C# side has disposed the entry.
 
-// Local stubs for the SendMessage-era globals. The ambient declarations were
-// removed from globals.d.ts in task 2.5.2; this file is rewritten in task 2.5.4
-// to use the DynCall channel, at which point these stubs disappear.
-declare function SendMessage(
-  gameObject: string,
-  method: string,
-  value: string,
-): void;
-declare const _EL_BridgeName: string;
-
-export const $EL_InvokeCallback__deps = ["$EL_BridgeName"];
+export const $EL_InvokeCallback__deps = ["$EL_CallbackPtr"];
 export function $EL_InvokeCallback(handle: number, payload: string): void {
-  SendMessage(_EL_BridgeName, "OnCallbackInvoked", handle + ":" + payload);
+  const payloadPtr = stringToNewUTF8(payload);
+  try {
+    dynCall_vii(_EL_CallbackPtr, handle, payloadPtr);
+  } finally {
+    _free(payloadPtr);
+  }
 }
