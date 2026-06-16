@@ -621,7 +621,7 @@ Phase 3 was redesigned on 2026-06-12 around the DynCall path (see [dyncall-migra
 
 ### Phase 4 — WebGL smoke test (requires the Phase 3 prelude above + Phase 3 complete)
 
-- [ ] **4.1 — Minimal scene.** A `BridgePrimitiveSmokeTest` MonoBehaviour: registers the `mathFactory` from Phase 2.7 in a `.jspre` (or its equivalent), then in C# `Start()` invokes the factory, exercises each surface (method, property, callback registration, function-handle round-trip), asserts on results, logs to console.
+- [x] **4.1 — Minimal scene.** A `BridgePrimitiveSmokeTest` MonoBehaviour: registers the `mathFactory` from Phase 2.7 in a `.jspre` (or its equivalent), then in C# `Start()` invokes the factory, exercises each surface (method, property, callback registration, function-handle round-trip), asserts on results, logs to console.
 - [ ] **4.2 — Validation assertions.**
   - V1: `SendMessage` from an async JS callback delivers same-frame (`Time.frameCount` comparison)
   - V2: `Awaitable` continuation after `await JsObject.CallAsync(...)` can immediately call another `DllImport` without breakage

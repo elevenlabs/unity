@@ -27,8 +27,16 @@
     "Tests.meta",
     "Plugins",
     "Plugins.meta",
+    "Samples~",
     "COMPATIBILITY.md",
     "CONTRIBUTING.md"
+  ],
+  "samples": [
+    {
+      "displayName": "Bridge Smoke Test",
+      "description": "Exercises every bridge primitive surface end-to-end in a WebGL build.",
+      "path": "Samples~/BridgeSmokeTest"
+    }
   ],
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"

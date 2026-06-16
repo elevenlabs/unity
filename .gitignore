@@ -125,6 +125,7 @@ Bridge~/dist/
 #   repo-root  (non-Unity source files at the repo root) — IGNORED: Unity auto-stamps docs,
 #              package.json, etc.; these carry no UPM-meaningful GUID so we don't track them.
 CHANGELOG.md.meta
+COMPATIBILITY.md.meta
 CONTRIBUTING.md.meta
 LICENSE.meta
 README.md.meta
