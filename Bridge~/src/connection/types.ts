@@ -15,7 +15,7 @@ import type {
   OutputConfig as SdkOutputConfig,
   DisconnectionDetails as SdkDisconnectionDetails,
   ConnectionType as SdkConnectionType,
-} from "@elevenlabs/client";
+} from "@elevenlabs/client/internal/unity";
 
 export type SessionConfig = SdkSessionConfig;
 export type FormatConfig = SdkFormatConfig;

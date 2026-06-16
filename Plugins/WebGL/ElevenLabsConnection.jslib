@@ -21,7 +21,768 @@ var library = (function() {
 
 //#endregion
 
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/BaseConnection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/createWorkletModuleLoader.js
+	const URLCache = /* @__PURE__ */ new Map();
+	function createWorkletModuleLoader(name, sourceCode) {
+		return async (worklet, path) => {
+			const cachedUrl = URLCache.get(name);
+			if (cachedUrl) return worklet.addModule(cachedUrl);
+			if (path) try {
+				await worklet.addModule(path);
+				URLCache.set(name, path);
+				return;
+			} catch (error) {
+				throw new Error(`Failed to load the ${name} worklet module from path: ${path}. Error: ${error}`);
+			}
+			const blob = new Blob([sourceCode], { type: "application/javascript" });
+			const blobURL = URL.createObjectURL(blob);
+			try {
+				await worklet.addModule(blobURL);
+				URLCache.set(name, blobURL);
+				return;
+			} catch {
+				URL.revokeObjectURL(blobURL);
+			}
+			try {
+				const moduleURL = `data:application/javascript;base64,${btoa(sourceCode)}`;
+				await worklet.addModule(moduleURL);
+				URLCache.set(name, moduleURL);
+			} catch (error) {
+				throw new Error(`Failed to load the ${name} worklet module. Make sure the browser supports AudioWorklets. If you are using a strict CSP, you may need to self-host the worklet files.`);
+			}
+		};
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/rawAudioProcessor.generated.js
+	const loadRawAudioProcessor = createWorkletModuleLoader("rawAudioProcessor", `/*
+ * ulaw encoding logic taken from the wavefile library
+ * https://github.com/rochars/wavefile/blob/master/lib/codecs/mulaw.js
+ * USED BY @elevenlabs/client
+ */
+
+const BIAS = 0x84;
+const CLIP = 32635;
+const encodeTable = [
+  0,0,1,1,2,2,2,2,3,3,3,3,3,3,3,3,
+  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+  5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+  5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
+  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7
+];
+
+function encodeSample(sample) {
+  let sign;
+  let exponent;
+  let mantissa;
+  let muLawSample;
+  sign = (sample >> 8) & 0x80;
+  if (sign !== 0) sample = -sample;
+  sample = sample + BIAS;
+  if (sample > CLIP) sample = CLIP;
+  exponent = encodeTable[(sample>>7) & 0xFF];
+  mantissa = (sample >> (exponent+3)) & 0x0F;
+  muLawSample = ~(sign | (exponent << 4) | mantissa);
+  
+  return muLawSample;
+}
+
+class RawAudioProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+              
+    this.port.onmessage = ({ data }) => {
+      switch (data.type) {
+        case "setFormat":
+          this.isMuted = false;
+          this.buffer = []; // Initialize an empty buffer
+          const chunkDurationMs = data.chunkDurationMs ?? 25;
+          this.bufferSize = Math.max(
+            1,
+            Math.round((data.sampleRate * chunkDurationMs) / 1000)
+          );
+          this.format = data.format;
+
+          if (globalThis.LibSampleRate && sampleRate !== data.sampleRate) {
+            globalThis.LibSampleRate.create(1, sampleRate, data.sampleRate).then(resampler => {
+              this.resampler = resampler;
+            });
+          }
+          break;
+        case "setMuted":
+          this.isMuted = data.isMuted;
+          break;
+      }
+    };
+  }
+  process(inputs) {
+    if (!this.buffer) {
+      return true;
+    }
+    
+    const input = inputs[0]; // Get the first input node
+    if (input.length > 0) {
+      let channelData = input[0]; // Get the first channel's data
+
+      // Resample the audio if necessary
+      if (this.resampler) {
+        channelData = this.resampler.full(channelData);
+      }
+
+      // Add channel data to the buffer
+      this.buffer.push(...channelData);
+      // Get max volume 
+      let sum = 0.0;
+      for (let i = 0; i < channelData.length; i++) {
+        sum += channelData[i] * channelData[i];
+      }
+      const maxVolume = Math.sqrt(sum / channelData.length);
+      // Check if buffer size has reached or exceeded the threshold
+      if (this.buffer.length >= this.bufferSize) {
+        const float32Array = this.isMuted 
+          ? new Float32Array(this.buffer.length)
+          : new Float32Array(this.buffer);
+
+        let encodedArray = this.format === "ulaw"
+          ? new Uint8Array(float32Array.length)
+          : new Int16Array(float32Array.length);
+
+        // Iterate through the Float32Array and convert each sample to PCM16
+        for (let i = 0; i < float32Array.length; i++) {
+          // Clamp the value to the range [-1, 1]
+          let sample = Math.max(-1, Math.min(1, float32Array[i]));
+
+          // Scale the sample to the range [-32768, 32767]
+          let value = sample < 0 ? sample * 32768 : sample * 32767;
+          if (this.format === "ulaw") {
+            value = encodeSample(Math.round(value));
+          }
+
+          encodedArray[i] = value;
+        }
+
+        // Send the buffered data to the main script
+        this.port.postMessage([encodedArray, maxVolume]);
+
+        // Clear the buffer after sending
+        this.buffer = [];
+      }
+    }
+    return true; // Continue processing
+  }
+}
+registerProcessor("rawAudioProcessor", RawAudioProcessor);
+`);
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/compatibility.js
+	function isIosDevice() {
+		return [
+			"iPad Simulator",
+			"iPhone Simulator",
+			"iPod Simulator",
+			"iPad",
+			"iPhone",
+			"iPod"
+		].includes(navigator.platform) || navigator.userAgent.includes("Mac") && "ontouchend" in document;
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/addLibsamplerateModule.js
+	const LIBSAMPLERATE_JS = "https://cdn.jsdelivr.net/npm/@alexanderolsen/libsamplerate-js@2.1.2/dist/libsamplerate.worklet.js";
+	async function addLibsamplerateModule(context, customPath) {
+		const libsamplerateUrl = customPath || LIBSAMPLERATE_JS;
+		await context.audioWorklet.addModule(libsamplerateUrl);
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/calculateVolume.js
+/**
+	* Calculate a scalar volume level (0–1) from byte frequency data.
+	*
+	* The value is the mean of all frequency bins normalised to [0, 1].
+	*/
+	function calculateVolume(frequencyData) {
+		if (frequencyData.length === 0) return 0;
+		let volume = 0;
+		for (let i = 0; i < frequencyData.length; i++) volume += frequencyData[i] / 255;
+		volume /= frequencyData.length;
+		return volume < 0 ? 0 : volume > 1 ? 1 : volume;
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/volumeProvider.js
+	const NO_VOLUME = {
+		getVolume: () => 0,
+		getByteFrequencyData: () => {}
+	};
+	const MIN_VOICE_FREQUENCY = 100;
+	const MAX_VOICE_FREQUENCY = 8e3;
+	/**
+	* Resamples the voice-relevant portion of raw frequency data into an output
+	* buffer using linear interpolation. This ensures both web and React Native
+	* return comparable frequency data focused on the human voice range.
+	*/
+	function resampleVoiceRange(raw, buffer, sampleRate) {
+		const binCount = raw.length;
+		const hzPerBin = sampleRate / 2 / binCount;
+		const minBin = Math.floor(100 / hzPerBin);
+		const maxBin = Math.min(Math.ceil(MAX_VOICE_FREQUENCY / hzPerBin), binCount);
+		const voiceBinCount = maxBin - minBin;
+		const outLen = buffer.length;
+		for (let i = 0; i < outLen; i++) {
+			const pos = i / outLen * voiceBinCount;
+			const lo = minBin + Math.floor(pos);
+			const hi = Math.min(lo + 1, maxBin - 1);
+			const t = pos - Math.floor(pos);
+			buffer[i] = Math.round(raw[lo] * (1 - t) + raw[hi] * t);
+		}
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/volumeProvider.js
+	function createAnalyserVolumeProvider(analyser, sampleRate) {
+		const binCount = analyser.frequencyBinCount;
+		let rawData;
+		let voiceData;
+		return {
+			getVolume() {
+				rawData ??= new Uint8Array(binCount);
+				voiceData ??= new Uint8Array(binCount);
+				analyser.getByteFrequencyData(rawData);
+				resampleVoiceRange(rawData, voiceData, sampleRate);
+				return calculateVolume(voiceData);
+			},
+			getByteFrequencyData(buffer) {
+				rawData ??= new Uint8Array(binCount);
+				analyser.getByteFrequencyData(rawData);
+				resampleVoiceRange(rawData, buffer, sampleRate);
+			}
+		};
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/input.js
+	const defaultConstraints = {
+		echoCancellation: true,
+		noiseSuppression: true,
+		autoGainControl: true,
+		channelCount: { ideal: 1 }
+	};
+	var MediaDeviceInput = class MediaDeviceInput {
+		context;
+		analyser;
+		worklet;
+		inputStream;
+		mediaStreamSource;
+		permissions;
+		onError;
+		static async create({ sampleRate, format, preferHeadphonesForIosDevices, inputDeviceId, workletPaths, libsampleratePath, onError, inputChunkDurationMs = 25 }) {
+			let context = null;
+			let inputStream = null;
+			try {
+				const options = {
+					sampleRate: { ideal: sampleRate },
+					...defaultConstraints
+				};
+				if (isIosDevice() && preferHeadphonesForIosDevices) {
+					const idealDevice = (await window.navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === "audioinput" && [
+						"airpod",
+						"headphone",
+						"earphone"
+					].find((keyword) => d.label.toLowerCase().includes(keyword)));
+					if (idealDevice) options.deviceId = { ideal: idealDevice.deviceId };
+				}
+				if (inputDeviceId) options.deviceId = MediaDeviceInput.getDeviceIdConstraint(inputDeviceId);
+				const supportsSampleRateConstraint = navigator.mediaDevices.getSupportedConstraints().sampleRate;
+				context = new window.AudioContext(supportsSampleRateConstraint ? { sampleRate } : {});
+				const analyser = context.createAnalyser();
+				if (!supportsSampleRateConstraint) await addLibsamplerateModule(context, libsampleratePath);
+				await loadRawAudioProcessor(context.audioWorklet, workletPaths?.rawAudioProcessor);
+				const constraints = {
+					voiceIsolation: true,
+					...options
+				};
+				inputStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+				const source = context.createMediaStreamSource(inputStream);
+				const worklet = new AudioWorkletNode(context, "rawAudioProcessor");
+				worklet.port.postMessage({
+					type: "setFormat",
+					format,
+					sampleRate,
+					chunkDurationMs: inputChunkDurationMs
+				});
+				source.connect(analyser);
+				analyser.connect(worklet);
+				await context.resume();
+				const permissions = await navigator.permissions.query({ name: "microphone" });
+				return new MediaDeviceInput(context, analyser, worklet, inputStream, source, permissions, onError);
+			} catch (error) {
+				inputStream?.getTracks().forEach((track) => {
+					track.stop();
+				});
+				context?.close();
+				throw error;
+			}
+		}
+		static getDeviceIdConstraint(deviceId) {
+			if (!deviceId) return;
+			return isIosDevice() ? { ideal: deviceId } : { exact: deviceId };
+		}
+		muted = false;
+		volumeProvider;
+		constructor(context, analyser, worklet, inputStream, mediaStreamSource, permissions, onError = console.error) {
+			this.context = context;
+			this.analyser = analyser;
+			this.worklet = worklet;
+			this.inputStream = inputStream;
+			this.mediaStreamSource = mediaStreamSource;
+			this.permissions = permissions;
+			this.onError = onError;
+			this.permissions.addEventListener("change", this.handlePermissionsChange);
+			this.worklet.port.start();
+			this.volumeProvider = createAnalyserVolumeProvider(analyser, context.sampleRate);
+		}
+		getAnalyser() {
+			return this.analyser;
+		}
+		getVolume() {
+			if (this.muted) return 0;
+			return this.volumeProvider.getVolume();
+		}
+		getByteFrequencyData(buffer) {
+			if (this.muted) {
+				buffer.fill(0);
+				return;
+			}
+			this.volumeProvider.getByteFrequencyData(buffer);
+		}
+		isMuted() {
+			return this.muted;
+		}
+		addListener(listener) {
+			this.worklet.port.addEventListener("message", listener);
+		}
+		removeListener(listener) {
+			this.worklet.port.removeEventListener("message", listener);
+		}
+		forgetInputStreamAndSource() {
+			for (const track of this.inputStream.getTracks()) track.stop();
+			this.mediaStreamSource.disconnect();
+		}
+		async close() {
+			this.forgetInputStreamAndSource();
+			this.permissions.removeEventListener("change", this.handlePermissionsChange);
+			await this.context.close();
+		}
+		async setMuted(isMuted) {
+			this.muted = isMuted;
+			this.worklet.port.postMessage({
+				type: "setMuted",
+				isMuted
+			});
+		}
+		settingInput = false;
+		async setDevice(config) {
+			try {
+				if (this.settingInput) throw new Error("Input device is already being set");
+				this.settingInput = true;
+				const inputDeviceId = config?.inputDeviceId;
+				const options = { ...defaultConstraints };
+				if (inputDeviceId) options.deviceId = MediaDeviceInput.getDeviceIdConstraint(inputDeviceId);
+				const constraints = {
+					voiceIsolation: true,
+					...options
+				};
+				const newInputStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+				this.forgetInputStreamAndSource();
+				this.inputStream = newInputStream;
+				this.mediaStreamSource = this.context.createMediaStreamSource(newInputStream);
+				this.mediaStreamSource.connect(this.analyser);
+			} catch (error) {
+				this.onError("Failed to switch input device:", error);
+				throw error;
+			} finally {
+				this.settingInput = false;
+			}
+		}
+		handlePermissionsChange = () => {
+			if (this.permissions.state === "denied") this.onError("Microphone permission denied");
+			else if (!this.settingInput) {
+				const [track] = this.inputStream.getAudioTracks();
+				const { deviceId } = track?.getSettings() ?? {};
+				this.setDevice({ inputDeviceId: deviceId }).catch((error) => {
+					this.onError("Failed to reset input device after permission change:", error);
+				});
+			}
+		};
+	};
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioConcatProcessor.generated.js
+	const loadAudioConcatProcessor = createWorkletModuleLoader("audioConcatProcessor", `/*
+ * ulaw decoding logic taken from the wavefile library
+ * https://github.com/rochars/wavefile/blob/master/lib/codecs/mulaw.js
+ * USED BY @elevenlabs/client
+ */
+
+const decodeTable = [0, 132, 396, 924, 1980, 4092, 8316, 16764];
+
+function decodeSample(muLawSample) {
+  let sign;
+  let exponent;
+  let mantissa;
+  let sample;
+  muLawSample = ~muLawSample;
+  sign = muLawSample & 0x80;
+  exponent = (muLawSample >> 4) & 0x07;
+  mantissa = muLawSample & 0x0f;
+  sample = decodeTable[exponent] + (mantissa << (exponent + 3));
+  if (sign !== 0) sample = -sample;
+
+  return sample;
+}
+
+class AudioConcatProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.buffers = []; // Initialize an empty buffer
+    this.cursor = 0;
+    this.currentBuffer = null;
+    this.wasInterrupted = false;
+    this.finished = false;
+
+    this.port.onmessage = ({ data }) => {
+      switch (data.type) {
+        case "setFormat":
+          this.format = data.format;
+          if (globalThis.LibSampleRate && sampleRate !== data.sampleRate) {
+            globalThis.LibSampleRate.create(
+              1,
+              data.sampleRate,
+              sampleRate
+            ).then(resampler => {
+              this.resampler = resampler;
+            });
+          }
+          break;
+        case "buffer":
+          this.wasInterrupted = false;
+          this.buffers.push(
+            this.format === "ulaw"
+              ? new Uint8Array(data.buffer)
+              : new Int16Array(data.buffer)
+          );
+          break;
+        case "interrupt":
+          this.wasInterrupted = true;
+          break;
+        case "clearInterrupted":
+          if (this.wasInterrupted) {
+            this.wasInterrupted = false;
+            this.buffers = [];
+            this.currentBuffer = null;
+          }
+      }
+    };
+  }
+  process(_, outputs) {
+    let finished = false;
+    const output = outputs[0][0];
+    for (let i = 0; i < output.length; i++) {
+      if (!this.currentBuffer) {
+        if (this.buffers.length === 0) {
+          finished = true;
+          break;
+        }
+        this.currentBuffer = this.buffers.shift();
+        if (this.resampler) {
+          this.currentBuffer = this.resampler.full(this.currentBuffer);
+        }
+        this.cursor = 0;
+      }
+
+      let value = this.currentBuffer[this.cursor];
+      if (this.format === "ulaw") {
+        value = decodeSample(value);
+      }
+      output[i] = value / 32768;
+      this.cursor++;
+
+      if (this.cursor >= this.currentBuffer.length) {
+        this.currentBuffer = null;
+      }
+    }
+
+    if (this.finished !== finished) {
+      this.finished = finished;
+      this.port.postMessage({ type: "process", finished });
+    }
+
+    return true; // Continue processing
+  }
+}
+
+registerProcessor("audioConcatProcessor", AudioConcatProcessor);
+`);
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/output.js
+	function maybePrimeIosPlayback({ sampleRate, format, worklet, audioElement }) {
+		if (!isIosDevice()) return;
+		const primeFrameCount = Math.floor(sampleRate * 100 / 1e3);
+		const silentBuffer = format === "ulaw" ? new Uint8Array(primeFrameCount).fill(255) : new Int16Array(primeFrameCount);
+		worklet.port.postMessage({
+			type: "buffer",
+			buffer: silentBuffer.buffer
+		});
+		audioElement.play().catch(() => {});
+	}
+	var MediaDeviceOutput = class MediaDeviceOutput {
+		context;
+		analyser;
+		gain;
+		worklet;
+		audioElement;
+		static async create({ sampleRate, format, outputDeviceId, workletPaths, libsampleratePath, audioContext }) {
+			let context = audioContext ?? null;
+			let audioElement = null;
+			try {
+				const supportsSampleRateConstraint = navigator.mediaDevices.getSupportedConstraints().sampleRate;
+				if (!context) context = new AudioContext(supportsSampleRateConstraint ? { sampleRate } : {});
+				const analyser = context.createAnalyser();
+				const gain = context.createGain();
+				audioElement = new Audio();
+				audioElement.src = "";
+				audioElement.load();
+				audioElement.autoplay = true;
+				audioElement.style.display = "none";
+				document.body.appendChild(audioElement);
+				const destination = context.createMediaStreamDestination();
+				audioElement.srcObject = destination.stream;
+				gain.connect(analyser);
+				analyser.connect(destination);
+				if (!supportsSampleRateConstraint || context.sampleRate !== sampleRate) {
+					if (context.sampleRate !== sampleRate) console.warn(`[ConversationalAI] Sample rate ${sampleRate} not available, resampling to ${context.sampleRate}`);
+					await addLibsamplerateModule(context, libsampleratePath);
+				}
+				await loadAudioConcatProcessor(context.audioWorklet, workletPaths?.audioConcatProcessor);
+				const worklet = new AudioWorkletNode(context, "audioConcatProcessor");
+				worklet.port.postMessage({
+					type: "setFormat",
+					format,
+					sampleRate
+				});
+				worklet.connect(gain);
+				await context.resume();
+				maybePrimeIosPlayback({
+					sampleRate,
+					format,
+					worklet,
+					audioElement
+				});
+				if (outputDeviceId && audioElement.setSinkId) await audioElement.setSinkId(outputDeviceId);
+				return new MediaDeviceOutput(context, analyser, gain, worklet, audioElement);
+			} catch (error) {
+				if (audioElement?.parentNode) audioElement.parentNode.removeChild(audioElement);
+				audioElement?.pause();
+				if (context && context.state !== "closed") await context.close();
+				throw error;
+			}
+		}
+		volume = 1;
+		interrupted = false;
+		interruptTimeout = null;
+		volumeProvider;
+		constructor(context, analyser, gain, worklet, audioElement) {
+			this.context = context;
+			this.analyser = analyser;
+			this.gain = gain;
+			this.worklet = worklet;
+			this.audioElement = audioElement;
+			this.worklet.port.start();
+			this.volumeProvider = createAnalyserVolumeProvider(analyser, context.sampleRate);
+		}
+		getAnalyser() {
+			return this.analyser;
+		}
+		getVolume() {
+			return this.volumeProvider.getVolume();
+		}
+		getByteFrequencyData(buffer) {
+			this.volumeProvider.getByteFrequencyData(buffer);
+		}
+		addListener(listener) {
+			this.worklet.port.addEventListener("message", listener);
+		}
+		removeListener(listener) {
+			this.worklet.port.removeEventListener("message", listener);
+		}
+		setVolume(volume) {
+			this.volume = volume;
+			this.gain.gain.value = volume;
+		}
+		playAudio(chunk) {
+			this.gain.gain.cancelScheduledValues(this.context.currentTime);
+			this.gain.gain.value = this.volume;
+			if (this.interruptTimeout) {
+				clearTimeout(this.interruptTimeout);
+				this.interruptTimeout = null;
+			}
+			this.worklet.port.postMessage({ type: "clearInterrupted" });
+			this.worklet.port.postMessage({
+				type: "buffer",
+				buffer: chunk
+			});
+		}
+		interrupt(resetDuration = 2e3) {
+			this.interrupted = true;
+			if (this.interruptTimeout) {
+				clearTimeout(this.interruptTimeout);
+				this.interruptTimeout = null;
+			}
+			this.worklet.port.postMessage({ type: "interrupt" });
+			this.gain.gain.exponentialRampToValueAtTime(1e-4, this.context.currentTime + resetDuration / 1e3);
+			this.interruptTimeout = setTimeout(() => {
+				this.interrupted = false;
+				this.gain.gain.value = this.volume;
+				this.worklet.port.postMessage({ type: "clearInterrupted" });
+				this.interruptTimeout = null;
+			}, resetDuration);
+		}
+		async setDevice(config) {
+			if (!("setSinkId" in HTMLAudioElement.prototype)) throw new Error("setSinkId is not supported in this browser");
+			const outputDeviceId = config?.outputDeviceId;
+			await this.audioElement.setSinkId(outputDeviceId || "");
+		}
+		async close() {
+			if (this.interruptTimeout) {
+				clearTimeout(this.interruptTimeout);
+				this.interruptTimeout = null;
+			}
+			if (this.audioElement.parentNode) this.audioElement.parentNode.removeChild(this.audioElement);
+			this.audioElement.pause();
+			await this.context.close();
+		}
+	};
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/webAudioAdapter.js
+/**
+	* Web implementation of {@link WebRTCAudioAdapter}.
+	*
+	* Uses AudioContext, HTMLAudioElement, and AudioWorkletNode to:
+	* - Attach remote audio tracks for playback via the DOM
+	* - Analyse input/output volume via AnalyserNode
+	* - Capture raw output audio via an AudioWorklet for the `onAudio` callback
+	*/
+	var WebAudioAdapter = class {
+		audioElements = [];
+		inputAudioContext = null;
+		audioCaptureContext = null;
+		async attachRemoteTrack(track, outputDeviceId) {
+			const audioElement = track.attach();
+			audioElement.autoplay = true;
+			audioElement.controls = false;
+			if (outputDeviceId && audioElement.setSinkId) try {
+				await audioElement.setSinkId(outputDeviceId);
+			} catch (error) {
+				console.warn("Failed to set output device for new audio element:", error);
+			}
+			audioElement.style.display = "none";
+			document.body.appendChild(audioElement);
+			this.audioElements.push(audioElement);
+		}
+		setupInputAnalysis(mediaStreamTrack) {
+			if (this.inputAudioContext) {
+				this.inputAudioContext.close().catch(() => {});
+				this.inputAudioContext = null;
+			}
+			const ctx = new AudioContext();
+			const analyser = ctx.createAnalyser();
+			ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack])).connect(analyser);
+			this.inputAudioContext = ctx;
+			return {
+				volumeProvider: createAnalyserVolumeProvider(analyser, ctx.sampleRate),
+				analyser
+			};
+		}
+		async setupOutputAnalysis(track, format, onAudioData) {
+			if (this.audioCaptureContext) {
+				this.audioCaptureContext.close().catch(() => {});
+				this.audioCaptureContext = null;
+			}
+			const audioContext = new AudioContext();
+			this.audioCaptureContext = audioContext;
+			const analyser = audioContext.createAnalyser();
+			analyser.fftSize = 2048;
+			analyser.smoothingTimeConstant = .8;
+			const mediaStream = new MediaStream([track.mediaStreamTrack]);
+			const source = audioContext.createMediaStreamSource(mediaStream);
+			const volumeProvider = createAnalyserVolumeProvider(analyser, audioContext.sampleRate);
+			await loadRawAudioProcessor(audioContext.audioWorklet);
+			const worklet = new AudioWorkletNode(audioContext, "rawAudioProcessor");
+			worklet.port.postMessage({
+				type: "setFormat",
+				format: format.format,
+				sampleRate: format.sampleRate
+			});
+			worklet.port.onmessage = (event) => {
+				const [audioData, maxVolume] = event.data;
+				onAudioData(audioData.buffer, maxVolume);
+			};
+			source.connect(analyser);
+			analyser.connect(worklet);
+			return {
+				volumeProvider,
+				analyser
+			};
+		}
+		setVolume(volume) {
+			for (const element of this.audioElements) element.volume = volume;
+		}
+		async setOutputDevice(deviceId) {
+			if (!("setSinkId" in HTMLAudioElement.prototype)) throw new Error("setSinkId is not supported in this browser");
+			await Promise.all(this.audioElements.map(async (element) => {
+				try {
+					await element.setSinkId(deviceId);
+				} catch (error) {
+					console.error("Failed to set sink ID for audio element:", error);
+					throw error;
+				}
+			}));
+		}
+		cleanup() {
+			if (this.inputAudioContext) {
+				this.inputAudioContext.close().catch((error) => {
+					console.warn("Error closing input audio context:", error);
+				});
+				this.inputAudioContext = null;
+			}
+			if (this.audioCaptureContext) {
+				this.audioCaptureContext.close().catch((error) => {
+					console.warn("Error closing audio capture context:", error);
+				});
+				this.audioCaptureContext = null;
+			}
+			for (const element of this.audioElements) element.remove();
+			this.audioElements = [];
+		}
+	};
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/BaseConnection.js
 	var BaseConnection = class {
 		queue = [];
 		disconnectionDetails = null;
@@ -79,13 +840,64 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/assert.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/version.js
+	const PACKAGE_VERSION = "1.11.2";
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/sourceInfo.js
+	let sourceInfo = Object.freeze({
+		name: "js_sdk",
+		version: PACKAGE_VERSION
+	});
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/events.js
+	function isValidSocketEvent(event) {
+		return !!event.type;
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/overrides.js
+	const CONVERSATION_INITIATION_CLIENT_DATA_TYPE = "conversation_initiation_client_data";
+	function constructOverrides(config) {
+		const overridesEvent = { type: CONVERSATION_INITIATION_CLIENT_DATA_TYPE };
+		if (config.overrides) overridesEvent.conversation_config_override = {
+			agent: {
+				prompt: config.overrides.agent?.prompt,
+				first_message: config.overrides.agent?.firstMessage,
+				language: config.overrides.agent?.language
+			},
+			tts: {
+				voice_id: config.overrides.tts?.voiceId,
+				speed: config.overrides.tts?.speed,
+				stability: config.overrides.tts?.stability,
+				similarity_boost: config.overrides.tts?.similarityBoost
+			},
+			conversation: { text_only: config.overrides.conversation?.textOnly }
+		};
+		if (config.customLlmExtraBody) overridesEvent.custom_llm_extra_body = config.customLlmExtraBody;
+		if (config.dynamicVariables) overridesEvent.dynamic_variables = config.dynamicVariables;
+		if (config.userId) overridesEvent.user_id = config.userId;
+		overridesEvent.source_info = {
+			source: sourceInfo.name,
+			version: sourceInfo.version
+		};
+		if (config.toolMockConfig) overridesEvent.tool_mock_config = {
+			mocking_strategy: config.toolMockConfig.mockingStrategy,
+			mocked_tool_names: config.toolMockConfig.mockedToolNames,
+			fallback_strategy: config.toolMockConfig.fallbackStrategy
+		};
+		return overridesEvent;
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/assert.js
 	function isJsonObject(value) {
 		return value != null && typeof value === "object" && !Array.isArray(value);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/errors.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/errors.js
 	async function extractApiErrorMessage(response) {
 		try {
 			const body = await response.json();
@@ -110,21 +922,146 @@ var library = (function() {
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/version.js
-	const PACKAGE_VERSION = "1.11.0";
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/sourceInfo.js
-	let sourceInfo = Object.freeze({
-		name: "js_sdk",
-		version: PACKAGE_VERSION
-	});
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/events.js
-	function isValidSocketEvent(event) {
-		return !!event.type;
-	}
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebSocketConnection.js
+	const MAIN_PROTOCOL = "convai";
+	const WSS_API_ORIGIN = "wss://api.elevenlabs.io";
+	const WSS_API_PATHNAME = "/v1/convai/conversation?agent_id=";
+	var WebSocketConnection = class WebSocketConnection extends BaseConnection {
+		socket;
+		conversationId;
+		inputFormat;
+		outputFormat;
+		outputListeners = /* @__PURE__ */ new Set();
+		pendingAudioEvents = [];
+		constructor(socket, conversationId, inputFormat, outputFormat) {
+			super();
+			this.socket = socket;
+			this.conversationId = conversationId;
+			this.inputFormat = inputFormat;
+			this.outputFormat = outputFormat;
+			this.socket.addEventListener("error", (event) => {
+				setTimeout(() => this.disconnect({
+					reason: "error",
+					message: "The connection was closed due to a socket error.",
+					context: { type: event.type }
+				}), 0);
+			});
+			this.socket.addEventListener("close", (event) => {
+				const closeCode = event.code;
+				const closeReason = event.reason || void 0;
+				const context = {
+					type: event.type,
+					code: closeCode,
+					reason: closeReason
+				};
+				this.disconnect(closeCode === 1e3 ? {
+					reason: "agent",
+					context,
+					closeCode,
+					closeReason
+				} : {
+					reason: "error",
+					message: closeReason || "The connection was closed by the server.",
+					context,
+					closeCode,
+					closeReason
+				});
+			});
+			this.socket.addEventListener("message", (event) => {
+				try {
+					const parsedEvent = JSON.parse(event.data);
+					if (!isValidSocketEvent(parsedEvent)) {
+						this.debug({
+							type: "invalid_event",
+							message: "Received invalid socket event",
+							data: event.data
+						});
+						return;
+					}
+					this.handleMessage(parsedEvent);
+				} catch (error) {
+					this.debug({
+						type: "parsing_error",
+						message: "Failed to parse socket message",
+						error: error instanceof Error ? error.message : String(error),
+						data: event.data
+					});
+				}
+			});
+		}
+		static async create(config) {
+			let socket = null;
+			try {
+				const origin = config.origin ?? WSS_API_ORIGIN;
+				let url;
+				const { name: source, version } = sourceInfo;
+				if (config.signedUrl) {
+					const separator = config.signedUrl.includes("?") ? "&" : "?";
+					url = `${config.signedUrl}${separator}source=${source}&version=${version}`;
+				} else url = `${origin}${WSS_API_PATHNAME}${config.agentId}&source=${source}&version=${version}`;
+				if (config.environment) url += `&environment=${encodeURIComponent(config.environment)}`;
+				const protocols = [MAIN_PROTOCOL];
+				if (config.authorization) protocols.push(`bearer.${config.authorization}`);
+				socket = new WebSocket(url, protocols);
+				const { conversation_id, agent_output_audio_format, user_input_audio_format } = await new Promise((resolve, reject) => {
+					socket.addEventListener("open", () => {
+						const overridesEvent = constructOverrides(config);
+						socket?.send(JSON.stringify(overridesEvent));
+					}, { once: true });
+					socket.addEventListener("error", (event) => {
+						setTimeout(() => reject(new SessionConnectionError("The connection was closed due to a socket error.")), 0);
+					});
+					socket.addEventListener("close", (event) => {
+						reject(new SessionConnectionError(event.reason || (event.code === 1e3 ? "Connection closed normally before session could be established." : "Connection closed unexpectedly before session could be established."), {
+							closeCode: event.code,
+							closeReason: event.reason || void 0
+						}));
+					});
+					socket.addEventListener("message", (event) => {
+						const message = JSON.parse(event.data);
+						if (!isValidSocketEvent(message)) return;
+						if (message.type === "conversation_initiation_metadata") resolve(message.conversation_initiation_metadata_event);
+						else console.warn("First received message is not conversation metadata.");
+					}, { once: true });
+				});
+				const inputFormat = parseFormat(user_input_audio_format ?? "pcm_16000");
+				const outputFormat = parseFormat(agent_output_audio_format);
+				return new WebSocketConnection(socket, conversation_id, inputFormat, outputFormat);
+			} catch (error) {
+				socket?.close();
+				throw error;
+			}
+		}
+		close() {
+			this.pendingAudioEvents = [];
+			this.socket.close(1e3, "User ended conversation");
+		}
+		sendMessage(message) {
+			this.socket.send(JSON.stringify(message));
+		}
+		addListener(listener) {
+			const hadListeners = this.outputListeners.size > 0;
+			this.outputListeners.add(listener);
+			if (hadListeners || this.pendingAudioEvents.length === 0) return;
+			const pending = this.pendingAudioEvents;
+			this.pendingAudioEvents = [];
+			for (const event of pending) listener(event);
+		}
+		removeListener(listener) {
+			this.outputListeners.delete(listener);
+		}
+		handleMessage(parsedEvent) {
+			super.handleMessage(parsedEvent);
+			if (parsedEvent.type === "audio" && parsedEvent.audio_event.audio_base_64) {
+				const audioEvent = { audio_base_64: parsedEvent.audio_event.audio_base_64 };
+				if (this.outputListeners.size === 0) {
+					this.pendingAudioEvents.push(audioEvent);
+					return;
+				}
+				this.outputListeners.forEach((listener) => listener(audioEvent));
+			}
+		}
+	};
 
 //#endregion
 //#region node_modules/.pnpm/livekit-client@2.16.1_@types+dom-mediacapture-record@1.0.22/node_modules/livekit-client/dist/livekit-client.esm.mjs
@@ -22044,41 +22981,7 @@ var library = (function() {
 	const ONE_MINUTE_IN_MILLISECONDS = 60 * ONE_SECOND_IN_MILLISECONDS;
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/overrides.js
-	const CONVERSATION_INITIATION_CLIENT_DATA_TYPE = "conversation_initiation_client_data";
-	function constructOverrides(config) {
-		const overridesEvent = { type: CONVERSATION_INITIATION_CLIENT_DATA_TYPE };
-		if (config.overrides) overridesEvent.conversation_config_override = {
-			agent: {
-				prompt: config.overrides.agent?.prompt,
-				first_message: config.overrides.agent?.firstMessage,
-				language: config.overrides.agent?.language
-			},
-			tts: {
-				voice_id: config.overrides.tts?.voiceId,
-				speed: config.overrides.tts?.speed,
-				stability: config.overrides.tts?.stability,
-				similarity_boost: config.overrides.tts?.similarityBoost
-			},
-			conversation: { text_only: config.overrides.conversation?.textOnly }
-		};
-		if (config.customLlmExtraBody) overridesEvent.custom_llm_extra_body = config.customLlmExtraBody;
-		if (config.dynamicVariables) overridesEvent.dynamic_variables = config.dynamicVariables;
-		if (config.userId) overridesEvent.user_id = config.userId;
-		overridesEvent.source_info = {
-			source: sourceInfo.name,
-			version: sourceInfo.version
-		};
-		if (config.toolMockConfig) overridesEvent.tool_mock_config = {
-			mocking_strategy: config.toolMockConfig.mockingStrategy,
-			mocked_tool_names: config.toolMockConfig.mockedToolNames,
-			fallback_strategy: config.toolMockConfig.fallbackStrategy
-		};
-		return overridesEvent;
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/audio.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/audio.js
 	function arrayBufferToBase64(b) {
 		const buffer = new Uint8Array(b);
 		return btoa(String.fromCharCode(...buffer));
@@ -22092,36 +22995,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/volumeProvider.js
-	const NO_VOLUME = {
-		getVolume: () => 0,
-		getByteFrequencyData: () => {}
-	};
-	const MIN_VOICE_FREQUENCY = 100;
-	const MAX_VOICE_FREQUENCY = 8e3;
-	/**
-	* Resamples the voice-relevant portion of raw frequency data into an output
-	* buffer using linear interpolation. This ensures both web and React Native
-	* return comparable frequency data focused on the human voice range.
-	*/
-	function resampleVoiceRange(raw, buffer, sampleRate) {
-		const binCount = raw.length;
-		const hzPerBin = sampleRate / 2 / binCount;
-		const minBin = Math.floor(100 / hzPerBin);
-		const maxBin = Math.min(Math.ceil(MAX_VOICE_FREQUENCY / hzPerBin), binCount);
-		const voiceBinCount = maxBin - minBin;
-		const outLen = buffer.length;
-		for (let i = 0; i < outLen; i++) {
-			const pos = i / outLen * voiceBinCount;
-			const lo = minBin + Math.floor(pos);
-			const hi = Math.min(lo + 1, maxBin - 1);
-			const t = pos - Math.floor(pos);
-			buffer[i] = Math.round(raw[lo] * (1 - t) + raw[hi] * t);
-		}
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/WebRTCAudioAdapter.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/WebRTCAudioAdapter.js
 	let audioAdapterFactory;
 	/**
 	* Register a factory that creates a {@link WebRTCAudioAdapter} for each
@@ -22137,7 +23011,7 @@ var library = (function() {
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebRTCConnection.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebRTCConnection.js
 	const DEFAULT_LIVEKIT_WS_URL = "wss://livekit.rtc.elevenlabs.io";
 	const HTTPS_API_ORIGIN = "https://api.elevenlabs.io";
 	const AUDIO_VOLUME_THRESHOLD = .01;
@@ -22476,835 +23350,7 @@ var library = (function() {
 	};
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/VoiceSessionSetup.js
-/**
-	* The active session setup strategy.
-	* Defaults to undefined — set by platform-specific entrypoints on import.
-	*/
-	let setupStrategy;
-	/**
-	* Override the voice session setup strategy.
-	* Called by platform-specific entrypoints to inject their own setup handling.
-	*/
-	function setSetupStrategy(strategy) {
-		setupStrategy = strategy;
-	}
-	/**
-	* Sets up a voice session for a WebRTC connection.
-	* Platform-agnostic: extracts the input/output controllers that
-	* WebRTCConnection already provides via LiveKit.
-	*/
-	function setupWebRTCSession(connection) {
-		if (!(connection instanceof WebRTCConnection)) throw new Error(`setupWebRTCSession requires a WebRTCConnection. Received: ${connection?.constructor?.name ?? typeof connection}`);
-		return {
-			connection,
-			input: connection.input,
-			output: connection.output,
-			playbackEventTarget: null,
-			detach: async () => {}
-		};
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/createWorkletModuleLoader.js
-	const URLCache = /* @__PURE__ */ new Map();
-	function createWorkletModuleLoader(name, sourceCode) {
-		return async (worklet, path) => {
-			const cachedUrl = URLCache.get(name);
-			if (cachedUrl) return worklet.addModule(cachedUrl);
-			if (path) try {
-				await worklet.addModule(path);
-				URLCache.set(name, path);
-				return;
-			} catch (error) {
-				throw new Error(`Failed to load the ${name} worklet module from path: ${path}. Error: ${error}`);
-			}
-			const blob = new Blob([sourceCode], { type: "application/javascript" });
-			const blobURL = URL.createObjectURL(blob);
-			try {
-				await worklet.addModule(blobURL);
-				URLCache.set(name, blobURL);
-				return;
-			} catch {
-				URL.revokeObjectURL(blobURL);
-			}
-			try {
-				const moduleURL = `data:application/javascript;base64,${btoa(sourceCode)}`;
-				await worklet.addModule(moduleURL);
-				URLCache.set(name, moduleURL);
-			} catch (error) {
-				throw new Error(`Failed to load the ${name} worklet module. Make sure the browser supports AudioWorklets. If you are using a strict CSP, you may need to self-host the worklet files.`);
-			}
-		};
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioConcatProcessor.generated.js
-	const loadAudioConcatProcessor = createWorkletModuleLoader("audioConcatProcessor", `/*
- * ulaw decoding logic taken from the wavefile library
- * https://github.com/rochars/wavefile/blob/master/lib/codecs/mulaw.js
- * USED BY @elevenlabs/client
- */
-
-const decodeTable = [0, 132, 396, 924, 1980, 4092, 8316, 16764];
-
-function decodeSample(muLawSample) {
-  let sign;
-  let exponent;
-  let mantissa;
-  let sample;
-  muLawSample = ~muLawSample;
-  sign = muLawSample & 0x80;
-  exponent = (muLawSample >> 4) & 0x07;
-  mantissa = muLawSample & 0x0f;
-  sample = decodeTable[exponent] + (mantissa << (exponent + 3));
-  if (sign !== 0) sample = -sample;
-
-  return sample;
-}
-
-class AudioConcatProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.buffers = []; // Initialize an empty buffer
-    this.cursor = 0;
-    this.currentBuffer = null;
-    this.wasInterrupted = false;
-    this.finished = false;
-
-    this.port.onmessage = ({ data }) => {
-      switch (data.type) {
-        case "setFormat":
-          this.format = data.format;
-          if (globalThis.LibSampleRate && sampleRate !== data.sampleRate) {
-            globalThis.LibSampleRate.create(
-              1,
-              data.sampleRate,
-              sampleRate
-            ).then(resampler => {
-              this.resampler = resampler;
-            });
-          }
-          break;
-        case "buffer":
-          this.wasInterrupted = false;
-          this.buffers.push(
-            this.format === "ulaw"
-              ? new Uint8Array(data.buffer)
-              : new Int16Array(data.buffer)
-          );
-          break;
-        case "interrupt":
-          this.wasInterrupted = true;
-          break;
-        case "clearInterrupted":
-          if (this.wasInterrupted) {
-            this.wasInterrupted = false;
-            this.buffers = [];
-            this.currentBuffer = null;
-          }
-      }
-    };
-  }
-  process(_, outputs) {
-    let finished = false;
-    const output = outputs[0][0];
-    for (let i = 0; i < output.length; i++) {
-      if (!this.currentBuffer) {
-        if (this.buffers.length === 0) {
-          finished = true;
-          break;
-        }
-        this.currentBuffer = this.buffers.shift();
-        if (this.resampler) {
-          this.currentBuffer = this.resampler.full(this.currentBuffer);
-        }
-        this.cursor = 0;
-      }
-
-      let value = this.currentBuffer[this.cursor];
-      if (this.format === "ulaw") {
-        value = decodeSample(value);
-      }
-      output[i] = value / 32768;
-      this.cursor++;
-
-      if (this.cursor >= this.currentBuffer.length) {
-        this.currentBuffer = null;
-      }
-    }
-
-    if (this.finished !== finished) {
-      this.finished = finished;
-      this.port.postMessage({ type: "process", finished });
-    }
-
-    return true; // Continue processing
-  }
-}
-
-registerProcessor("audioConcatProcessor", AudioConcatProcessor);
-`);
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/addLibsamplerateModule.js
-	const LIBSAMPLERATE_JS = "https://cdn.jsdelivr.net/npm/@alexanderolsen/libsamplerate-js@2.1.2/dist/libsamplerate.worklet.js";
-	async function addLibsamplerateModule(context, customPath) {
-		const libsamplerateUrl = customPath || LIBSAMPLERATE_JS;
-		await context.audioWorklet.addModule(libsamplerateUrl);
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/calculateVolume.js
-/**
-	* Calculate a scalar volume level (0–1) from byte frequency data.
-	*
-	* The value is the mean of all frequency bins normalised to [0, 1].
-	*/
-	function calculateVolume(frequencyData) {
-		if (frequencyData.length === 0) return 0;
-		let volume = 0;
-		for (let i = 0; i < frequencyData.length; i++) volume += frequencyData[i] / 255;
-		volume /= frequencyData.length;
-		return volume < 0 ? 0 : volume > 1 ? 1 : volume;
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/volumeProvider.js
-	function createAnalyserVolumeProvider(analyser, sampleRate) {
-		const binCount = analyser.frequencyBinCount;
-		let rawData;
-		let voiceData;
-		return {
-			getVolume() {
-				rawData ??= new Uint8Array(binCount);
-				voiceData ??= new Uint8Array(binCount);
-				analyser.getByteFrequencyData(rawData);
-				resampleVoiceRange(rawData, voiceData, sampleRate);
-				return calculateVolume(voiceData);
-			},
-			getByteFrequencyData(buffer) {
-				rawData ??= new Uint8Array(binCount);
-				analyser.getByteFrequencyData(rawData);
-				resampleVoiceRange(rawData, buffer, sampleRate);
-			}
-		};
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/compatibility.js
-	function isIosDevice() {
-		return [
-			"iPad Simulator",
-			"iPhone Simulator",
-			"iPod Simulator",
-			"iPad",
-			"iPhone",
-			"iPod"
-		].includes(navigator.platform) || navigator.userAgent.includes("Mac") && "ontouchend" in document;
-	}
-	function isAndroidDevice() {
-		return /android/i.test(navigator.userAgent);
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/output.js
-	function maybePrimeIosPlayback({ sampleRate, format, worklet, audioElement }) {
-		if (!isIosDevice()) return;
-		const primeFrameCount = Math.floor(sampleRate * 100 / 1e3);
-		const silentBuffer = format === "ulaw" ? new Uint8Array(primeFrameCount).fill(255) : new Int16Array(primeFrameCount);
-		worklet.port.postMessage({
-			type: "buffer",
-			buffer: silentBuffer.buffer
-		});
-		audioElement.play().catch(() => {});
-	}
-	var MediaDeviceOutput = class MediaDeviceOutput {
-		context;
-		analyser;
-		gain;
-		worklet;
-		audioElement;
-		static async create({ sampleRate, format, outputDeviceId, workletPaths, libsampleratePath, audioContext }) {
-			let context = audioContext ?? null;
-			let audioElement = null;
-			try {
-				const supportsSampleRateConstraint = navigator.mediaDevices.getSupportedConstraints().sampleRate;
-				if (!context) context = new AudioContext(supportsSampleRateConstraint ? { sampleRate } : {});
-				const analyser = context.createAnalyser();
-				const gain = context.createGain();
-				audioElement = new Audio();
-				audioElement.src = "";
-				audioElement.load();
-				audioElement.autoplay = true;
-				audioElement.style.display = "none";
-				document.body.appendChild(audioElement);
-				const destination = context.createMediaStreamDestination();
-				audioElement.srcObject = destination.stream;
-				gain.connect(analyser);
-				analyser.connect(destination);
-				if (!supportsSampleRateConstraint || context.sampleRate !== sampleRate) {
-					if (context.sampleRate !== sampleRate) console.warn(`[ConversationalAI] Sample rate ${sampleRate} not available, resampling to ${context.sampleRate}`);
-					await addLibsamplerateModule(context, libsampleratePath);
-				}
-				await loadAudioConcatProcessor(context.audioWorklet, workletPaths?.audioConcatProcessor);
-				const worklet = new AudioWorkletNode(context, "audioConcatProcessor");
-				worklet.port.postMessage({
-					type: "setFormat",
-					format,
-					sampleRate
-				});
-				worklet.connect(gain);
-				await context.resume();
-				maybePrimeIosPlayback({
-					sampleRate,
-					format,
-					worklet,
-					audioElement
-				});
-				if (outputDeviceId && audioElement.setSinkId) await audioElement.setSinkId(outputDeviceId);
-				return new MediaDeviceOutput(context, analyser, gain, worklet, audioElement);
-			} catch (error) {
-				if (audioElement?.parentNode) audioElement.parentNode.removeChild(audioElement);
-				audioElement?.pause();
-				if (context && context.state !== "closed") await context.close();
-				throw error;
-			}
-		}
-		volume = 1;
-		interrupted = false;
-		interruptTimeout = null;
-		volumeProvider;
-		constructor(context, analyser, gain, worklet, audioElement) {
-			this.context = context;
-			this.analyser = analyser;
-			this.gain = gain;
-			this.worklet = worklet;
-			this.audioElement = audioElement;
-			this.worklet.port.start();
-			this.volumeProvider = createAnalyserVolumeProvider(analyser, context.sampleRate);
-		}
-		getAnalyser() {
-			return this.analyser;
-		}
-		getVolume() {
-			return this.volumeProvider.getVolume();
-		}
-		getByteFrequencyData(buffer) {
-			this.volumeProvider.getByteFrequencyData(buffer);
-		}
-		addListener(listener) {
-			this.worklet.port.addEventListener("message", listener);
-		}
-		removeListener(listener) {
-			this.worklet.port.removeEventListener("message", listener);
-		}
-		setVolume(volume) {
-			this.volume = volume;
-			this.gain.gain.value = volume;
-		}
-		playAudio(chunk) {
-			this.gain.gain.cancelScheduledValues(this.context.currentTime);
-			this.gain.gain.value = this.volume;
-			if (this.interruptTimeout) {
-				clearTimeout(this.interruptTimeout);
-				this.interruptTimeout = null;
-			}
-			this.worklet.port.postMessage({ type: "clearInterrupted" });
-			this.worklet.port.postMessage({
-				type: "buffer",
-				buffer: chunk
-			});
-		}
-		interrupt(resetDuration = 2e3) {
-			this.interrupted = true;
-			if (this.interruptTimeout) {
-				clearTimeout(this.interruptTimeout);
-				this.interruptTimeout = null;
-			}
-			this.worklet.port.postMessage({ type: "interrupt" });
-			this.gain.gain.exponentialRampToValueAtTime(1e-4, this.context.currentTime + resetDuration / 1e3);
-			this.interruptTimeout = setTimeout(() => {
-				this.interrupted = false;
-				this.gain.gain.value = this.volume;
-				this.worklet.port.postMessage({ type: "clearInterrupted" });
-				this.interruptTimeout = null;
-			}, resetDuration);
-		}
-		async setDevice(config) {
-			if (!("setSinkId" in HTMLAudioElement.prototype)) throw new Error("setSinkId is not supported in this browser");
-			const outputDeviceId = config?.outputDeviceId;
-			await this.audioElement.setSinkId(outputDeviceId || "");
-		}
-		async close() {
-			if (this.interruptTimeout) {
-				clearTimeout(this.interruptTimeout);
-				this.interruptTimeout = null;
-			}
-			if (this.audioElement.parentNode) this.audioElement.parentNode.removeChild(this.audioElement);
-			this.audioElement.pause();
-			await this.context.close();
-		}
-	};
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/rawAudioProcessor.generated.js
-	const loadRawAudioProcessor = createWorkletModuleLoader("rawAudioProcessor", `/*
- * ulaw encoding logic taken from the wavefile library
- * https://github.com/rochars/wavefile/blob/master/lib/codecs/mulaw.js
- * USED BY @elevenlabs/client
- */
-
-const BIAS = 0x84;
-const CLIP = 32635;
-const encodeTable = [
-  0,0,1,1,2,2,2,2,3,3,3,3,3,3,3,3,
-  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
-  5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
-  5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
-  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
-  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
-  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
-  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7
-];
-
-function encodeSample(sample) {
-  let sign;
-  let exponent;
-  let mantissa;
-  let muLawSample;
-  sign = (sample >> 8) & 0x80;
-  if (sign !== 0) sample = -sample;
-  sample = sample + BIAS;
-  if (sample > CLIP) sample = CLIP;
-  exponent = encodeTable[(sample>>7) & 0xFF];
-  mantissa = (sample >> (exponent+3)) & 0x0F;
-  muLawSample = ~(sign | (exponent << 4) | mantissa);
-  
-  return muLawSample;
-}
-
-class RawAudioProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-              
-    this.port.onmessage = ({ data }) => {
-      switch (data.type) {
-        case "setFormat":
-          this.isMuted = false;
-          this.buffer = []; // Initialize an empty buffer
-          const chunkDurationMs = data.chunkDurationMs ?? 25;
-          this.bufferSize = Math.max(
-            1,
-            Math.round((data.sampleRate * chunkDurationMs) / 1000)
-          );
-          this.format = data.format;
-
-          if (globalThis.LibSampleRate && sampleRate !== data.sampleRate) {
-            globalThis.LibSampleRate.create(1, sampleRate, data.sampleRate).then(resampler => {
-              this.resampler = resampler;
-            });
-          }
-          break;
-        case "setMuted":
-          this.isMuted = data.isMuted;
-          break;
-      }
-    };
-  }
-  process(inputs) {
-    if (!this.buffer) {
-      return true;
-    }
-    
-    const input = inputs[0]; // Get the first input node
-    if (input.length > 0) {
-      let channelData = input[0]; // Get the first channel's data
-
-      // Resample the audio if necessary
-      if (this.resampler) {
-        channelData = this.resampler.full(channelData);
-      }
-
-      // Add channel data to the buffer
-      this.buffer.push(...channelData);
-      // Get max volume 
-      let sum = 0.0;
-      for (let i = 0; i < channelData.length; i++) {
-        sum += channelData[i] * channelData[i];
-      }
-      const maxVolume = Math.sqrt(sum / channelData.length);
-      // Check if buffer size has reached or exceeded the threshold
-      if (this.buffer.length >= this.bufferSize) {
-        const float32Array = this.isMuted 
-          ? new Float32Array(this.buffer.length)
-          : new Float32Array(this.buffer);
-
-        let encodedArray = this.format === "ulaw"
-          ? new Uint8Array(float32Array.length)
-          : new Int16Array(float32Array.length);
-
-        // Iterate through the Float32Array and convert each sample to PCM16
-        for (let i = 0; i < float32Array.length; i++) {
-          // Clamp the value to the range [-1, 1]
-          let sample = Math.max(-1, Math.min(1, float32Array[i]));
-
-          // Scale the sample to the range [-32768, 32767]
-          let value = sample < 0 ? sample * 32768 : sample * 32767;
-          if (this.format === "ulaw") {
-            value = encodeSample(Math.round(value));
-          }
-
-          encodedArray[i] = value;
-        }
-
-        // Send the buffered data to the main script
-        this.port.postMessage([encodedArray, maxVolume]);
-
-        // Clear the buffer after sending
-        this.buffer = [];
-      }
-    }
-    return true; // Continue processing
-  }
-}
-registerProcessor("rawAudioProcessor", RawAudioProcessor);
-`);
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/input.js
-	const defaultConstraints = {
-		echoCancellation: true,
-		noiseSuppression: true,
-		autoGainControl: true,
-		channelCount: { ideal: 1 }
-	};
-	var MediaDeviceInput = class MediaDeviceInput {
-		context;
-		analyser;
-		worklet;
-		inputStream;
-		mediaStreamSource;
-		permissions;
-		onError;
-		static async create({ sampleRate, format, preferHeadphonesForIosDevices, inputDeviceId, workletPaths, libsampleratePath, onError, inputChunkDurationMs = 25 }) {
-			let context = null;
-			let inputStream = null;
-			try {
-				const options = {
-					sampleRate: { ideal: sampleRate },
-					...defaultConstraints
-				};
-				if (isIosDevice() && preferHeadphonesForIosDevices) {
-					const idealDevice = (await window.navigator.mediaDevices.enumerateDevices()).find((d) => d.kind === "audioinput" && [
-						"airpod",
-						"headphone",
-						"earphone"
-					].find((keyword) => d.label.toLowerCase().includes(keyword)));
-					if (idealDevice) options.deviceId = { ideal: idealDevice.deviceId };
-				}
-				if (inputDeviceId) options.deviceId = MediaDeviceInput.getDeviceIdConstraint(inputDeviceId);
-				const supportsSampleRateConstraint = navigator.mediaDevices.getSupportedConstraints().sampleRate;
-				context = new window.AudioContext(supportsSampleRateConstraint ? { sampleRate } : {});
-				const analyser = context.createAnalyser();
-				if (!supportsSampleRateConstraint) await addLibsamplerateModule(context, libsampleratePath);
-				await loadRawAudioProcessor(context.audioWorklet, workletPaths?.rawAudioProcessor);
-				const constraints = {
-					voiceIsolation: true,
-					...options
-				};
-				inputStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-				const source = context.createMediaStreamSource(inputStream);
-				const worklet = new AudioWorkletNode(context, "rawAudioProcessor");
-				worklet.port.postMessage({
-					type: "setFormat",
-					format,
-					sampleRate,
-					chunkDurationMs: inputChunkDurationMs
-				});
-				source.connect(analyser);
-				analyser.connect(worklet);
-				await context.resume();
-				const permissions = await navigator.permissions.query({ name: "microphone" });
-				return new MediaDeviceInput(context, analyser, worklet, inputStream, source, permissions, onError);
-			} catch (error) {
-				inputStream?.getTracks().forEach((track) => {
-					track.stop();
-				});
-				context?.close();
-				throw error;
-			}
-		}
-		static getDeviceIdConstraint(deviceId) {
-			if (!deviceId) return;
-			return isIosDevice() ? { ideal: deviceId } : { exact: deviceId };
-		}
-		muted = false;
-		volumeProvider;
-		constructor(context, analyser, worklet, inputStream, mediaStreamSource, permissions, onError = console.error) {
-			this.context = context;
-			this.analyser = analyser;
-			this.worklet = worklet;
-			this.inputStream = inputStream;
-			this.mediaStreamSource = mediaStreamSource;
-			this.permissions = permissions;
-			this.onError = onError;
-			this.permissions.addEventListener("change", this.handlePermissionsChange);
-			this.worklet.port.start();
-			this.volumeProvider = createAnalyserVolumeProvider(analyser, context.sampleRate);
-		}
-		getAnalyser() {
-			return this.analyser;
-		}
-		getVolume() {
-			if (this.muted) return 0;
-			return this.volumeProvider.getVolume();
-		}
-		getByteFrequencyData(buffer) {
-			if (this.muted) {
-				buffer.fill(0);
-				return;
-			}
-			this.volumeProvider.getByteFrequencyData(buffer);
-		}
-		isMuted() {
-			return this.muted;
-		}
-		addListener(listener) {
-			this.worklet.port.addEventListener("message", listener);
-		}
-		removeListener(listener) {
-			this.worklet.port.removeEventListener("message", listener);
-		}
-		forgetInputStreamAndSource() {
-			for (const track of this.inputStream.getTracks()) track.stop();
-			this.mediaStreamSource.disconnect();
-		}
-		async close() {
-			this.forgetInputStreamAndSource();
-			this.permissions.removeEventListener("change", this.handlePermissionsChange);
-			await this.context.close();
-		}
-		async setMuted(isMuted) {
-			this.muted = isMuted;
-			this.worklet.port.postMessage({
-				type: "setMuted",
-				isMuted
-			});
-		}
-		settingInput = false;
-		async setDevice(config) {
-			try {
-				if (this.settingInput) throw new Error("Input device is already being set");
-				this.settingInput = true;
-				const inputDeviceId = config?.inputDeviceId;
-				const options = { ...defaultConstraints };
-				if (inputDeviceId) options.deviceId = MediaDeviceInput.getDeviceIdConstraint(inputDeviceId);
-				const constraints = {
-					voiceIsolation: true,
-					...options
-				};
-				const newInputStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-				this.forgetInputStreamAndSource();
-				this.inputStream = newInputStream;
-				this.mediaStreamSource = this.context.createMediaStreamSource(newInputStream);
-				this.mediaStreamSource.connect(this.analyser);
-			} catch (error) {
-				this.onError("Failed to switch input device:", error);
-				throw error;
-			} finally {
-				this.settingInput = false;
-			}
-		}
-		handlePermissionsChange = () => {
-			if (this.permissions.state === "denied") this.onError("Microphone permission denied");
-			else if (!this.settingInput) {
-				const [track] = this.inputStream.getAudioTracks();
-				const { deviceId } = track?.getSettings() ?? {};
-				this.setDevice({ inputDeviceId: deviceId }).catch((error) => {
-					this.onError("Failed to reset input device after permission change:", error);
-				});
-			}
-		};
-	};
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/WebSocketConnection.js
-	const MAIN_PROTOCOL = "convai";
-	const WSS_API_ORIGIN = "wss://api.elevenlabs.io";
-	const WSS_API_PATHNAME = "/v1/convai/conversation?agent_id=";
-	var WebSocketConnection = class WebSocketConnection extends BaseConnection {
-		socket;
-		conversationId;
-		inputFormat;
-		outputFormat;
-		outputListeners = /* @__PURE__ */ new Set();
-		pendingAudioEvents = [];
-		constructor(socket, conversationId, inputFormat, outputFormat) {
-			super();
-			this.socket = socket;
-			this.conversationId = conversationId;
-			this.inputFormat = inputFormat;
-			this.outputFormat = outputFormat;
-			this.socket.addEventListener("error", (event) => {
-				setTimeout(() => this.disconnect({
-					reason: "error",
-					message: "The connection was closed due to a socket error.",
-					context: { type: event.type }
-				}), 0);
-			});
-			this.socket.addEventListener("close", (event) => {
-				const closeCode = event.code;
-				const closeReason = event.reason || void 0;
-				const context = {
-					type: event.type,
-					code: closeCode,
-					reason: closeReason
-				};
-				this.disconnect(closeCode === 1e3 ? {
-					reason: "agent",
-					context,
-					closeCode,
-					closeReason
-				} : {
-					reason: "error",
-					message: closeReason || "The connection was closed by the server.",
-					context,
-					closeCode,
-					closeReason
-				});
-			});
-			this.socket.addEventListener("message", (event) => {
-				try {
-					const parsedEvent = JSON.parse(event.data);
-					if (!isValidSocketEvent(parsedEvent)) {
-						this.debug({
-							type: "invalid_event",
-							message: "Received invalid socket event",
-							data: event.data
-						});
-						return;
-					}
-					this.handleMessage(parsedEvent);
-				} catch (error) {
-					this.debug({
-						type: "parsing_error",
-						message: "Failed to parse socket message",
-						error: error instanceof Error ? error.message : String(error),
-						data: event.data
-					});
-				}
-			});
-		}
-		static async create(config) {
-			let socket = null;
-			try {
-				const origin = config.origin ?? WSS_API_ORIGIN;
-				let url;
-				const { name: source, version } = sourceInfo;
-				if (config.signedUrl) {
-					const separator = config.signedUrl.includes("?") ? "&" : "?";
-					url = `${config.signedUrl}${separator}source=${source}&version=${version}`;
-				} else url = `${origin}${WSS_API_PATHNAME}${config.agentId}&source=${source}&version=${version}`;
-				if (config.environment) url += `&environment=${encodeURIComponent(config.environment)}`;
-				const protocols = [MAIN_PROTOCOL];
-				if (config.authorization) protocols.push(`bearer.${config.authorization}`);
-				socket = new WebSocket(url, protocols);
-				const { conversation_id, agent_output_audio_format, user_input_audio_format } = await new Promise((resolve, reject) => {
-					socket.addEventListener("open", () => {
-						const overridesEvent = constructOverrides(config);
-						socket?.send(JSON.stringify(overridesEvent));
-					}, { once: true });
-					socket.addEventListener("error", (event) => {
-						setTimeout(() => reject(new SessionConnectionError("The connection was closed due to a socket error.")), 0);
-					});
-					socket.addEventListener("close", (event) => {
-						reject(new SessionConnectionError(event.reason || (event.code === 1e3 ? "Connection closed normally before session could be established." : "Connection closed unexpectedly before session could be established."), {
-							closeCode: event.code,
-							closeReason: event.reason || void 0
-						}));
-					});
-					socket.addEventListener("message", (event) => {
-						const message = JSON.parse(event.data);
-						if (!isValidSocketEvent(message)) return;
-						if (message.type === "conversation_initiation_metadata") resolve(message.conversation_initiation_metadata_event);
-						else console.warn("First received message is not conversation metadata.");
-					}, { once: true });
-				});
-				const inputFormat = parseFormat(user_input_audio_format ?? "pcm_16000");
-				const outputFormat = parseFormat(agent_output_audio_format);
-				return new WebSocketConnection(socket, conversation_id, inputFormat, outputFormat);
-			} catch (error) {
-				socket?.close();
-				throw error;
-			}
-		}
-		close() {
-			this.pendingAudioEvents = [];
-			this.socket.close(1e3, "User ended conversation");
-		}
-		sendMessage(message) {
-			this.socket.send(JSON.stringify(message));
-		}
-		addListener(listener) {
-			const hadListeners = this.outputListeners.size > 0;
-			this.outputListeners.add(listener);
-			if (hadListeners || this.pendingAudioEvents.length === 0) return;
-			const pending = this.pendingAudioEvents;
-			this.pendingAudioEvents = [];
-			for (const event of pending) listener(event);
-		}
-		removeListener(listener) {
-			this.outputListeners.delete(listener);
-		}
-		handleMessage(parsedEvent) {
-			super.handleMessage(parsedEvent);
-			if (parsedEvent.type === "audio" && parsedEvent.audio_event.audio_base_64) {
-				const audioEvent = { audio_base_64: parsedEvent.audio_event.audio_base_64 };
-				if (this.outputListeners.size === 0) {
-					this.pendingAudioEvents.push(audioEvent);
-					return;
-				}
-				this.outputListeners.forEach((listener) => listener(audioEvent));
-			}
-		}
-	};
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachInputToConnection.js
-	function attachInputToConnection(input, connection) {
-		const listener = (event) => {
-			const rawAudioPcmData = event.data[0];
-			connection.sendMessage({ user_audio_chunk: arrayBufferToBase64(rawAudioPcmData.buffer) });
-		};
-		input.addListener(listener);
-		return () => {
-			input.removeListener(listener);
-		};
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.js
-	function attachConnectionToOutput(connection, output) {
-		const listener = (event) => {
-			output.playAudio(base64ToArrayBuffer(event.audio_base_64));
-		};
-		connection.addListener(listener);
-		return () => {
-			connection.removeListener(listener);
-		};
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/ConnectionFactory.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/ConnectionFactory.js
 	function determineConnectionType(config) {
 		const hasSignedUrl = "signedUrl" in config && config.signedUrl;
 		if (hasSignedUrl && config.connectionType === "webrtc") throw new Error("signedUrl only supports websocket connections. Remove connectionType or set it to 'websocket'.");
@@ -23323,28 +23369,32 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/applyDelay.js
-/**
-	* Resolves a platform-specific delay from a DelayConfig.
-	* The `platform` parameter is determined by the caller (e.g. via
-	* `compatibility.ts` on the web, or from the React Native runtime).
-	*/
-	const DEFAULT_DELAY = {
-		default: 0,
-		android: 3e3
-	};
-	function resolveDelay(delayConfig, platform = "default") {
-		const config = delayConfig ?? DEFAULT_DELAY;
-		if (platform === "android") return config.android ?? config.default;
-		if (platform === "ios") return config.ios ?? config.default;
-		return config.default;
-	}
-	async function applyDelay(delayMs) {
-		if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachInputToConnection.js
+	function attachInputToConnection(input, connection) {
+		const listener = (event) => {
+			const rawAudioPcmData = event.data[0];
+			connection.sendMessage({ user_audio_chunk: arrayBufferToBase64(rawAudioPcmData.buffer) });
+		};
+		input.addListener(listener);
+		return () => {
+			input.removeListener(listener);
+		};
 	}
 
 //#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioUnlock.js
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.js
+	function attachConnectionToOutput(connection, output) {
+		const listener = (event) => {
+			output.playAudio(base64ToArrayBuffer(event.audio_base_64));
+		};
+		connection.addListener(listener);
+		return () => {
+			connection.removeListener(listener);
+		};
+	}
+
+//#endregion
+//#region node_modules/.pnpm/@elevenlabs+client@1.11.2_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/audioUnlock.js
 	const STASH_TTL_MS = 3e4;
 	const UNLOCK_EVENTS = [
 		"touchstart",
@@ -23395,478 +23445,12 @@ registerProcessor("rawAudioProcessor", RawAudioProcessor);
 		};
 		for (const event of UNLOCK_EVENTS) document.addEventListener(event, onUserGesture, true);
 	}
-	function takeUnlockedAudioContext() {
-		const ctx = stashedAudioContext;
-		stashedAudioContext = null;
-		clearStashDiscardTimer();
-		return ctx;
-	}
 	function discardStashedAudioContext() {
 		if (!stashedAudioContext) return;
 		stashedAudioContext.close().catch(() => {});
 		stashedAudioContext = null;
 		clearStashDiscardTimer();
 	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/VoiceSessionSetup.js
-	function detectPlatform() {
-		if (isAndroidDevice()) return "android";
-		if (isIosDevice()) return "ios";
-		return "default";
-	}
-	async function requestWakeLock() {
-		if ("wakeLock" in navigator) try {
-			return await navigator.wakeLock.request("screen");
-		} catch (_e) {}
-		return null;
-	}
-	/**
-	* Sets up WebSocket-specific input and output controllers using
-	* web MediaDevice APIs (AudioContext, AudioWorklet, etc.).
-	*/
-	async function setupWebSocketIO(options, connection, audioContext) {
-		const [input, output] = await Promise.all([MediaDeviceInput.create({
-			...connection.inputFormat,
-			preferHeadphonesForIosDevices: options.preferHeadphonesForIosDevices,
-			inputDeviceId: options.inputDeviceId,
-			inputChunkDurationMs: options.inputChunkDurationMs,
-			workletPaths: options.workletPaths,
-			libsampleratePath: options.libsampleratePath
-		}), MediaDeviceOutput.create({
-			...connection.outputFormat,
-			outputDeviceId: options.outputDeviceId,
-			workletPaths: options.workletPaths,
-			audioContext: audioContext ?? void 0
-		})]);
-		const detachInput = attachInputToConnection(input, connection);
-		const detachOutput = attachConnectionToOutput(connection, output);
-		return {
-			input,
-			output,
-			playbackEventTarget: output,
-			detach: async () => {
-				detachInput();
-				detachOutput();
-			}
-		};
-	}
-	/**
-	* Web platform session setup strategy.
-	* Handles wake lock, preliminary mic permission, platform-specific delay,
-	* connection creation, and input/output setup.
-	*/
-	async function webSessionSetup(options) {
-		const useWakeLock = options.useWakeLock ?? true;
-		let wakeLock = null;
-		let preliminaryInputStream = null;
-		let unlockedAudioContext = null;
-		try {
-			if (useWakeLock) wakeLock = await requestWakeLock();
-			preliminaryInputStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			const platform = detectPlatform();
-			await applyDelay(resolveDelay(options.connectionDelay, platform));
-			const connection = await createConnection(options);
-			let result;
-			try {
-				if (connection instanceof WebSocketConnection) {
-					unlockedAudioContext = takeUnlockedAudioContext();
-					result = {
-						connection,
-						...await setupWebSocketIO(options, connection, unlockedAudioContext)
-					};
-					unlockedAudioContext = null;
-				} else {
-					discardStashedAudioContext();
-					result = setupWebRTCSession(connection);
-				}
-			} catch (ioError) {
-				await unlockedAudioContext?.close().catch(() => {});
-				unlockedAudioContext = null;
-				connection.close();
-				throw ioError;
-			}
-			if (preliminaryInputStream) {
-				for (const track of preliminaryInputStream.getTracks()) track.stop();
-				preliminaryInputStream = null;
-			}
-			let visibilityChangeHandler = null;
-			if (wakeLock) {
-				visibilityChangeHandler = () => {
-					if (document.visibilityState === "visible" && wakeLock?.released) requestWakeLock().then((lock) => {
-						wakeLock = lock;
-					});
-				};
-				document.addEventListener("visibilitychange", visibilityChangeHandler);
-			}
-			const originalDetach = result.detach;
-			return {
-				...result,
-				detach: async () => {
-					await originalDetach();
-					if (visibilityChangeHandler) document.removeEventListener("visibilitychange", visibilityChangeHandler);
-					try {
-						await wakeLock?.release();
-						wakeLock = null;
-					} catch (_e) {}
-				}
-			};
-		} catch (error) {
-			if (preliminaryInputStream) for (const track of preliminaryInputStream.getTracks()) track.stop();
-			try {
-				await wakeLock?.release();
-				wakeLock = null;
-			} catch (_e) {}
-			discardStashedAudioContext();
-			throw error;
-		}
-	}
-	setSetupStrategy(webSessionSetup);
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/webAudioAdapter.js
-/**
-	* Web implementation of {@link WebRTCAudioAdapter}.
-	*
-	* Uses AudioContext, HTMLAudioElement, and AudioWorkletNode to:
-	* - Attach remote audio tracks for playback via the DOM
-	* - Analyse input/output volume via AnalyserNode
-	* - Capture raw output audio via an AudioWorklet for the `onAudio` callback
-	*/
-	var WebAudioAdapter = class {
-		audioElements = [];
-		inputAudioContext = null;
-		audioCaptureContext = null;
-		async attachRemoteTrack(track, outputDeviceId) {
-			const audioElement = track.attach();
-			audioElement.autoplay = true;
-			audioElement.controls = false;
-			if (outputDeviceId && audioElement.setSinkId) try {
-				await audioElement.setSinkId(outputDeviceId);
-			} catch (error) {
-				console.warn("Failed to set output device for new audio element:", error);
-			}
-			audioElement.style.display = "none";
-			document.body.appendChild(audioElement);
-			this.audioElements.push(audioElement);
-		}
-		setupInputAnalysis(mediaStreamTrack) {
-			if (this.inputAudioContext) {
-				this.inputAudioContext.close().catch(() => {});
-				this.inputAudioContext = null;
-			}
-			const ctx = new AudioContext();
-			const analyser = ctx.createAnalyser();
-			ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack])).connect(analyser);
-			this.inputAudioContext = ctx;
-			return {
-				volumeProvider: createAnalyserVolumeProvider(analyser, ctx.sampleRate),
-				analyser
-			};
-		}
-		async setupOutputAnalysis(track, format, onAudioData) {
-			if (this.audioCaptureContext) {
-				this.audioCaptureContext.close().catch(() => {});
-				this.audioCaptureContext = null;
-			}
-			const audioContext = new AudioContext();
-			this.audioCaptureContext = audioContext;
-			const analyser = audioContext.createAnalyser();
-			analyser.fftSize = 2048;
-			analyser.smoothingTimeConstant = .8;
-			const mediaStream = new MediaStream([track.mediaStreamTrack]);
-			const source = audioContext.createMediaStreamSource(mediaStream);
-			const volumeProvider = createAnalyserVolumeProvider(analyser, audioContext.sampleRate);
-			await loadRawAudioProcessor(audioContext.audioWorklet);
-			const worklet = new AudioWorkletNode(audioContext, "rawAudioProcessor");
-			worklet.port.postMessage({
-				type: "setFormat",
-				format: format.format,
-				sampleRate: format.sampleRate
-			});
-			worklet.port.onmessage = (event) => {
-				const [audioData, maxVolume] = event.data;
-				onAudioData(audioData.buffer, maxVolume);
-			};
-			source.connect(analyser);
-			analyser.connect(worklet);
-			return {
-				volumeProvider,
-				analyser
-			};
-		}
-		setVolume(volume) {
-			for (const element of this.audioElements) element.volume = volume;
-		}
-		async setOutputDevice(deviceId) {
-			if (!("setSinkId" in HTMLAudioElement.prototype)) throw new Error("setSinkId is not supported in this browser");
-			await Promise.all(this.audioElements.map(async (element) => {
-				try {
-					await element.setSinkId(deviceId);
-				} catch (error) {
-					console.error("Failed to set sink ID for audio element:", error);
-					throw error;
-				}
-			}));
-		}
-		cleanup() {
-			if (this.inputAudioContext) {
-				this.inputAudioContext.close().catch((error) => {
-					console.warn("Error closing input audio context:", error);
-				});
-				this.inputAudioContext = null;
-			}
-			if (this.audioCaptureContext) {
-				this.audioCaptureContext.close().catch((error) => {
-					console.warn("Error closing audio capture context:", error);
-				});
-				this.audioCaptureContext = null;
-			}
-			for (const element of this.audioElements) element.remove();
-			this.audioElements = [];
-		}
-	};
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/microphone.js
-/**
-	* Platform-agnostic microphone streaming interface for Scribe.
-	*
-	* The web implementation (`platform/web/scribeMicrophone.ts`) provides the
-	* actual AudioContext + getUserMedia pipeline; other platforms can supply
-	* their own implementation via `setScribeMicrophoneSetup`.
-	*/
-	let microphoneSetup = null;
-	function setScribeMicrophoneSetup(setup) {
-		microphoneSetup = setup;
-	}
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/scribeAudioProcessor.generated.js
-	const loadScribeAudioProcessor = createWorkletModuleLoader("scribeAudioProcessor", `/*
- * Scribe Audio Processor for converting microphone audio to PCM16 format
- * Supports resampling for browsers like Firefox that don't support
- * AudioContext sample rate constraints.
- * USED BY @elevenlabs/client
- */
-
-class ScribeAudioProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.buffer = [];
-    this.bufferSize = 4096; // Buffer size for optimal chunk transmission
-
-    // Resampling state
-    this.inputSampleRate = null;
-    this.outputSampleRate = null;
-    this.resampleRatio = 1;
-    this.lastSample = 0;
-    this.resampleAccumulator = 0;
-
-    this.port.onmessage = ({ data }) => {
-      if (data.type === "configure") {
-        this.inputSampleRate = data.inputSampleRate;
-        this.outputSampleRate = data.outputSampleRate;
-        if (this.inputSampleRate && this.outputSampleRate) {
-          this.resampleRatio = this.inputSampleRate / this.outputSampleRate;
-        }
-      }
-    };
-  }
-
-  // Linear interpolation resampling
-  resample(inputData) {
-    if (this.resampleRatio === 1 || !this.inputSampleRate) {
-      return inputData;
-    }
-
-    const outputSamples = [];
-
-    for (let i = 0; i < inputData.length; i++) {
-      const currentSample = inputData[i];
-
-      // Generate output samples using linear interpolation
-      while (this.resampleAccumulator < 1) {
-        const interpolated =
-          this.lastSample +
-          (currentSample - this.lastSample) * this.resampleAccumulator;
-        outputSamples.push(interpolated);
-        this.resampleAccumulator += this.resampleRatio;
-      }
-
-      this.resampleAccumulator -= 1;
-      this.lastSample = currentSample;
-    }
-
-    return new Float32Array(outputSamples);
-  }
-
-  process(inputs) {
-    const input = inputs[0];
-    if (input.length > 0) {
-      let channelData = input[0]; // Get first channel (mono)
-
-      // Resample if needed (for Firefox and other browsers that don't
-      // support AudioContext sample rate constraints)
-      if (this.resampleRatio !== 1) {
-        channelData = this.resample(channelData);
-      }
-
-      // Add incoming audio to buffer
-      for (let i = 0; i < channelData.length; i++) {
-        this.buffer.push(channelData[i]);
-      }
-
-      // When buffer reaches threshold, convert and send
-      if (this.buffer.length >= this.bufferSize) {
-        const float32Array = new Float32Array(this.buffer);
-        const int16Array = new Int16Array(float32Array.length);
-
-        // Convert Float32 [-1, 1] to Int16 [-32768, 32767]
-        for (let i = 0; i < float32Array.length; i++) {
-          // Clamp the value to prevent overflow
-          const sample = Math.max(-1, Math.min(1, float32Array[i]));
-          // Scale to PCM16 range
-          int16Array[i] = sample < 0 ? sample * 32768 : sample * 32767;
-        }
-
-        // Send to main thread as transferable ArrayBuffer
-        this.port.postMessage(
-          {
-            audioData: int16Array.buffer
-          },
-          [int16Array.buffer]
-        );
-
-        // Clear buffer
-        this.buffer = [];
-      }
-    }
-
-    return true; // Continue processing
-  }
-}
-
-registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
-
-`);
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/scribeMicrophone.js
-	const TARGET_SAMPLE_RATE = 16e3;
-	/**
-	* Web implementation of Scribe microphone streaming.
-	*
-	* Uses `navigator.mediaDevices.getUserMedia`, `AudioContext`, and an
-	* `AudioWorkletNode` to capture, resample, and encode microphone audio
-	* as base64 PCM16 chunks.
-	*/
-	const webScribeMicrophoneSetup = async (config, onAudioData) => {
-		const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-			deviceId: config.deviceId,
-			echoCancellation: config.echoCancellation ?? true,
-			noiseSuppression: config.noiseSuppression ?? true,
-			autoGainControl: config.autoGainControl ?? true,
-			channelCount: config.channelCount ?? 1,
-			sampleRate: { ideal: TARGET_SAMPLE_RATE }
-		} });
-		const [audioTrack] = stream.getAudioTracks();
-		const streamSampleRate = audioTrack?.getSettings().sampleRate;
-		const audioContext = new AudioContext(streamSampleRate ? { sampleRate: streamSampleRate } : {});
-		await loadScribeAudioProcessor(audioContext.audioWorklet);
-		const source = audioContext.createMediaStreamSource(stream);
-		const scribeNode = new AudioWorkletNode(audioContext, "scribeAudioProcessor");
-		if (audioContext.sampleRate !== TARGET_SAMPLE_RATE) scribeNode.port.postMessage({
-			type: "configure",
-			inputSampleRate: audioContext.sampleRate,
-			outputSampleRate: TARGET_SAMPLE_RATE
-		});
-		scribeNode.port.onmessage = (event) => {
-			onAudioData(arrayBufferToBase64(event.data.audioData));
-		};
-		source.connect(scribeNode);
-		if (audioContext.state === "suspended") await audioContext.resume();
-		return {
-			mediaStreamTrack: audioTrack,
-			cleanup: () => {
-				for (const track of stream.getTracks()) track.stop();
-				source.disconnect();
-				scribeNode.disconnect();
-				audioContext.close();
-			}
-		};
-	};
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/connection.js
-/**
-	* Events emitted by the RealtimeConnection.
-	*/
-	var RealtimeEvents;
-	(function(RealtimeEvents) {
-		/** Emitted when the session is successfully started */
-		RealtimeEvents["SESSION_STARTED"] = "session_started";
-		/** Emitted when a partial (interim) transcript is available */
-		RealtimeEvents["PARTIAL_TRANSCRIPT"] = "partial_transcript";
-		/** Emitted when a final transcript is available */
-		RealtimeEvents["COMMITTED_TRANSCRIPT"] = "committed_transcript";
-		/** Emitted when a final transcript with timestamps is available */
-		RealtimeEvents["COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS"] = "committed_transcript_with_timestamps";
-		/** Emitted when an authentication error occurs */
-		RealtimeEvents["AUTH_ERROR"] = "auth_error";
-		/** Emitted when an error occurs (also emitted for all specific error types) */
-		RealtimeEvents["ERROR"] = "error";
-		/** Emitted when the WebSocket connection is opened */
-		RealtimeEvents["OPEN"] = "open";
-		/** Emitted when the WebSocket connection is closed */
-		RealtimeEvents["CLOSE"] = "close";
-		/** Emitted when a quota exceeded error occurs */
-		RealtimeEvents["QUOTA_EXCEEDED"] = "quota_exceeded";
-		/** Emitted when commit is throttled */
-		RealtimeEvents["COMMIT_THROTTLED"] = "commit_throttled";
-		/** Emitted when a transcriber error occurs */
-		RealtimeEvents["TRANSCRIBER_ERROR"] = "transcriber_error";
-		/** Emitted when terms have not been accepted */
-		RealtimeEvents["UNACCEPTED_TERMS"] = "unaccepted_terms";
-		/** Emitted when rate limited */
-		RealtimeEvents["RATE_LIMITED"] = "rate_limited";
-		/** Emitted when there's an input error */
-		RealtimeEvents["INPUT_ERROR"] = "input_error";
-		/** Emitted when the queue overflows */
-		RealtimeEvents["QUEUE_OVERFLOW"] = "queue_overflow";
-		/** Emitted when resources are exhausted */
-		RealtimeEvents["RESOURCE_EXHAUSTED"] = "resource_exhausted";
-		/** Emitted when session time limit is exceeded */
-		RealtimeEvents["SESSION_TIME_LIMIT_EXCEEDED"] = "session_time_limit_exceeded";
-		/** Emitted when chunk size is exceeded */
-		RealtimeEvents["CHUNK_SIZE_EXCEEDED"] = "chunk_size_exceeded";
-		/** Emitted when there's insufficient audio activity */
-		RealtimeEvents["INSUFFICIENT_AUDIO_ACTIVITY"] = "insufficient_audio_activity";
-	})(RealtimeEvents || (RealtimeEvents = {}));
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/scribe/scribe.js
-	var AudioFormat;
-	(function(AudioFormat) {
-		AudioFormat["PCM_8000"] = "pcm_8000";
-		AudioFormat["PCM_16000"] = "pcm_16000";
-		AudioFormat["PCM_22050"] = "pcm_22050";
-		AudioFormat["PCM_24000"] = "pcm_24000";
-		AudioFormat["PCM_44100"] = "pcm_44100";
-		AudioFormat["PCM_48000"] = "pcm_48000";
-		AudioFormat["ULAW_8000"] = "ulaw_8000";
-	})(AudioFormat || (AudioFormat = {}));
-	var CommitStrategy;
-	(function(CommitStrategy) {
-		CommitStrategy["MANUAL"] = "manual";
-		CommitStrategy["VAD"] = "vad";
-	})(CommitStrategy || (CommitStrategy = {}));
-
-//#endregion
-//#region node_modules/.pnpm/@elevenlabs+client@1.11.0_@types+dom-mediacapture-record@1.0.22/node_modules/@elevenlabs/client/dist/platform/web/index.js
-	installIosAudioUnlockListener();
-	setWebRTCAudioAdapterFactory(() => new WebAudioAdapter());
-	setScribeMicrophoneSetup(webScribeMicrophoneSetup);
 
 //#endregion
 //#region src/connection/factories.ts
@@ -23919,6 +23503,8 @@ registerProcessor("scribeAudioProcessor", ScribeAudioProcessor);
 
 //#endregion
 //#region src/connection/index.ts
+	setWebRTCAudioAdapterFactory(() => new WebAudioAdapter());
+	if (typeof navigator !== "undefined") installIosAudioUnlockListener();
 	const library = {
 		...factories_exports,
 		...audio_glue_exports

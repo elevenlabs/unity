@@ -25,7 +25,7 @@ import {
 import { $EL_EncodeReturn, $EL_Rehydrate } from "../primitives/marshalling.js";
 import { $EL_Settle } from "../primitives/promise-settle.js";
 import { $EL_InvokeCallback } from "../primitives/callbacks.js";
-import type { IncomingSocketEvent } from "@elevenlabs/client";
+import type { IncomingSocketEvent } from "@elevenlabs/client/internal/unity";
 
 // ---------------------------------------------------------------------------
 // SDK mock — hoisted so it's in effect when audio-glue imports.

@@ -39,13 +39,13 @@ import { $EL_Settle } from "../primitives/promise-settle.js";
 import { $EL_InvokeCallback } from "../primitives/callbacks.js";
 import { $EL_ConnectionFactories } from "./factories.js";
 import { $EL_AudioGlueFactories } from "./audio-glue.js";
-import type { IncomingSocketEvent } from "@elevenlabs/client";
+import type { IncomingSocketEvent } from "@elevenlabs/client/internal/unity";
 
 // ---------------------------------------------------------------------------
 // SDK mocks — hoisted so they're in effect before factories/audio-glue import.
 // ---------------------------------------------------------------------------
 
-vi.mock("@elevenlabs/client", () => {
+vi.mock("@elevenlabs/client/internal/unity", () => {
   const mockWsConn = {
     sendMessage: vi.fn(),
     onMessage: vi.fn(),
@@ -60,26 +60,23 @@ vi.mock("@elevenlabs/client", () => {
       }),
     },
     createConnection: vi.fn().mockResolvedValue(mockWsConn),
+    MediaDeviceInput: {
+      create: vi
+        .fn()
+        .mockResolvedValue({ close: vi.fn().mockResolvedValue(undefined) }),
+    },
+    MediaDeviceOutput: {
+      create: vi
+        .fn()
+        .mockResolvedValue({ close: vi.fn().mockResolvedValue(undefined) }),
+    },
+    attachInputToConnection: vi.fn(() => vi.fn()),
+    attachConnectionToOutput: vi.fn(() => vi.fn()),
   };
 });
 
-vi.mock("@elevenlabs/client/internal/unity", () => ({
-  MediaDeviceInput: {
-    create: vi
-      .fn()
-      .mockResolvedValue({ close: vi.fn().mockResolvedValue(undefined) }),
-  },
-  MediaDeviceOutput: {
-    create: vi
-      .fn()
-      .mockResolvedValue({ close: vi.fn().mockResolvedValue(undefined) }),
-  },
-  attachInputToConnection: vi.fn(() => vi.fn()),
-  attachConnectionToOutput: vi.fn(() => vi.fn()),
-}));
-
-import { WebSocketConnection } from "@elevenlabs/client";
 import {
+  WebSocketConnection,
   attachInputToConnection,
   attachConnectionToOutput,
 } from "@elevenlabs/client/internal/unity";

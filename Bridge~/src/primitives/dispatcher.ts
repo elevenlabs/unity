@@ -256,3 +256,13 @@ export const EL_FunctionRelease__deps = ["$EL_ReleaseFunction"];
 export function EL_FunctionRelease(handle: number): void {
   _EL_ReleaseFunction(handle);
 }
+
+// --- Heap memory management ---
+
+// Thin wrapper so C# can free sync-result heap strings via a named DllImport
+// instead of calling _free directly. Calling Emscripten's _free as a DllImport
+// from IL2CPP fails at WebGL link time because _free is not in wasm exports;
+// going through a jslib wrapper keeps the call on the JS side where it works.
+export function EL_Free(ptr: number): void {
+  _free(ptr);
+}

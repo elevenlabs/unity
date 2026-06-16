@@ -19,8 +19,8 @@
 import {
   attachInputToConnection,
   attachConnectionToOutput,
+  type IncomingSocketEvent,
 } from "@elevenlabs/client/internal/unity";
-import type { IncomingSocketEvent } from "@elevenlabs/client";
 
 type OnMessage = (event: IncomingSocketEvent) => void;
 

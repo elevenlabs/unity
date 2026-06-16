@@ -10,11 +10,9 @@ import {
   WebSocketConnection,
   WebRTCConnection,
   createConnection,
-  type SessionConfig,
-} from "@elevenlabs/client";
-import {
   MediaDeviceInput,
   MediaDeviceOutput,
+  type SessionConfig,
   type MediaDeviceInputConfig,
   type MediaDeviceOutputConfig,
   type WebRTCConnectionConfig,

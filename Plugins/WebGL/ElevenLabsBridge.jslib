@@ -192,6 +192,7 @@ var library = (function() {
 //#endregion
 //#region src/primitives/dispatcher.ts
 	var dispatcher_exports = /* @__PURE__ */ __exportAll({
+		EL_Free: () => EL_Free,
 		EL_FunctionCallAsync: () => EL_FunctionCallAsync,
 		EL_FunctionCallAsync__deps: () => EL_FunctionCallAsync__deps,
 		EL_FunctionCallSync: () => EL_FunctionCallSync,
@@ -355,6 +356,9 @@ var library = (function() {
 	const EL_FunctionRelease__deps = ["$EL_ReleaseFunction"];
 	function EL_FunctionRelease(handle) {
 		_EL_ReleaseFunction(handle);
+	}
+	function EL_Free(ptr) {
+		_free(ptr);
 	}
 
 //#endregion

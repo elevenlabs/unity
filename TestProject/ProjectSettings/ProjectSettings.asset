@@ -767,7 +767,7 @@ PlayerSettings:
   webGLMemoryGeometricGrowthStep: 0.2
   webGLMemoryGeometricGrowthCap: 96
   webGLPowerPreference: 2
-  webGLWebAssemblyTable: 0
+  webGLWebAssemblyTable: 1
   webGLWebAssemblyBigInt: 0
   webGLCloseOnQuit: 0
   webWasm2023: 0
@@ -866,7 +866,7 @@ PlayerSettings:
   hmiCpuConfiguration: 
   hmiLogStartupTiming: 0
   qnxGraphicConfPath: 
-  apiCompatibilityLevel: 9
+  apiCompatibilityLevel: 6
   captureStartupLogs: {}
   activeInputHandler: 0
   windowsGamepadBackendHint: 0

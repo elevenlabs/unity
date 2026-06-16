@@ -101,7 +101,7 @@ namespace ElevenLabs.WebGL
             if (ptr == IntPtr.Zero)
                 return default;
             string json = Marshal.PtrToStringUTF8(ptr);
-            ElevenLabsBridgeNative._free(ptr);
+            ElevenLabsBridgeNative.EL_Free(ptr);
             if (json != null && json.StartsWith(ErrorPrefix, StringComparison.Ordinal))
                 throw new BridgeException(json.Substring(ErrorPrefix.Length));
             return BridgeValueDecoder.Decode<T>(json);

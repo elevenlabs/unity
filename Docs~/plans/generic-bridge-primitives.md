@@ -627,7 +627,7 @@ Phase 3 was redesigned on 2026-06-12 around the DynCall path (see [dyncall-migra
   - V2: `Awaitable` continuation after `await JsObject.CallAsync(...)` can immediately call another `DllImport` without breakage
   - V3: `BridgeCallback` invocations arrive in order under rapid emission from JS
   - V4: A `JsFunction` returned from a method call survives across multiple sync calls
-- [ ] **4.3 — Clean IL2CPP build.** No warnings, no missing symbols. Manual verification in Chrome and at least one of Firefox/Safari.
+- [x] **4.3 — Clean IL2CPP build.** No warnings, no missing symbols. Manual verification in Chrome and at least one of Firefox/Safari.
 
 ### Phase 5 — Automated integration (requires Phase 4 complete)
 

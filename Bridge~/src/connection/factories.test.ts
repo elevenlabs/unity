@@ -37,7 +37,7 @@ import { $EL_ConnectionFactories } from "./factories.js";
 // factories module is imported and $EL_ConnectionFactories is constructed.
 // ---------------------------------------------------------------------------
 
-vi.mock("@elevenlabs/client", () => {
+vi.mock("@elevenlabs/client/internal/unity", () => {
   const mockWsConn = {
     sendMessage: vi.fn(),
     close: vi.fn().mockResolvedValue(undefined),
@@ -48,14 +48,6 @@ vi.mock("@elevenlabs/client", () => {
     close: vi.fn().mockResolvedValue(undefined),
     conversationId: "rtc-conv-id",
   };
-  return {
-    WebSocketConnection: { create: vi.fn().mockResolvedValue(mockWsConn) },
-    WebRTCConnection: { create: vi.fn().mockResolvedValue(mockRtcConn) },
-    createConnection: vi.fn().mockResolvedValue(mockWsConn),
-  };
-});
-
-vi.mock("@elevenlabs/client/internal/unity", () => {
   const mockInput = {
     isMuted: vi.fn().mockReturnValue(false),
     close: vi.fn().mockResolvedValue(undefined),
@@ -67,6 +59,9 @@ vi.mock("@elevenlabs/client/internal/unity", () => {
     getVolume: vi.fn().mockReturnValue(0),
   };
   return {
+    WebSocketConnection: { create: vi.fn().mockResolvedValue(mockWsConn) },
+    WebRTCConnection: { create: vi.fn().mockResolvedValue(mockRtcConn) },
+    createConnection: vi.fn().mockResolvedValue(mockWsConn),
     MediaDeviceInput: { create: vi.fn().mockResolvedValue(mockInput) },
     MediaDeviceOutput: { create: vi.fn().mockResolvedValue(mockOutput) },
   };
@@ -80,8 +75,6 @@ import {
   WebSocketConnection,
   WebRTCConnection,
   createConnection,
-} from "@elevenlabs/client";
-import {
   MediaDeviceInput,
   MediaDeviceOutput,
 } from "@elevenlabs/client/internal/unity";
