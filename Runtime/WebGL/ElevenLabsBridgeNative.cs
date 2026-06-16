@@ -7,6 +7,9 @@ namespace ElevenLabs.WebGL
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
         [DllImport("__Internal")]
+        public static extern void _free(IntPtr ptr);
+
+        [DllImport("__Internal")]
         public static extern void EL_SetSettleCallback(IntPtr functionPointer);
 
         [DllImport("__Internal")]
@@ -71,6 +74,8 @@ namespace ElevenLabs.WebGL
         [DllImport("__Internal")]
         public static extern void EL_FunctionRelease(int handle);
 #else
+        public static void _free(IntPtr ptr) { }
+
         public static void EL_SetSettleCallback(IntPtr functionPointer) =>
             throw new PlatformNotSupportedException(
                 "WebGL bridge is not available outside WebGL builds."
