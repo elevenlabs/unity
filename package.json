@@ -27,6 +27,7 @@
     "Tests.meta",
     "Plugins",
     "Plugins.meta",
+    "COMPATIBILITY.md",
     "CONTRIBUTING.md"
   ],
   "dependencies": {
