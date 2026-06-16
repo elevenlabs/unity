@@ -9,9 +9,7 @@ namespace ElevenLabs.WebGL
     /// <summary>
     /// Static JS→C# dispatch surface for the WebGL bridge. Holds two function pointers
     /// (promise-settle, callback-invoke) that the JS side calls synchronously via
-    /// <c>{{{ makeDynCall('sig', 'fnVar') }}}</c>. Subsequent phases wire the bodies
-    /// into the promise and callback registries (tasks 3.3 / 3.6 / 3.7 of
-    /// <c>Docs~/plans/generic-bridge-primitives.md</c>).
+    /// <c>{{{ makeDynCall('sig', 'fnVar') }}}</c>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -90,15 +88,12 @@ namespace ElevenLabs.WebGL
         }
 
         [MonoPInvokeCallback(typeof(SettleCallback))]
-        private static void OnSettleFromJs(int promiseId, int statusCode, IntPtr payloadPtr)
+        internal static void OnSettleFromJs(int promiseId, int statusCode, IntPtr payloadPtr)
         {
             // The JS side `_free`s the buffer the moment this DynCall returns, so the
             // payload must be copied out synchronously — never captured into a continuation.
             string payload = payloadPtr == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(payloadPtr);
-            // Promise-registry wiring lands in task 3.7.
-            _ = payload;
-            _ = promiseId;
-            _ = statusCode;
+            PromiseRegistry.TrySettle(promiseId, ok: statusCode == 0, payload);
         }
 
         [MonoPInvokeCallback(typeof(InvokeCallback))]
