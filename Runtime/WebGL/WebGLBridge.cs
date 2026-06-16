@@ -9,7 +9,6 @@ namespace ElevenLabs.WebGL
     /// </summary>
     public sealed class WebGLBridge : MonoBehaviour
     {
-        /// <summary>Name of the bridge GameObject, shared with the jslib side via <see cref="ElevenLabsBridgeNative.EL_SetBridgeName"/>.</summary>
         internal const string GameObjectName = "__ElevenLabsBridge__";
 
         private static WebGLBridge _instance;
@@ -32,9 +31,6 @@ namespace ElevenLabs.WebGL
                     DontDestroyOnLoad(go);
                     go.hideFlags = HideFlags.HideAndDontSave;
                     _instance = go.AddComponent<WebGLBridge>();
-#if UNITY_WEBGL && !UNITY_EDITOR
-                    ElevenLabsBridgeNative.EL_SetBridgeName(GameObjectName);
-#endif
                 }
                 return _instance;
             }
