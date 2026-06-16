@@ -116,6 +116,26 @@ Bridge~/dist/
 # Allow project-level Claude context despite global gitignore rules
 !.claude/CLAUDE.md
 
+# Unity-generated .meta files — three categories (see Docs~/plans/generic-bridge-primitives.md
+# HP.9 for the full rationale):
+#
+#   pkg-asset  (Runtime/, Editor/, Plugins/, Tests/ subtrees) — COMMITTED: stable GUIDs for
+#              asset references; tracked via "git add" alongside each source file.
+#
+#   repo-root  (non-Unity source files at the repo root) — IGNORED: Unity auto-stamps docs,
+#              package.json, etc.; these carry no UPM-meaningful GUID so we don't track them.
+CHANGELOG.md.meta
+CONTRIBUTING.md.meta
+LICENSE.meta
+README.md.meta
+package.json.meta
+#
+#   test-host  (TestProject/ subtree) — IGNORED: Unity recursively stamps everything it scans
+#              inside the embedded dev host project; none of these GUIDs are referenced by
+#              package consumers.
+TestProject.meta
+TestProject/**/*.meta
+
 # TestProject/ — embedded dev Unity host project (see Docs~/plans/generic-bridge-primitives.md
 # Phase 3 prelude). Track only Packages/manifest.json + ProjectSettings/*; exclude Unity-
 # generated dirs and the auto-resolved package lock.
@@ -130,6 +150,8 @@ TestProject/[Uu]ser[Ss]ettings/
 TestProject/[Aa]ssets/*
 !TestProject/[Aa]ssets/.gitkeep
 TestProject/Packages/packages-lock.json
+# Unity auto-generates per-package sub-directories under ProjectSettings/Packages/ on import
+TestProject/ProjectSettings/Packages/
 TestProject/test-results.xml
 
 # Memtrace
