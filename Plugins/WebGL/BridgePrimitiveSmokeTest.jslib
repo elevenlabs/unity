@@ -28,6 +28,29 @@ mergeInto(LibraryManager.library, {
                         cb(value);
                     });
                 },
+                // V1: fires all listeners from a Promise microtask (async JS context).
+                invokeTickFromPromise: function (value) {
+                    return Promise.resolve().then(function () {
+                        listeners.slice().forEach(function (cb) {
+                            cb(value);
+                        });
+                    });
+                },
+                // V3: fires all listeners `count` times with sequential values 0..count-1.
+                invokeTickN: function (count) {
+                    var lns = listeners.slice();
+                    for (var i = 0; i < count; i++) {
+                        for (var j = 0; j < lns.length; j++) {
+                            lns[j](i);
+                        }
+                    }
+                },
+                // V4: returns a JS function that adds `n` to its argument.
+                makeAdder: function (n) {
+                    return function (x) {
+                        return n + x;
+                    };
+                },
             };
         });
     },
