@@ -82,6 +82,33 @@ Node 23+ runs `.ts` files directly via type-stripping, so build scripts under
 `tsx`, no transpile step). Only fall back to `.js` / `.mjs` for files a tool requires
 in a non-TS form (e.g. `eslint.config.js`).
 
+## Avoid deprecated Unity WebGL APIs
+
+Per Unity's [deprecated browser-interaction reference](https://docs.unity3d.com/6000.0/Documentation/Manual/web-interacting-browser-deprecated.html),
+do not introduce these in `.jslib` files, WebGL page templates, or any JS
+loaded alongside the Unity build:
+
+| Deprecated               | Use instead                            |
+| ------------------------ | -------------------------------------- |
+| `Module.dynCall_*(...)`  | `{{{ makeDynCall('<sig>', '<var>') }}}(...)` macro |
+| `Pointer_stringify(ptr)` | `UTF8ToString(ptr)`                    |
+| `unity.Instance(...)`    | `createUnityInstance(...)`             |
+| `gameInstance`           | `unityInstance`                        |
+
+Enabling Unity's recommended **Use WebAssembly.Table** publishing setting
+removes the legacy `dynCall_*` API entirely, so the modern forms are the
+only forward-compatible path.
+
+**Intentional exception:** TypeScript sources under `Bridge~/src/` deliberately
+call `dynCall_<sig>(_EL_<Var>, ...)`. The Rolldown plugin
+[`Bridge~/build/substitute-make-dyncall.ts`](../Bridge~/build/substitute-make-dyncall.ts)
+rewrites those call sites to the `{{{ makeDynCall(...) }}}` macro at bundle
+time, so the committed `.jslib` files under `Plugins/WebGL/` only contain
+the non-deprecated form. Rationale and ground rules:
+[`Docs~/plans/dyncall-migration.md`](../Docs~/plans/dyncall-migration.md).
+The `verify:primitives` / `verify:connection` scripts will catch drift if
+someone bypasses the plugin.
+
 ## Project plans
 
 Implementation plans live in `Docs~/plans/` (alongside `Docs~/ARCHITECTURE.md`). Look there for context on agreed approaches, and place any new plans there too.
