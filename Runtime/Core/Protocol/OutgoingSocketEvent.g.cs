@@ -5,7 +5,7 @@
 #nullable enable
 
 using System.Collections.Generic;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace ElevenLabs.Protocol
 {
@@ -13,223 +13,223 @@ namespace ElevenLabs.Protocol
 
     public class UserAudioChunk : OutgoingSocketEvent
     {
-        [JsonPropertyName("user_audio_chunk")]
+        [JsonProperty("user_audio_chunk")]
         public string UserAudioChunkData { get; set; } = "";
     }
 
     public class UserMessage : OutgoingSocketEvent
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "user_message";
 
-        [JsonPropertyName("text")]
+        [JsonProperty("text")]
         public string? Text { get; set; }
     }
 
     public class UserActivity : OutgoingSocketEvent
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "user_activity";
     }
 
     public class MultimodalMessage : OutgoingSocketEvent
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "multimodal_message";
 
-        [JsonPropertyName("text")]
+        [JsonProperty("text")]
         public Text? Text { get; set; }
 
-        [JsonPropertyName("file")]
+        [JsonProperty("file")]
         public File? File { get; set; }
     }
 
     public class Text
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "user_message";
 
-        [JsonPropertyName("text")]
+        [JsonProperty("text")]
         public string? TextData { get; set; }
     }
 
     public class File
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "file_input";
 
-        [JsonPropertyName("file_id")]
+        [JsonProperty("file_id")]
         public string FileId { get; set; } = "";
     }
 
     public class Pong : OutgoingSocketEvent
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "pong";
 
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
     }
 
     public class ClientToolResult : OutgoingSocketEvent
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "client_tool_result";
 
-        [JsonPropertyName("tool_call_id")]
+        [JsonProperty("tool_call_id")]
         public string ToolCallId { get; set; } = "";
 
-        [JsonPropertyName("result")]
+        [JsonProperty("result")]
         public string Result { get; set; } = "";
 
-        [JsonPropertyName("is_error")]
+        [JsonProperty("is_error")]
         public bool IsError { get; set; } = false;
 
-        [JsonPropertyName("error_type")]
+        [JsonProperty("error_type")]
         public string? ErrorType { get; set; }
     }
 
     public class ContextualUpdate : OutgoingSocketEvent
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "contextual_update";
 
-        [JsonPropertyName("text")]
+        [JsonProperty("text")]
         public string Text { get; set; } = "";
     }
 
     public class ConversationInitiationClientData : OutgoingSocketEvent
     {
-        [JsonPropertyName("conversation_config_override")]
+        [JsonProperty("conversation_config_override")]
         public ConversationConfigOverride? ConversationConfigOverride { get; set; }
 
-        [JsonPropertyName("custom_llm_extra_body")]
+        [JsonProperty("custom_llm_extra_body")]
         public Dictionary<string, dynamic>? CustomLlmExtraBody { get; set; }
 
-        [JsonPropertyName("user_id")]
+        [JsonProperty("user_id")]
         public string? UserId { get; set; }
 
-        [JsonPropertyName("source_info")]
+        [JsonProperty("source_info")]
         public SourceInfo? SourceInfo { get; set; }
 
-        [JsonPropertyName("branch_id")]
+        [JsonProperty("branch_id")]
         public string? BranchId { get; set; }
 
-        [JsonPropertyName("environment")]
+        [JsonProperty("environment")]
         public string? Environment { get; set; }
 
-        [JsonPropertyName("starting_workflow_node_id")]
+        [JsonProperty("starting_workflow_node_id")]
         public string? StartingWorkflowNodeId { get; set; }
 
-        [JsonPropertyName("dynamic_variables")]
+        [JsonProperty("dynamic_variables")]
         public Dictionary<string, dynamic>? DynamicVariables { get; set; }
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "conversation_initiation_client_data";
     }
 
     public class ConversationConfigOverride
     {
-        [JsonPropertyName("turn")]
+        [JsonProperty("turn")]
         public ConversationConfigOverrideTurn? Turn { get; set; }
 
-        [JsonPropertyName("tts")]
+        [JsonProperty("tts")]
         public ConversationConfigOverrideTts? Tts { get; set; }
 
-        [JsonPropertyName("conversation")]
+        [JsonProperty("conversation")]
         public ConversationConfigOverrideConversation? Conversation { get; set; }
 
-        [JsonPropertyName("agent")]
+        [JsonProperty("agent")]
         public ConversationConfigOverrideAgent? Agent { get; set; }
     }
 
     public class ConversationConfigOverrideTurn
     {
-        [JsonPropertyName("soft_timeout_config")]
+        [JsonProperty("soft_timeout_config")]
         public ConversationConfigOverrideTurnSoftTimeoutConfig? SoftTimeoutConfig { get; set; }
     }
 
     public class ConversationConfigOverrideTurnSoftTimeoutConfig
     {
-        [JsonPropertyName("message")]
+        [JsonProperty("message")]
         public string? Message { get; set; }
     }
 
     public class ConversationConfigOverrideTts
     {
-        [JsonPropertyName("voice_id")]
+        [JsonProperty("voice_id")]
         public string? VoiceId { get; set; }
 
-        [JsonPropertyName("stability")]
+        [JsonProperty("stability")]
         public double? Stability { get; set; }
 
-        [JsonPropertyName("speed")]
+        [JsonProperty("speed")]
         public double? Speed { get; set; }
 
-        [JsonPropertyName("similarity_boost")]
+        [JsonProperty("similarity_boost")]
         public double? SimilarityBoost { get; set; }
     }
 
     public class ConversationConfigOverrideConversation
     {
-        [JsonPropertyName("text_only")]
+        [JsonProperty("text_only")]
         public bool? TextOnly { get; set; }
     }
 
     public class ConversationConfigOverrideAgent
     {
-        [JsonPropertyName("first_message")]
+        [JsonProperty("first_message")]
         public string? FirstMessage { get; set; }
 
-        [JsonPropertyName("language")]
+        [JsonProperty("language")]
         public string? Language { get; set; }
 
-        [JsonPropertyName("max_conversation_duration_message")]
+        [JsonProperty("max_conversation_duration_message")]
         public string? MaxConversationDurationMessage { get; set; }
 
-        [JsonPropertyName("prompt")]
+        [JsonProperty("prompt")]
         public ConversationConfigOverrideAgentPrompt? Prompt { get; set; }
     }
 
     public class ConversationConfigOverrideAgentPrompt
     {
-        [JsonPropertyName("prompt")]
+        [JsonProperty("prompt")]
         public string? Prompt { get; set; }
 
-        [JsonPropertyName("llm")]
+        [JsonProperty("llm")]
         public string? Llm { get; set; }
 
-        [JsonPropertyName("tool_ids")]
+        [JsonProperty("tool_ids")]
         public IEnumerable<string>? ToolIds { get; set; }
 
-        [JsonPropertyName("native_mcp_server_ids")]
+        [JsonProperty("native_mcp_server_ids")]
         public IEnumerable<string>? NativeMcpServerIds { get; set; }
 
-        [JsonPropertyName("knowledge_base")]
+        [JsonProperty("knowledge_base")]
         public IEnumerable<ConversationConfigOverrideAgentPromptKnowledgeBaseItem>? KnowledgeBase { get; set; }
     }
 
     public class ConversationConfigOverrideAgentPromptKnowledgeBaseItem
     {
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; set; } = "";
 
-        [JsonPropertyName("name")]
+        [JsonProperty("name")]
         public string Name { get; set; } = "";
 
-        [JsonPropertyName("id")]
+        [JsonProperty("id")]
         public string Id { get; set; } = "";
 
-        [JsonPropertyName("usage_mode")]
+        [JsonProperty("usage_mode")]
         public string? UsageMode { get; set; }
     }
 
     public class SourceInfo
     {
-        [JsonPropertyName("source")]
+        [JsonProperty("source")]
         public string? Source { get; set; }
 
-        [JsonPropertyName("version")]
+        [JsonProperty("version")]
         public string? Version { get; set; }
     }
 }

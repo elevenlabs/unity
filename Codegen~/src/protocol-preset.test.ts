@@ -179,7 +179,7 @@ describe("renderProtocolProperty", () => {
     });
     assert.equal(
       out,
-      `[JsonPropertyName("user_id")]\npublic string UserId { get; set; } = "";`,
+      `[JsonProperty("user_id")]\npublic string UserId { get; set; } = "";`,
     );
   });
 
@@ -194,7 +194,7 @@ describe("renderProtocolProperty", () => {
     });
     assert.equal(
       out,
-      `[JsonPropertyName("extra")]\npublic Foo? Extra { get; set; }`,
+      `[JsonProperty("extra")]\npublic Foo? Extra { get; set; }`,
     );
   });
 
@@ -209,7 +209,7 @@ describe("renderProtocolProperty", () => {
     });
     assert.equal(
       out,
-      `[JsonPropertyName("inner")]\npublic Foo Inner { get; set; } = null!;`,
+      `[JsonProperty("inner")]\npublic Foo Inner { get; set; } = null!;`,
     );
   });
 
@@ -225,7 +225,7 @@ describe("renderProtocolProperty", () => {
     });
     assert.equal(
       out,
-      `[JsonPropertyName("type")]\npublic string Type { get; init; } = "agent_response";`,
+      `[JsonProperty("type")]\npublic string Type { get; init; } = "agent_response";`,
     );
   });
 
@@ -242,7 +242,7 @@ describe("renderProtocolProperty", () => {
     });
     assert.equal(
       out,
-      `[JsonPropertyName("type")]\npublic string Type { get; init; } = "agent_\\"weird\\"";`,
+      `[JsonProperty("type")]\npublic string Type { get; init; } = "agent_\\"weird\\"";`,
     );
   });
 

@@ -5,7 +5,7 @@
 #nullable enable
 
 using System.Collections.Generic;
-using System.Text.Json.Serialization;
+using Newtonsoft.Json;
 
 namespace ElevenLabs.Protocol
 {
@@ -13,197 +13,197 @@ namespace ElevenLabs.Protocol
 
     public class ConversationInitiationMetadata : IncomingSocketEvent
     {
-        [JsonPropertyName("conversation_initiation_metadata_event")]
+        [JsonProperty("conversation_initiation_metadata_event")]
         public ConversationInitiationMetadataEvent ConversationInitiationMetadataEvent { get; set; } =
             null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "conversation_initiation_metadata";
     }
 
     public class ConversationInitiationMetadataEvent
     {
-        [JsonPropertyName("conversation_id")]
+        [JsonProperty("conversation_id")]
         public string ConversationId { get; set; } = "";
 
-        [JsonPropertyName("agent_output_audio_format")]
+        [JsonProperty("agent_output_audio_format")]
         public string AgentOutputAudioFormat { get; set; } = "";
 
-        [JsonPropertyName("user_input_audio_format")]
+        [JsonProperty("user_input_audio_format")]
         public string UserInputAudioFormat { get; set; } = "";
     }
 
     public class AgentResponseComplete : IncomingSocketEvent
     {
-        [JsonPropertyName("agent_response_complete_event")]
+        [JsonProperty("agent_response_complete_event")]
         public AgentResponseCompleteEvent AgentResponseCompleteEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "agent_response_complete";
     }
 
     public class AgentResponseCompleteEvent
     {
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
     }
 
     public class UserTranscript : IncomingSocketEvent
     {
-        [JsonPropertyName("user_transcription_event")]
+        [JsonProperty("user_transcription_event")]
         public UserTranscriptionEvent UserTranscriptionEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "user_transcript";
     }
 
     public class UserTranscriptionEvent
     {
-        [JsonPropertyName("user_transcript")]
+        [JsonProperty("user_transcript")]
         public string UserTranscript { get; set; } = "";
 
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
     }
 
     public class AgentResponse : IncomingSocketEvent
     {
-        [JsonPropertyName("agent_response_event")]
+        [JsonProperty("agent_response_event")]
         public AgentResponseEvent AgentResponseEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "agent_response";
     }
 
     public class AgentResponseEvent
     {
-        [JsonPropertyName("agent_response")]
+        [JsonProperty("agent_response")]
         public string AgentResponse { get; set; } = "";
 
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
     }
 
     public class AgentResponseCorrection : IncomingSocketEvent
     {
-        [JsonPropertyName("agent_response_correction_event")]
+        [JsonProperty("agent_response_correction_event")]
         public AgentResponseCorrectionEvent AgentResponseCorrectionEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "agent_response_correction";
     }
 
     public class AgentResponseCorrectionEvent
     {
-        [JsonPropertyName("original_agent_response")]
+        [JsonProperty("original_agent_response")]
         public string OriginalAgentResponse { get; set; } = "";
 
-        [JsonPropertyName("corrected_agent_response")]
+        [JsonProperty("corrected_agent_response")]
         public string CorrectedAgentResponse { get; set; } = "";
 
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
     }
 
     public class AudioResponse : IncomingSocketEvent
     {
-        [JsonPropertyName("audio_event")]
+        [JsonProperty("audio_event")]
         public AudioEvent AudioEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "audio";
     }
 
     public class AudioEvent
     {
-        [JsonPropertyName("audio_base_64")]
+        [JsonProperty("audio_base_64")]
         public string AudioBase64 { get; set; } = "";
 
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
 
-        [JsonPropertyName("alignment")]
+        [JsonProperty("alignment")]
         public AudioEventAlignment? Alignment { get; set; }
 
-        [JsonPropertyName("is_final")]
+        [JsonProperty("is_final")]
         public bool? IsFinal { get; set; }
     }
 
     public class AudioEventAlignment
     {
-        [JsonPropertyName("chars")]
+        [JsonProperty("chars")]
         public IEnumerable<string> Chars { get; set; } = null!;
 
-        [JsonPropertyName("char_start_times_ms")]
+        [JsonProperty("char_start_times_ms")]
         public IEnumerable<int> CharStartTimesMs { get; set; } = null!;
 
-        [JsonPropertyName("char_durations_ms")]
+        [JsonProperty("char_durations_ms")]
         public IEnumerable<int> CharDurationsMs { get; set; } = null!;
     }
 
     public class Interruption : IncomingSocketEvent
     {
-        [JsonPropertyName("interruption_event")]
+        [JsonProperty("interruption_event")]
         public InterruptionEvent InterruptionEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "interruption";
     }
 
     public class InterruptionEvent
     {
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
     }
 
     public class VadScore : IncomingSocketEvent
     {
-        [JsonPropertyName("vad_score_event")]
+        [JsonProperty("vad_score_event")]
         public VadScoreEvent VadScoreEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "vad_score";
     }
 
     public class VadScoreEvent
     {
-        [JsonPropertyName("vad_score")]
+        [JsonProperty("vad_score")]
         public double VadScore { get; set; } = 0;
     }
 
     public class ClientToolCall : IncomingSocketEvent
     {
-        [JsonPropertyName("client_tool_call")]
+        [JsonProperty("client_tool_call")]
         public ClientToolCall ClientToolCallData { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "client_tool_call";
     }
 
     public class AgentToolResponseFullPayload : IncomingSocketEvent
     {
-        [JsonPropertyName("agent_tool_response_full_payload")]
+        [JsonProperty("agent_tool_response_full_payload")]
         public AgentToolResponseFullPayload AgentToolResponseFullPayloadData { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "agent_tool_response_full_payload";
     }
 
     public class Ping : IncomingSocketEvent
     {
-        [JsonPropertyName("ping_event")]
+        [JsonProperty("ping_event")]
         public PingEvent PingEvent { get; set; } = null!;
 
-        [JsonPropertyName("type")]
+        [JsonProperty("type")]
         public string Type { get; init; } = "ping";
     }
 
     public class PingEvent
     {
-        [JsonPropertyName("event_id")]
+        [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
 
-        [JsonPropertyName("ping_ms")]
+        [JsonProperty("ping_ms")]
         public int? PingMs { get; set; }
     }
 }

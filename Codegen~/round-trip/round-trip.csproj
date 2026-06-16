@@ -11,4 +11,8 @@
     <!-- In Unity, these compile as part of the Assembly Definition; here they compile standalone. -->
     <Compile Include="../../Runtime/Core/Protocol/*.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Matches the Newtonsoft.Json version shipped by com.unity.nuget.newtonsoft-json@3.x. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
 </Project>

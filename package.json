@@ -18,5 +18,7 @@
     "agents",
     "webgl"
   ],
-  "dependencies": {}
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  }
 }

@@ -1,6 +1,12 @@
-// Modelina preset that emits our Convai DTOs (System.Text.Json attributes,
+// Modelina preset that emits our Convai DTOs (Newtonsoft.Json attributes,
 // init-only string literals for const properties, top-level event types
 // extended from a shared discriminated-union base class).
+//
+// Newtonsoft.Json was chosen over System.Text.Json because Unity 6 LTS does
+// not ship System.Text.Json in its scripting BCL; pulling it in via NuGet
+// invites IL2CPP/AOT trip-hazards on WebGL. The Unity-blessed package
+// `com.unity.nuget.newtonsoft-json` (v3.x, wrapping Newtonsoft.Json 13.0.1)
+// supports init-only setters and ships an AOT-friendly build out of the box.
 //
 // Extracted from generate-protocol-dtos.ts so the property/class renderers
 // and their helpers can be unit-tested without booting the full generator
@@ -116,7 +122,7 @@ export function renderProtocolProperty({
 
   const csType = property.property.type;
   const isRequired = property.required;
-  const attr = `[JsonPropertyName("${jsonName}")]`;
+  const attr = `[JsonProperty("${jsonName}")]`;
 
   const constOpt = property.property.options.const;
   if (constOpt && constOpt.value !== undefined) {
@@ -156,7 +162,7 @@ export function renderProtocolClassHeader({
 // Modelina's default class renderer emits `public T name { get; set; }`
 // without JSON attributes; the bundled JsonSerializerPreset emits per-class
 // JsonConverter<T> classes, which is more invasive than we want.
-// The property hook emits [JsonPropertyName] + a standard auto-property,
+// The property hook emits [JsonProperty] + a standard auto-property,
 // with init-only literal defaults for `const` properties. The class hook
 // strips Modelina's default `partial` and, for top-level event types,
 // injects the discriminated-union base class.
@@ -167,9 +173,7 @@ export function makeProtocolPreset(
   return {
     class: {
       self({ renderer, model, content }) {
-        renderer.dependencyManager.addDependency(
-          "using System.Text.Json.Serialization;",
-        );
+        renderer.dependencyManager.addDependency("using Newtonsoft.Json;");
         return renderProtocolClassHeader({
           content,
           modelName: model.name,
