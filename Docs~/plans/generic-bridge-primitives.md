@@ -638,3 +638,44 @@ natural place for each, but none are needed for v0.1.
 - **`AsyncBridgeCallback`** — a `BridgeCallback` whose JS-side wrapper function returns a `Promise` that settles when C# resolves it (via a `EL_ResolveCallback(invocationId, resultJson)` DllImport). Lets JS-side code `await` a result from C#, covering patterns like remote tool dispatch (a JS module asking C# to execute a tool and waiting for the result). Reuses the existing settle channel plus a per-invocation registry on the JS side. With this in place the primitive set covers every interop direction symmetrically: C# can call sync or async into JS (via `JsObject` / `JsFunction`); JS can call sync-style fire-and-forget or async-with-result into C# (via `BridgeCallback` / `AsyncBridgeCallback`).
 - **Binary-payload variants** — `EL_ObjectCallBytes(handle, methodPtr, bufferPtr, bufferLen, promiseId)` and a mirror return variant for hot paths (audio PCM frames at 40+ Hz). Avoids the JSON encode/decode of base64 strings. Slot-in alongside the existing async/sync call entry points without changing the wider protocol.
 - **DynCall + `[MonoPInvokeCallback]` fast path** — for hot paths where even the SendMessage hop is too slow (PCM streaming at high sample rates), the C# side can register a static method via `[MonoPInvokeCallback]` whose function pointer JS calls via `Module.dynCall_*`. Out of scope; v0.1 stays on SendMessage as discussed in [webgl-js-to-csharp-callbacks.md](./webgl-js-to-csharp-callbacks.md).
+
+## Pending Human Approval
+
+### HP-Block.1 — Unity batchmode rejects `-projectPath` paths ending in `~` (2026-06-16)
+
+**Discovery while attempting HP.3.** Unity 6000.3.6f1 in batchmode refuses to
+open any project whose path resolves to one ending in `~`. Reproduced with:
+
+```bash
+"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" \
+  -batchmode -nographics -projectPath /Users/.../TestProject~ -logFile - -quit
+# → "Couldn't set project path to: /Users/.../TestProject~"
+# → "Aborting batchmode due to failure: Couldn't set project path to: ..."
+```
+
+Also reproduced via:
+
+- `-projectPath .` from inside the directory (Unity canonicalises to the absolute path before validating).
+- `-projectPath /tmp/elevenlabs-testproject` where `/tmp/elevenlabs-testproject → TestProject~` (Unity resolves the symlink before validating).
+- Trailing-slash form (`TestProject~/`).
+
+Unity's own "folders ending in `~` are ignored during asset import" rule
+extends to the batchmode project-path validator. The original HP.1 design
+decision — pick `TestProject~/` precisely so Unity ignores it when this
+package is installed by a downstream consumer — collides with Unity's
+willingness to open the same folder as the active project root.
+
+**Impact on the plan:**
+
+- **HP.3** — the human-driven "Open via Unity Hub" step is still untested; Unity Hub may use a different code path. If it works there, the import succeeds and the discovery is scoped to batchmode only. If it doesn't, HP.1's directory-name decision needs to be revisited.
+- **HP.5** — the headless `unity -batchmode -projectPath TestProject~ -runTests` wrapper script is **blocked outright** by this finding, regardless of HP.3's outcome. The same blocker propagates to **HP.6** (WebGL build wrapper) and the eventual CI wiring in **HP.7**.
+
+**Mitigation options for the human to choose between:**
+
+1. **Rename to a non-`~` directory + replace `~`-ignore with package-payload exclusion.** Move host project to e.g. `TestProject/` or `TestProject.Host/`. Exclude it from the UPM payload via `package.json`'s `files:` field or an equivalent UPM mechanism so it doesn't ship to downstream consumers. Lowest-friction for tooling; loses the elegance of relying on Unity's built-in folder-ignore.
+2. **Move host project outside the package root.** Sibling directory like `../elevenlabs-unity-host/` with a `Packages/manifest.json` pointing back via `file:../elevenlabs-unity`. Cleanest separation of concerns; adds a second repo-root entry point devs need to know about.
+3. **Wrap with a non-`~` symlink at the repo root, gitignored.** E.g. dev creates `TestProjectHost -> TestProject~` locally; the symlink is git-ignored, Unity opens the symlink, and the `~`-suffixed canonical name remains for downstream consumers. Won't work — verified above that Unity resolves the symlink before validating.
+4. **Hybrid: keep `TestProject~/` for the human-driven Unity Hub flow, accept that headless/CI test runs are off the table until the directory is renamed.** Document the limitation; revisit when CI becomes a hard requirement. Lowest immediate cost; defers the real fix.
+5. **Make the repo root itself the Unity project.** Pattern used by [`livekit/client-sdk-unity`](https://github.com/livekit/client-sdk-unity) (and many other UPM SDK repos): there is no embedded host project — `package.json` lives at the repo root, `Runtime/` + `Editor/` + `Tests/` are the package source, and `ProjectSettings/` + `Packages/` are committed at the root so Unity can open the repo directly. Dev-only directories (`Library/`, `Temp/`, `Logs/`, `UserSettings/`) are gitignored. Samples live under `Samples~/` and CI targets the root with `unity -projectPath .`. Pros: zero `~`-path issues, most-precedented pattern in the Unity SDK ecosystem, one project to open. Cons: clutters the repo root with Unity's runtime detritus (gitignored but visible), and the line between "the package" and "a Unity project consuming it" gets blurry — when the package is published to a downstream consumer, only `Runtime/` / `Editor/` / `Tests/` / `Samples~/` should ship, so `package.json`'s `files:` field (or equivalent) must explicitly exclude `ProjectSettings/` and `Packages/`. Requires deleting `TestProject~/` and adopting a different repo layout — non-trivial restructure.
+
+**Recommendation:** Option 5 (repo-root-as-project) — it's the well-trodden Unity SDK pattern, sidesteps the `~`-path issue entirely rather than working around it, and keeps the dev/CI workflow identical to what consumers of the SDK will see. The price is a one-time repo restructure (commit `ProjectSettings/` + `Packages/manifest.json` at the root, delete `TestProject~/`, exclude them from the published UPM payload, regenerate `.meta` files for any folders Unity needs to track).
