@@ -1,4 +1,6 @@
 using System;
+using ElevenLabs.WebGL.Internal;
+using Newtonsoft.Json;
 
 namespace ElevenLabs.WebGL
 {
@@ -10,6 +12,8 @@ namespace ElevenLabs.WebGL
     /// </remarks>
     public sealed class BridgeCallback : IDisposable
     {
+        private bool _disposed;
+
         /// <summary>Opaque integer handle passed to JS inside a <c>{"$cb": handle}</c> marker.</summary>
         public int Handle { get; }
 
@@ -18,7 +22,40 @@ namespace ElevenLabs.WebGL
             Handle = handle;
         }
 
-        /// <summary>Removes the C# delegate from the callback registry. Full implementation lands in task 3.6.</summary>
-        public void Dispose() { }
+        /// <summary>
+        /// Wraps a C# delegate in a <see cref="BridgeCallback"/> that JS can invoke.
+        /// The delegate receives the raw JSON payload string from the JS call.
+        /// </summary>
+        public static BridgeCallback Wrap(Action<string> handler)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+            int handle = CallbackRegistry.Register(handler);
+            return new BridgeCallback(handle);
+        }
+
+        /// <summary>
+        /// Typed convenience overload. The JSON payload from JS is deserialised to
+        /// <typeparamref name="T"/> before the delegate is invoked.
+        /// </summary>
+        public static BridgeCallback Wrap<T>(Action<T> handler)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+            return Wrap(payload => handler(JsonConvert.DeserializeObject<T>(payload)));
+        }
+
+        /// <summary>
+        /// Removes the C# delegate from the callback registry. Safe to call multiple times —
+        /// subsequent calls are no-ops. JS invocations arriving after dispose miss the lookup
+        /// and no-op silently.
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            CallbackRegistry.TryRemove(Handle);
+        }
     }
 }

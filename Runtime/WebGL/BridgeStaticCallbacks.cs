@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using AOT;
+using ElevenLabs.WebGL.Internal;
 using UnityEngine;
 
 namespace ElevenLabs.WebGL
@@ -104,9 +105,7 @@ namespace ElevenLabs.WebGL
         private static void OnCallbackInvokedFromJs(int handle, IntPtr payloadPtr)
         {
             string payload = payloadPtr == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(payloadPtr);
-            // Callback-registry wiring lands in task 3.6.
-            _ = payload;
-            _ = handle;
+            CallbackRegistry.TryDispatch(handle, payload);
         }
 
         private static void OnApplicationQuitting()
