@@ -114,6 +114,27 @@ VS Code Problems panel.
 > the test runner fires and exits silently with no results. The test runner
 > exits the editor itself once tests finish.
 
+## Unity-owned `.meta` files
+
+Unity generates a `.meta` sidecar for every file and folder it imports on
+project open. **Do not author `.meta` files by hand** (no `uuidgen` runs to
+fabricate GUIDs, no copy-pasting `fileFormatVersion: 2` headers): instead
+write the source file (`.cs`, `.asmdef`, `.jslib`, etc.) and let Unity stamp
+the GUID on its next import.
+
+The simplest way to trigger import is to run the test runner — it opens the
+project, refreshes the asset pipeline, and exits:
+
+```bash
+node TestProject/run-tests.ts
+```
+
+After that command, `git status` will show the new `.meta` files as
+untracked. Commit them alongside their source files for any path covered by
+the package payload (see HP.9 in
+[`Docs~/plans/generic-bridge-primitives.md`](../Docs~/plans/generic-bridge-primitives.md)
+for which `.meta` files are tracked vs. ignored).
+
 ## Language conventions
 
 Write all JS-side code in TypeScript — sources, tests, and build/tooling scripts alike.
