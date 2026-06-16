@@ -3,6 +3,10 @@ using System.Runtime.InteropServices;
 
 namespace ElevenLabs.WebGL
 {
+    /// <summary>
+    /// Raw DllImport declarations for the ElevenLabs WebGL bridge entry points. On non-WebGL
+    /// platforms every method throws <see cref="PlatformNotSupportedException"/>.
+    /// </summary>
     internal static class ElevenLabsBridgeNative
     {
 #if UNITY_WEBGL && !UNITY_EDITOR

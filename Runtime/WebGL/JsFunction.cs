@@ -33,6 +33,13 @@ namespace ElevenLabs.WebGL
         /// JS dispatcher — pass <see cref="JsObject"/> or <see cref="JsFunction"/> to receive a
         /// handle, any other type for a plain JSON-decoded value.
         /// </summary>
+        /// <typeparam name="T">Expected return type. Drives the return-shape code automatically.</typeparam>
+        /// <param name="args">
+        /// Arguments forwarded to the function. <see cref="JsObject"/>,
+        /// <see cref="JsFunction"/>, and <see cref="BridgeCallback"/> instances are
+        /// encoded as typed markers; all other values are JSON-serialised.
+        /// </param>
+        /// <returns>An awaitable that resolves to the decoded return value.</returns>
         public async Awaitable<T> CallAsync<T>(params object[] args)
         {
             var source = new AwaitableCompletionSource<string>();
@@ -59,6 +66,7 @@ namespace ElevenLabs.WebGL
         /// <summary>
         /// Invokes the remote JS function asynchronously, discarding the return value.
         /// </summary>
+        /// <param name="args">Arguments forwarded to the function.</param>
         public async Awaitable CallAsync(params object[] args)
         {
             var source = new AwaitableCompletionSource<string>();
@@ -83,6 +91,9 @@ namespace ElevenLabs.WebGL
         /// <summary>
         /// Invokes the remote JS function synchronously.
         /// </summary>
+        /// <typeparam name="T">Expected return type. Drives the return-shape code automatically.</typeparam>
+        /// <param name="args">Arguments forwarded to the function.</param>
+        /// <returns>The decoded return value.</returns>
         /// <exception cref="BridgeException">Thrown when the JS function throws an error.</exception>
         public T Call<T>(params object[] args)
         {
@@ -95,6 +106,7 @@ namespace ElevenLabs.WebGL
         /// <summary>
         /// Invokes the remote JS function synchronously, discarding the return value.
         /// </summary>
+        /// <param name="args">Arguments forwarded to the function.</param>
         /// <exception cref="BridgeException">Thrown when the JS function throws an error.</exception>
         public void Call(params object[] args)
         {

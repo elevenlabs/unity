@@ -13,6 +13,11 @@ namespace ElevenLabs.WebGL
     /// </summary>
     internal static class BridgeArgEncoder
     {
+        /// <summary>
+        /// Encodes the argument list to a JSON array string, wrapping bridge handle types as typed markers.
+        /// </summary>
+        /// <param name="args">Arguments to encode. Null is treated as an empty list.</param>
+        /// <returns>A JSON array string suitable for passing across the DllImport boundary.</returns>
         public static string Encode(params object[] args)
         {
             var tokens = (args ?? System.Array.Empty<object>()).Select(EncodeValue);

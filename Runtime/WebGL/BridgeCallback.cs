@@ -26,6 +26,9 @@ namespace ElevenLabs.WebGL
         /// Wraps a C# delegate in a <see cref="BridgeCallback"/> that JS can invoke.
         /// The delegate receives the raw JSON payload string from the JS call.
         /// </summary>
+        /// <param name="handler">The delegate to invoke when JS calls the callback.</param>
+        /// <returns>A new <see cref="BridgeCallback"/> holding the registered handle.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="handler"/> is null.</exception>
         public static BridgeCallback Wrap(Action<string> handler)
         {
             if (handler == null)
@@ -38,6 +41,10 @@ namespace ElevenLabs.WebGL
         /// Typed convenience overload. The JSON payload from JS is deserialised to
         /// <typeparamref name="T"/> before the delegate is invoked.
         /// </summary>
+        /// <typeparam name="T">The type the JSON payload is deserialised to before invoking the delegate.</typeparam>
+        /// <param name="handler">The delegate to invoke when JS calls the callback.</param>
+        /// <returns>A new <see cref="BridgeCallback"/> holding the registered handle.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="handler"/> is null.</exception>
         public static BridgeCallback Wrap<T>(Action<T> handler)
         {
             if (handler == null)

@@ -33,6 +33,14 @@ namespace ElevenLabs.WebGL
         /// JS dispatcher — pass <see cref="JsObject"/> or <see cref="JsFunction"/> to receive a
         /// handle, any other type for a plain JSON-decoded value.
         /// </summary>
+        /// <typeparam name="T">Expected return type. Drives the return-shape code automatically.</typeparam>
+        /// <param name="method">Name of the method to invoke on the remote object.</param>
+        /// <param name="args">
+        /// Arguments forwarded to the method. <see cref="JsObject"/>,
+        /// <see cref="JsFunction"/>, and <see cref="BridgeCallback"/> instances are
+        /// encoded as typed markers; all other values are JSON-serialised.
+        /// </param>
+        /// <returns>An awaitable that resolves to the decoded return value.</returns>
         public async Awaitable<T> CallAsync<T>(string method, params object[] args)
         {
             var source = new AwaitableCompletionSource<string>();
@@ -60,6 +68,8 @@ namespace ElevenLabs.WebGL
         /// <summary>
         /// Calls a named method on the remote JS object asynchronously, discarding the return value.
         /// </summary>
+        /// <param name="method">Name of the method to invoke on the remote object.</param>
+        /// <param name="args">Arguments forwarded to the method.</param>
         public async Awaitable CallAsync(string method, params object[] args)
         {
             var source = new AwaitableCompletionSource<string>();
@@ -85,6 +95,10 @@ namespace ElevenLabs.WebGL
         /// <summary>
         /// Calls a named method on the remote JS object synchronously.
         /// </summary>
+        /// <typeparam name="T">Expected return type. Drives the return-shape code automatically.</typeparam>
+        /// <param name="method">Name of the method to invoke on the remote object.</param>
+        /// <param name="args">Arguments forwarded to the method.</param>
+        /// <returns>The decoded return value.</returns>
         /// <exception cref="BridgeException">Thrown when the JS method throws an error.</exception>
         public T Call<T>(string method, params object[] args)
         {
@@ -102,6 +116,8 @@ namespace ElevenLabs.WebGL
         /// <summary>
         /// Calls a named method on the remote JS object synchronously, discarding the return value.
         /// </summary>
+        /// <param name="method">Name of the method to invoke on the remote object.</param>
+        /// <param name="args">Arguments forwarded to the method.</param>
         /// <exception cref="BridgeException">Thrown when the JS method throws an error.</exception>
         public void Call(string method, params object[] args)
         {
@@ -119,6 +135,9 @@ namespace ElevenLabs.WebGL
         /// Reads a named property from the remote JS object synchronously. The result is always
         /// JSON-decoded (value shape); use <see cref="CallAsync{T}"/> when you need a handle.
         /// </summary>
+        /// <typeparam name="T">Expected property value type.</typeparam>
+        /// <param name="property">Name of the property to read.</param>
+        /// <returns>The property value decoded as <typeparamref name="T"/>.</returns>
         /// <exception cref="BridgeException">Thrown when the JS property access throws an error.</exception>
         public T Get<T>(string property)
         {

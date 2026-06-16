@@ -11,6 +11,13 @@ namespace ElevenLabs.WebGL
     /// </summary>
     internal static class BridgeValueDecoder
     {
+        /// <summary>
+        /// Decodes the JSON string returned from the bridge. Recognises <c>{"$ref": h}</c> and
+        /// <c>{"$fn": h}</c> markers; everything else is deserialised via Newtonsoft.Json.
+        /// </summary>
+        /// <typeparam name="T">Expected type of the decoded value.</typeparam>
+        /// <param name="json">The JSON string from the bridge, or null/empty for a void result.</param>
+        /// <returns>The decoded value, or <c>default</c> for a null/empty/void result.</returns>
         public static T Decode<T>(string json)
         {
             if (string.IsNullOrEmpty(json) || json == "null")
