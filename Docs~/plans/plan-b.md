@@ -130,9 +130,13 @@ ships.
 
 ## Implementation phases
 
-Phases are ordered so everything that can be done without the Unity license
-lands first. Phases 1–3 are Unity-free and can run in parallel by separate
-agent loops. Phases 4–7 unblock once the Unity license is active.
+Phases are ordered so everything that can be done without a Unity host
+project lands first. Phases 1–3 are Unity-free and can run in parallel by
+separate agent loops. Phases 4–7 unblock once the embedded `TestProject~/`
+exists — see "Phase 3 prelude — Unity host project" in
+[generic-bridge-primitives.md](./generic-bridge-primitives.md) (tasks
+HP.1–HP.4 are the minimum). Unity **6000.3.6f1** is installed locally as
+of 2026-06-16; the prior "Unity license" framing no longer applies.
 
 ### Phase 1 — Plan disposition and naming (no code)
 
@@ -183,7 +187,7 @@ landing it now means Phase 4 starts with the right types in hand.
 
 This phase can be deferred to overlap with Phase 4 if Phases 1–2 are slow.
 
-### Phase 4 — C# Conversation + Core abstractions (requires Unity)
+### Phase 4 — C# Conversation + Core abstractions (requires Unity host project)
 
 The Conversation logic itself. Mostly a port of `BaseConversation.ts`'s
 `onMessage` switch (lines 446-569), state tracking (mode/status/feedback),
@@ -198,7 +202,7 @@ mock `IConnection`/`IInputController`/`IOutputController`.
 - [ ] **4.5 — Edit-mode tests.** Mock IConnection / IInputController / IOutputController; drive every router branch and every public method. This is the regression baseline for the whole SDK.
 - [ ] **4.6 — XML doc comments on the public surface.**
 
-### Phase 5 — WebGL bridged implementations (requires Unity)
+### Phase 5 — WebGL bridged implementations (requires Unity host project)
 
 Thin C# wrappers around the `JsObject` handles returned by the Phase 2
 factories. Each one is a class that holds a `JsObject`, implements the
@@ -213,7 +217,7 @@ points carry everything.
 - [ ] **5.4 — Conversation factory selection.** Inside `Conversation.StartSessionAsync`: `#if UNITY_WEBGL` delegates to `BridgedSession`; `#else` calls native impls (Phase 7). The rest of `Conversation` is platform-unaware.
 - [ ] **5.5 — Edit-mode tests for the bridged wrappers.** Stub `JsObject` / `JsFunction` / `BridgeCallback` (the generic primitives layer is its own test surface — here we only check that the bridged wrappers issue the right `CallAsync` / `Call` / `Get` invocations with the right method names and arguments, and that incoming `BridgeCallback` invocations route to the right C# events).
 
-### Phase 6 — WebGL smoke + integration (requires Unity)
+### Phase 6 — WebGL smoke + integration (requires Unity host project)
 
 - [ ] **6.1 — Minimal scene.** A scene that calls `Conversation.StartSessionAsync` against a real test agent, sends a message, gets a response, ends. Manually verified in Chrome.
 - [ ] **6.2 — Validation assertions.** Same V1–V4 list as the primitives plan, plus: audio default-mode flows correctly (mic in, speaker out, no Unity AudioSource involved); end-session tears down all three JS instances without leaks.

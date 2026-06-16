@@ -464,7 +464,9 @@ behaviour from the outside.
 
 ## Implementation phases
 
-Ordered to frontload everything that doesn't require a Unity license.
+Ordered to frontload everything that doesn't require a Unity host project.
+Unity 6000.3.6f1 is now installed locally (see "Phase 3 prelude" below) —
+the C# phases unblock once the embedded `TestProject~/` lands.
 
 The first downstream consumer of this primitive layer is [plan-b.md](./plan-b.md)
 (the connection / I/O controller bridge that the C# `Conversation` orchestrates).
@@ -536,7 +538,44 @@ See [dyncall-migration.md](./dyncall-migration.md) for the full design rationale
 - [x] **2.5.5 — Update `Bridge~/src/primitives/index.ts`.** Swap `import * as bridgeName from "./bridge-name"` for `import * as functionPointers from "./function-pointers"`; spread in place of `bridgeName`.
 - [x] **2.5.6 — Add Rolldown transform plugin + regenerate `Plugins/WebGL/ElevenLabsBridge.jslib`.** New `Bridge~/build/substitute-make-dyncall.ts` exports a Rolldown plugin that uses `this.parse(code)` in `transform` to walk the AST, locates `CallExpression` nodes with `callee.name` matching `/^dynCall_[vif]+$/` and a first argument that's an `Identifier` starting with `_EL_`, and rewrites via `MagicString` to `{{{ makeDynCall('<sig>', '<varName>') }}}(<rest>)`. Wired into `bundle-jslib.ts`'s `rolldown({ plugins: [...] })` call. Plugin has its own unit tests (plain int args, nested `JSON.stringify`, multi-line, zero-arg, non-`_EL_` negative case). Then `pnpm --dir Bridge~ run build:primitives` regenerates the `.jslib`; commit it. `pnpm --dir Bridge~ run verify:primitives` passes. Spot-check: exactly **two** `{{{ makeDynCall(...) }}}` macro sites in the regenerated file, **zero** `SendMessage(...)` calls.
 
-### Phase 3 — C# primitive layer (requires Unity)
+### Phase 3 prelude — Unity host project (gating prerequisite for Phase 3+)
+
+**Status as of 2026-06-16:** Unity **6000.3.6f1** (Unity 6 LTS) is installed
+locally at `/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app`. The
+previous "blocked on Unity license" framing no longer applies — the only
+remaining gating dependency for Phase 3+ is a Unity project Unity can
+actually open. The package source today (asmdefs, jslib, Phase 1
+scaffolding) has no consumer; Unity has nothing to compile.
+
+**Layout decision: embedded `TestProject~/` at repo root.** The `~` suffix
+makes Unity ignore the folder when the package is installed by a downstream
+consumer (so it doesn't ship in the UPM payload), but it's a real Unity
+project for us — opened locally for compile errors, IntelliSense, the Test
+Runner, and WebGL builds. The dev host is intentionally separate from a
+future consumer-facing `Samples~/` directory (which Unity surfaces in
+Package Manager via the "Import" button); merging the two concerns
+historically leads to either a cluttered example or a stunted dev host.
+Directory name chosen as `TestProject~/` (2026-06-16) — accurately
+describes the primary use (driving Edit Mode tests + WebGL build smoke
+tests + the Phase 4 smoke scene). Mild overlap with the existing `Tests/`
+folder at the package root is intentional and the `~` suffix already
+distinguishes them: `Tests/` holds the test *source* that ships with the
+package; `TestProject~/` is the *runner host* Unity opens.
+
+- [ ] **HP.1 — Create `TestProject~/` skeleton.** Commit `TestProject~/Packages/manifest.json` with `"io.elevenlabs.agents": "file:../.."` so the local package source is the embedded host's dev source, plus `TestProject~/ProjectSettings/ProjectVersion.txt` pinned to `m_EditorVersion: 6000.3.6f1`. Either seed manually or bootstrap once via Unity Hub's "New Project" flow and then prune everything except `Packages/manifest.json` + `ProjectSettings/`. Add a one-paragraph `TestProject~/README.md` noting that this is the dev host project (not a sample) and pointing back to this plan.
+- [ ] **HP.2 — Update root `.gitignore`.** Add `TestProject~/[Ll]ibrary/`, `TestProject~/[Tt]emp/`, `TestProject~/[Oo]bj/`, `TestProject~/[Bb]uild/`, `TestProject~/[Ll]ogs/`, `TestProject~/[Uu]ser[Ss]ettings/`, and `TestProject~/Assets/` (Unity generates an empty `Assets/` on first open; we have no host-specific assets to track). Keep `TestProject~/Packages/manifest.json` and `TestProject~/ProjectSettings/` tracked.
+- [ ] **HP.3 — First open verification.** Open `TestProject~/` via Unity Hub; confirm clean import (zero console errors), confirm `io.elevenlabs.agents` shows up under Packages at the right local path, and confirm the existing `Runtime/WebGL/*.cs` + `Runtime/Core/Protocol/*.g.cs` files compile. This is the moment the Phase 1 scaffolding and the Phase 3 codegen output earn their first real compile.
+- [ ] **HP.4 — Minimal Edit Mode sanity test.** A throwaway `Tests/Editor/SanityTest.cs` with `Assert.Pass()`. Proves the existing `ElevenLabs.Agents.WebGL.Tests.asmdef` reference graph resolves, the `UNITY_INCLUDE_TESTS` define is active, and Test Runner picks the assembly up. Remove or repurpose once a real Phase 3.2+ test lands.
+- [ ] **HP.5 — Headless local test runner.** Wrapper script `TestProject~/run-tests.sh` (or similar) that invokes `"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" -batchmode -nographics -projectPath TestProject~ -runTests -testPlatform editmode -testResults TestProject~/test-results.xml -logFile -`. Devs use this for fast iteration without opening the editor; the same command runs in CI later. Document in `.claude/CLAUDE.md` under "Verification commands".
+- [ ] **HP.6 — WebGL build smoke.** A second wrapper invoking the same Unity binary with `-buildTarget WebGL -executeMethod` against a stub `Editor/HostBuild.cs` that calls `BuildPipeline.BuildPlayer(...)`. Confirms the IL2CPP WebGL pipeline is healthy before Phase 4 needs it. The scene that exercises the bridge for real lives in Phase 4.1 — HP.6 just proves the build target works.
+- [ ] **HP.7 — CI wiring (deferred).** GitHub Actions via `game-ci/unity-test-runner@v4` plus license activation (Personal seat ULF via repo secret, or organization seat). Tracked here; lands once HP.5 is stable locally. Not a Phase 3 blocker.
+
+**Unblocks what:** HP.1 through HP.4 are the minimum to start Phase 3.0
+work — after HP.4 the existing scaffolding compiles inside Unity and new
+tests can be authored against it. HP.5–HP.7 are quality-of-life and CI
+plumbing that don't gate any C# task individually.
+
+### Phase 3 — C# primitive layer (requires the Phase 3 prelude above)
 
 Phase 3 was redesigned on 2026-06-12 around the DynCall path (see [dyncall-migration.md](./dyncall-migration.md)). Headline changes vs. the original v0.1 plan: the dispatch entry point is a static `BridgeStaticCallbacks` class with `[AOT.MonoPInvokeCallback]` static methods (not a MonoBehaviour with `SendMessage` targets); the `WebGLBridge` MonoBehaviour and `BridgeMessageParser` are deleted; consumers must enable `Use WebAssembly.Table` (enforced at build time + runtime).
 
@@ -557,7 +596,7 @@ Follow-up tasks landing alongside the C# work (see [dyncall-migration.md](./dync
 - Delete `Runtime/WebGL/BridgeMessageParser.cs` (typed DynCall args make string parsing unnecessary).
 - README updates documenting the `Use WebAssembly.Table` requirement and the .NET Standard 2.1 API compatibility level.
 
-### Phase 4 — WebGL smoke test (requires Unity)
+### Phase 4 — WebGL smoke test (requires the Phase 3 prelude above + Phase 3 complete)
 
 - [ ] **4.1 — Minimal scene.** A `BridgePrimitiveSmokeTest` MonoBehaviour: registers the `mathFactory` from Phase 2.7 in a `.jspre` (or its equivalent), then in C# `Start()` invokes the factory, exercises each surface (method, property, callback registration, function-handle round-trip), asserts on results, logs to console.
 - [ ] **4.2 — Validation assertions.**
@@ -567,7 +606,7 @@ Follow-up tasks landing alongside the C# work (see [dyncall-migration.md](./dync
   - V4: A `JsFunction` returned from a method call survives across multiple sync calls
 - [ ] **4.3 — Clean IL2CPP build.** No warnings, no missing symbols. Manual verification in Chrome and at least one of Firefox/Safari.
 
-### Phase 5 — Automated integration (requires Unity)
+### Phase 5 — Automated integration (requires Phase 4 complete)
 
 - [ ] **5.1 — Vitest browser-mode harness.** Playwright provider loads the WebGL build; the harness drives the smoke-test scene from JS and asserts on the bridge protocol.
 - [ ] **5.2 — Edge cases.** Double-dispose, orphaned handles on bridge destroy, special chars in payload (colons, newlines, Unicode), large payloads (>100KB), rapid-fire callback invocations from JS.

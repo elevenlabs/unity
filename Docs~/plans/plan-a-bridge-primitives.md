@@ -549,13 +549,22 @@ The primitives are small but the next consumer (Conversation adapter) needs a bu
 
 ---
 
-### Requires Unity License
+### Requires Unity (compiler now available)
+
+> **2026-06-16 update.** Unity 6000.3.6f1 is installed locally; the
+> "requires Unity license" framing across the remainder of this plan is
+> obsolete. The host-project setup task has moved to the active plan as
+> "Phase 3 prelude — Unity host project" in
+> [generic-bridge-primitives.md](./generic-bridge-primitives.md) (tasks
+> HP.1–HP.7). The C# Phase 2–4 tasks listed below are themselves
+> superseded by `generic-bridge-primitives.md` Phase 3 and are kept here
+> only as historical reference.
 
 Everything below needs a Unity installation for C# compilation, the Test Runner, or a WebGL build. The host project task is the first dependency — it unblocks all compilation and Edit Mode testing.
 
 #### Phase 1 — Foundation (remaining)
 
-- [ ] **Set up a host Unity project** to enable local compilation and Edit Mode test runs (`-batchmode -nographics -runTests`) during development, and wire it into CI — includes Unity license activation on the runner
+- [ ] **Set up a host Unity project** — superseded by HP.1–HP.7 in [generic-bridge-primitives.md](./generic-bridge-primitives.md); track work there.
 - [ ] Edit Mode tests for `BridgeIdGenerator`: IDs are unique, strictly increasing, and not zero
 - [ ] Edit Mode tests for `BridgeMessageParser`: each variant, colons in payload, empty payload, Unicode
 - [ ] XML doc comments on all public types and members in this phase
