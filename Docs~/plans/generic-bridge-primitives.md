@@ -466,7 +466,7 @@ behaviour from the outside.
 
 Ordered to frontload everything that doesn't require a Unity host project.
 Unity 6000.3.6f1 is now installed locally (see "Phase 3 prelude" below) —
-the C# phases unblock once the embedded `TestProject~/` lands.
+the C# phases unblock once the embedded `TestProject/` lands.
 
 The first downstream consumer of this primitive layer is [plan-b.md](./plan-b.md)
 (the connection / I/O controller bridge that the C# `Conversation` orchestrates).
@@ -547,33 +547,59 @@ remaining gating dependency for Phase 3+ is a Unity project Unity can
 actually open. The package source today (asmdefs, jslib, Phase 1
 scaffolding) has no consumer; Unity has nothing to compile.
 
-**Layout decision: embedded `TestProject~/` at repo root.** The `~` suffix
-makes Unity ignore the folder when the package is installed by a downstream
-consumer (so it doesn't ship in the UPM payload), but it's a real Unity
-project for us — opened locally for compile errors, IntelliSense, the Test
-Runner, and WebGL builds. The dev host is intentionally separate from a
-future consumer-facing `Samples~/` directory (which Unity surfaces in
-Package Manager via the "Import" button); merging the two concerns
-historically leads to either a cluttered example or a stunted dev host.
-Directory name chosen as `TestProject~/` (2026-06-16) — accurately
-describes the primary use (driving Edit Mode tests + WebGL build smoke
-tests + the Phase 4 smoke scene). Mild overlap with the existing `Tests/`
-folder at the package root is intentional and the `~` suffix already
-distinguishes them: `Tests/` holds the test *source* that ships with the
-package; `TestProject~/` is the *runner host* Unity opens.
+**Layout decision: embedded `TestProject/` at repo root (no tilde).** The
+dev host is a real Unity project we open locally for compile errors,
+IntelliSense, the Test Runner, and WebGL builds. Two ideas got tried and
+discarded on 2026-06-16 before landing on the current shape:
 
-- [x] **HP.1 — Create `TestProject~/` skeleton.** Commit `TestProject~/Packages/manifest.json` with `"io.elevenlabs.agents": "file:../.."` so the local package source is the embedded host's dev source, plus `TestProject~/ProjectSettings/ProjectVersion.txt` pinned to `m_EditorVersion: 6000.3.6f1`. Either seed manually or bootstrap once via Unity Hub's "New Project" flow and then prune everything except `Packages/manifest.json` + `ProjectSettings/`. Add a one-paragraph `TestProject~/README.md` noting that this is the dev host project (not a sample) and pointing back to this plan.
-- [x] **HP.2 — Update root `.gitignore`.** Add `TestProject~/[Ll]ibrary/`, `TestProject~/[Tt]emp/`, `TestProject~/[Oo]bj/`, `TestProject~/[Bb]uild/`, `TestProject~/[Ll]ogs/`, `TestProject~/[Uu]ser[Ss]ettings/`, and `TestProject~/Assets/` (Unity generates an empty `Assets/` on first open; we have no host-specific assets to track). Keep `TestProject~/Packages/manifest.json` and `TestProject~/ProjectSettings/` tracked.
-- [ ] **HP.3 — First open verification.** Open `TestProject~/` via Unity Hub; confirm clean import (zero console errors), confirm `io.elevenlabs.agents` shows up under Packages at the right local path, and confirm the existing `Runtime/WebGL/*.cs` + `Runtime/Core/Protocol/*.g.cs` files compile. This is the moment the Phase 1 scaffolding and the Phase 3 codegen output earn their first real compile.
-- [ ] **HP.4 — Minimal Edit Mode sanity test.** A throwaway `Tests/Editor/SanityTest.cs` with `Assert.Pass()`. Proves the existing `ElevenLabs.Agents.WebGL.Tests.asmdef` reference graph resolves, the `UNITY_INCLUDE_TESTS` define is active, and Test Runner picks the assembly up. Remove or repurpose once a real Phase 3.2+ test lands.
-- [ ] **HP.5 — Headless local test runner.** Wrapper script `TestProject~/run-tests.sh` (or similar) that invokes `"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" -batchmode -nographics -projectPath TestProject~ -runTests -testPlatform editmode -testResults TestProject~/test-results.xml -logFile -`. Devs use this for fast iteration without opening the editor; the same command runs in CI later. Document in `.claude/CLAUDE.md` under "Verification commands".
+1. **`TestProject~/` (trailing tilde)** — original HP.1 design. Unity's
+   asset-import folder-ignore rule (`~`-suffixed folders are skipped)
+   would have kept the dev host out of downstream consumers' installed
+   payload. **Doesn't work**: Unity's batchmode `-projectPath` validator
+   refuses any path ending in `~`, including after symlink resolution.
+   Blocks headless test runs and CI.
+2. **Repo root as the Unity project** — `package.json` and
+   `Packages/manifest.json` both at `/`, package self-referenced via
+   `"io.elevenlabs.agents": "file:.."`. **Doesn't work**: Unity's
+   `PackageManager::PackageAssets::RejectLocalPackagesInForbiddenFolders`
+   crashes (segfault during `Project::Restore`) when a `file:` package
+   resolves to the project root itself.
+
+**Landed shape:** `TestProject/` (no tilde) at the repo root, with the
+package referenced via `"io.elevenlabs.agents": "file:../.."` from
+`TestProject/Packages/manifest.json`. The package source lives one
+directory above the Unity project, satisfying the "forbidden folder"
+constraint. The non-tilde name lets `-projectPath` open the project from
+batchmode and CI. Mild overlap with the existing `Tests/` folder at the
+package root is intentional: `Tests/` holds the test *source* that ships
+with the package; `TestProject/` is the *runner host* Unity opens.
+
+**UPM payload exclusion (follow-up):** Because `TestProject/` no longer
+has the `~` suffix, Unity does NOT automatically exclude it from the
+package when an end user installs `io.elevenlabs.agents` via git URL or
+scoped registry. The directory will be visible inside the consumer's
+`Packages/io.elevenlabs.agents/TestProject/`. To exclude it from
+published payloads, add a `package.json` `"files"` allowlist OR an
+`.npmignore` entry. Tracked as HP.8 below — not a Phase 3 blocker; the
+practical effect on consumers is visual cruft, not broken behaviour.
+
+- [x] **HP.1 — Create `TestProject/` skeleton (no tilde).** `TestProject/Packages/manifest.json` references the local package via `"io.elevenlabs.agents": "file:../.."`; `TestProject/ProjectSettings/` is seeded from a Unity 6000.3.6f1 `-createProject` run (all the standard `*.asset` files, including `ProjectSettings.asset`, `EditorBuildSettings.asset`, etc.); `TestProject/Assets/.gitkeep` keeps the empty Assets dir alive in fresh clones (Unity refuses to open a project without an existing `Assets/`).
+- [x] **HP.2 — Update root `.gitignore`.** Add `TestProject/[Ll]ibrary/`, `TestProject/[Tt]emp/`, `TestProject/[Oo]bj/`, `TestProject/[Bb]uild/`, `TestProject/[Ll]ogs/`, `TestProject/[Uu]ser[Ss]ettings/`, `TestProject/[Aa]ssets/*` (with a negation for `.gitkeep`), and `TestProject/Packages/packages-lock.json`. Keep `TestProject/Packages/manifest.json` and `TestProject/ProjectSettings/*` tracked.
+- [x] **HP.3 — First open verification.** Confirmed via `"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" -batchmode -nographics -projectPath /path/to/repo/TestProject -logFile - -quit`: project path accepted, `io.elevenlabs.agents` resolves from `file:../..`, package source is scanned. **Known follow-ups surfaced:** (a) Unity creates `.meta` sidecar files for every file/folder it scans inside the package source (Editor/, Plugins/, Runtime/, Tests/, plus the repo-root markdown/json files); these are currently deleted on each open and need a real management strategy (tracked as HP.9). (b) The existing protocol DTOs fail to compile with `System.Text.Json` missing + `IsExternalInit` undefined — Unity's default API compat level doesn't include them; tracked as HP.10.
+- [ ] **HP.4 — Minimal Edit Mode sanity test.** A throwaway `Tests/Editor/SanityTest.cs` with `Assert.Pass()`. Proves the existing `ElevenLabs.Agents.WebGL.Tests.asmdef` reference graph resolves, the `UNITY_INCLUDE_TESTS` define is active, and Test Runner picks the assembly up. Blocked on HP.10 (the package needs to compile cleanly first). Remove or repurpose once a real Phase 3.2+ test lands.
+- [ ] **HP.5 — Headless local test runner.** Wrapper script `TestProject/run-tests.sh` (or `scripts/run-tests.sh`) that invokes `"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" -batchmode -nographics -projectPath TestProject -runTests -testPlatform editmode -testResults TestProject/test-results.xml -logFile -`. Devs use this for fast iteration without opening the editor; the same command runs in CI later. Document in `.claude/CLAUDE.md` under "Verification commands".
 - [ ] **HP.6 — WebGL build smoke.** A second wrapper invoking the same Unity binary with `-buildTarget WebGL -executeMethod` against a stub `Editor/HostBuild.cs` that calls `BuildPipeline.BuildPlayer(...)`. Confirms the IL2CPP WebGL pipeline is healthy before Phase 4 needs it. The scene that exercises the bridge for real lives in Phase 4.1 — HP.6 just proves the build target works.
 - [ ] **HP.7 — CI wiring (deferred).** GitHub Actions via `game-ci/unity-test-runner@v4` plus license activation (Personal seat ULF via repo secret, or organization seat). Tracked here; lands once HP.5 is stable locally. Not a Phase 3 blocker.
+- [ ] **HP.8 — UPM payload exclusion for `TestProject/`.** Add a `"files"` allowlist to `package.json` (or `.npmignore`) so `TestProject/` (and any other dev-only artefacts at the repo root) are excluded from the published package payload. Verify via `npm pack` on a clean clone that the resulting tarball contains only `Runtime/`, `Editor/`, `Tests/`, `Plugins/`, `Samples~/` (when it exists), and the documentation/license files. Not a Phase 3 blocker.
+- [ ] **HP.9 — `.meta` file management strategy.** Decide which Unity-generated `.meta` files to commit. UPM convention is to commit `.meta` for every package-source file/folder (stable GUIDs for asset references); the recursive scan also creates `.meta` for the `TestProject/` subtree which should NOT be committed. Update `.gitignore` to draw the line cleanly and document the rule in the contributor guide.
+- [ ] **HP.10 — Set Unity API compat level + System.Text.Json reference.** The generated DTOs under `Runtime/Core/Protocol/*.g.cs` reference `System.Text.Json.Serialization` and use `init`-only setters (which require `IsExternalInit`). The default Unity 6 API compat level provides neither. Either switch the package's API compat to `.NET Standard 2.1` (latest), add a polyfill for `IsExternalInit`, and reference a System.Text.Json assembly (e.g. via the `com.unity.nuget.newtonsoft-json`-style package or vendor a copy); or change codegen to target a compat-friendly subset. Blocks HP.4 and downstream Phase 3 C# work.
 
-**Unblocks what:** HP.1 through HP.4 are the minimum to start Phase 3.0
-work — after HP.4 the existing scaffolding compiles inside Unity and new
-tests can be authored against it. HP.5–HP.7 are quality-of-life and CI
-plumbing that don't gate any C# task individually.
+**Unblocks what:** HP.1 through HP.4 + HP.10 are the minimum to start
+Phase 3.0 work — after HP.4 the existing scaffolding compiles inside
+Unity and new tests can be authored against it. HP.5–HP.7 are
+quality-of-life and CI plumbing that don't gate any C# task
+individually. HP.8 and HP.9 are repo-hygiene tasks that don't block
+Phase 3 but should land before the package's first external release.
 
 ### Phase 3 — C# primitive layer (requires the Phase 3 prelude above)
 
@@ -638,44 +664,3 @@ natural place for each, but none are needed for v0.1.
 - **`AsyncBridgeCallback`** — a `BridgeCallback` whose JS-side wrapper function returns a `Promise` that settles when C# resolves it (via a `EL_ResolveCallback(invocationId, resultJson)` DllImport). Lets JS-side code `await` a result from C#, covering patterns like remote tool dispatch (a JS module asking C# to execute a tool and waiting for the result). Reuses the existing settle channel plus a per-invocation registry on the JS side. With this in place the primitive set covers every interop direction symmetrically: C# can call sync or async into JS (via `JsObject` / `JsFunction`); JS can call sync-style fire-and-forget or async-with-result into C# (via `BridgeCallback` / `AsyncBridgeCallback`).
 - **Binary-payload variants** — `EL_ObjectCallBytes(handle, methodPtr, bufferPtr, bufferLen, promiseId)` and a mirror return variant for hot paths (audio PCM frames at 40+ Hz). Avoids the JSON encode/decode of base64 strings. Slot-in alongside the existing async/sync call entry points without changing the wider protocol.
 - **DynCall + `[MonoPInvokeCallback]` fast path** — for hot paths where even the SendMessage hop is too slow (PCM streaming at high sample rates), the C# side can register a static method via `[MonoPInvokeCallback]` whose function pointer JS calls via `Module.dynCall_*`. Out of scope; v0.1 stays on SendMessage as discussed in [webgl-js-to-csharp-callbacks.md](./webgl-js-to-csharp-callbacks.md).
-
-## Pending Human Approval
-
-### HP-Block.1 — Unity batchmode rejects `-projectPath` paths ending in `~` (2026-06-16)
-
-**Discovery while attempting HP.3.** Unity 6000.3.6f1 in batchmode refuses to
-open any project whose path resolves to one ending in `~`. Reproduced with:
-
-```bash
-"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" \
-  -batchmode -nographics -projectPath /Users/.../TestProject~ -logFile - -quit
-# → "Couldn't set project path to: /Users/.../TestProject~"
-# → "Aborting batchmode due to failure: Couldn't set project path to: ..."
-```
-
-Also reproduced via:
-
-- `-projectPath .` from inside the directory (Unity canonicalises to the absolute path before validating).
-- `-projectPath /tmp/elevenlabs-testproject` where `/tmp/elevenlabs-testproject → TestProject~` (Unity resolves the symlink before validating).
-- Trailing-slash form (`TestProject~/`).
-
-Unity's own "folders ending in `~` are ignored during asset import" rule
-extends to the batchmode project-path validator. The original HP.1 design
-decision — pick `TestProject~/` precisely so Unity ignores it when this
-package is installed by a downstream consumer — collides with Unity's
-willingness to open the same folder as the active project root.
-
-**Impact on the plan:**
-
-- **HP.3** — the human-driven "Open via Unity Hub" step is still untested; Unity Hub may use a different code path. If it works there, the import succeeds and the discovery is scoped to batchmode only. If it doesn't, HP.1's directory-name decision needs to be revisited.
-- **HP.5** — the headless `unity -batchmode -projectPath TestProject~ -runTests` wrapper script is **blocked outright** by this finding, regardless of HP.3's outcome. The same blocker propagates to **HP.6** (WebGL build wrapper) and the eventual CI wiring in **HP.7**.
-
-**Mitigation options for the human to choose between:**
-
-1. **Rename to a non-`~` directory + replace `~`-ignore with package-payload exclusion.** Move host project to e.g. `TestProject/` or `TestProject.Host/`. Exclude it from the UPM payload via `package.json`'s `files:` field or an equivalent UPM mechanism so it doesn't ship to downstream consumers. Lowest-friction for tooling; loses the elegance of relying on Unity's built-in folder-ignore.
-2. **Move host project outside the package root.** Sibling directory like `../elevenlabs-unity-host/` with a `Packages/manifest.json` pointing back via `file:../elevenlabs-unity`. Cleanest separation of concerns; adds a second repo-root entry point devs need to know about.
-3. **Wrap with a non-`~` symlink at the repo root, gitignored.** E.g. dev creates `TestProjectHost -> TestProject~` locally; the symlink is git-ignored, Unity opens the symlink, and the `~`-suffixed canonical name remains for downstream consumers. Won't work — verified above that Unity resolves the symlink before validating.
-4. **Hybrid: keep `TestProject~/` for the human-driven Unity Hub flow, accept that headless/CI test runs are off the table until the directory is renamed.** Document the limitation; revisit when CI becomes a hard requirement. Lowest immediate cost; defers the real fix.
-5. **Make the repo root itself the Unity project.** Pattern used by [`livekit/client-sdk-unity`](https://github.com/livekit/client-sdk-unity) (and many other UPM SDK repos): there is no embedded host project — `package.json` lives at the repo root, `Runtime/` + `Editor/` + `Tests/` are the package source, and `ProjectSettings/` + `Packages/` are committed at the root so Unity can open the repo directly. Dev-only directories (`Library/`, `Temp/`, `Logs/`, `UserSettings/`) are gitignored. Samples live under `Samples~/` and CI targets the root with `unity -projectPath .`. Pros: zero `~`-path issues, most-precedented pattern in the Unity SDK ecosystem, one project to open. Cons: clutters the repo root with Unity's runtime detritus (gitignored but visible), and the line between "the package" and "a Unity project consuming it" gets blurry — when the package is published to a downstream consumer, only `Runtime/` / `Editor/` / `Tests/` / `Samples~/` should ship, so `package.json`'s `files:` field (or equivalent) must explicitly exclude `ProjectSettings/` and `Packages/`. Requires deleting `TestProject~/` and adopting a different repo layout — non-trivial restructure.
-
-**Recommendation:** Option 5 (repo-root-as-project) — it's the well-trodden Unity SDK pattern, sidesteps the `~`-path issue entirely rather than working around it, and keeps the dev/CI workflow identical to what consumers of the SDK will see. The price is a one-time repo restructure (commit `ProjectSettings/` + `Packages/manifest.json` at the root, delete `TestProject~/`, exclude them from the published UPM payload, regenerate `.meta` files for any folders Unity needs to track).

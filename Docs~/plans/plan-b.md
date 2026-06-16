@@ -132,7 +132,7 @@ ships.
 
 Phases are ordered so everything that can be done without a Unity host
 project lands first. Phases 1–3 are Unity-free and can run in parallel by
-separate agent loops. Phases 4–7 unblock once the embedded `TestProject~/`
+separate agent loops. Phases 4–7 unblock once the embedded `TestProject/`
 exists — see "Phase 3 prelude — Unity host project" in
 [generic-bridge-primitives.md](./generic-bridge-primitives.md) (tasks
 HP.1–HP.4 are the minimum). Unity **6000.3.6f1** is installed locally as

@@ -116,12 +116,20 @@ Bridge~/dist/
 # Allow project-level Claude context despite global gitignore rules
 !.claude/CLAUDE.md
 
-# TestProject~ — dev host Unity project (~ keeps it out of UPM consumers)
-# Track only Packages/manifest.json and ProjectSettings/; exclude Unity-generated dirs.
-TestProject~/[Ll]ibrary/
-TestProject~/[Tt]emp/
-TestProject~/[Oo]bj/
-TestProject~/[Bb]uild/
-TestProject~/[Ll]ogs/
-TestProject~/[Uu]ser[Ss]ettings/
-TestProject~/[Aa]ssets/
+# TestProject/ — embedded dev Unity host project (see Docs~/plans/generic-bridge-primitives.md
+# Phase 3 prelude). Track only Packages/manifest.json + ProjectSettings/*; exclude Unity-
+# generated dirs and the auto-resolved package lock.
+TestProject/[Ll]ibrary/
+TestProject/[Tt]emp/
+TestProject/[Oo]bj/
+TestProject/[Bb]uild/
+TestProject/[Ll]ogs/
+TestProject/[Uu]ser[Ss]ettings/
+# Ignore Unity-generated assets, but keep the empty Assets/ folder tracked via .gitkeep
+# so Unity can open a fresh clone without anyone first creating the directory by hand.
+TestProject/[Aa]ssets/*
+!TestProject/[Aa]ssets/.gitkeep
+TestProject/Packages/packages-lock.json
+
+# Memtrace
+/.memdb/
