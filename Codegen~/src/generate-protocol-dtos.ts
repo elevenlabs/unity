@@ -7,9 +7,13 @@ import {
   ConstrainedObjectModel,
   ConstrainedObjectPropertyModel,
   ConstrainedReferenceModel,
-  type CSharpPreset,
   type OutputModel,
 } from "@asyncapi/modelina";
+import {
+  isPrimitive,
+  makeProtocolPreset,
+  toPascalCase,
+} from "./protocol-preset.ts";
 
 // ---- Paths ----
 const here = dirname(fileURLToPath(import.meta.url));
@@ -193,119 +197,6 @@ console.log(
 console.log(
   `Outgoing (${outgoing.length}): ${outgoing.map((p) => p.name).join(", ")}`,
 );
-
-// ---- Helpers ----
-
-function toPascalCase(s: string): string {
-  return s
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-}
-
-const PRIMITIVE_TYPES = new Set([
-  "string",
-  "int",
-  "long",
-  "short",
-  "byte",
-  "float",
-  "double",
-  "decimal",
-  "bool",
-  "char",
-]);
-
-function isPrimitive(csType: string): boolean {
-  const base = csType.replace(/\?$/, "");
-  return PRIMITIVE_TYPES.has(base);
-}
-
-function isCollection(csType: string): boolean {
-  return csType.startsWith("List<") || csType.startsWith("Dictionary<");
-}
-
-// ---- Custom Modelina preset ----
-
-// Modelina's default class renderer emits `public T name { get; set; }` without
-// JSON attributes; the bundled JsonSerializerPreset emits per-class
-// JsonConverter<T> classes, which is more invasive than we want.
-// Override the property renderer to emit [JsonPropertyName] + a standard
-// auto-property, with init-only literal default for `const` properties.
-// The `class.self` hook strips Modelina's default `partial` and, for top-level
-// event types, injects the discriminated-union base class.
-function makeProtocolPreset(
-  baseClass: string,
-  topLevelNames: Set<string>,
-): CSharpPreset {
-  return {
-    class: {
-      self({ renderer, model, content }) {
-        renderer.dependencyManager.addDependency(
-          "using System.Text.Json.Serialization;",
-        );
-        // Default `defaultSelf()` produces `public partial class Name { ... }`.
-        // Drop `partial`, and for top-level event types inject the base class.
-        const suffix = topLevelNames.has(model.name) ? ` : ${baseClass}` : "";
-        return content.replace(
-          new RegExp(`public partial class ${model.name}\\b`),
-          `public class ${model.name}${suffix}`,
-        );
-      },
-      property({ renderer, property }) {
-        const jsonName = property.unconstrainedPropertyName;
-        let propName = toPascalCase(jsonName);
-        // C# CS0542: a property cannot share its enclosing type's name.
-        // `renderer.model` is protected, but it's the ConstrainedObjectModel
-        // for the current class; cast to access `.name` from the preset.
-        const enclosingName = (
-          renderer as unknown as { model: { name: string } }
-        ).model.name;
-        if (propName === enclosingName) propName = `${propName}Data`;
-
-        const csType = property.property.type;
-        const isRequired = property.required;
-        const attr = `[JsonPropertyName("${jsonName}")]`;
-
-        // const literal → init-only string property with the literal default.
-        const constOpt = property.property.options.const;
-        if (constOpt && constOpt.value !== undefined) {
-          // Modelina stores the const value as a JSON-encoded string token,
-          // e.g. '"foo"'. Unwrap if needed.
-          const raw = constOpt.value;
-          const literal =
-            typeof raw === "string" && raw.startsWith('"') && raw.endsWith('"')
-              ? JSON.parse(raw)
-              : String(raw);
-          return `${attr}\npublic string ${propName} { get; init; } = "${literal}";`;
-        }
-
-        // Nullability: optional non-primitive → append `?`; required reference
-        // → suppress CS8618 via `= null!`.
-        const nullableSuffix =
-          !isRequired && !csType.endsWith("?") && !isPrimitive(csType)
-            ? "?"
-            : "";
-        const renderedType = `${csType}${nullableSuffix}`;
-
-        let initializer = "";
-        if (isRequired) {
-          if (csType === "string") initializer = ' = ""';
-          else if (csType === "int" || csType === "long") initializer = " = 0";
-          else if (csType === "float" || csType === "double")
-            initializer = " = 0";
-          else if (csType === "bool") initializer = " = false";
-          else if (isCollection(csType)) initializer = " = new()";
-          else if (!isPrimitive(csType)) initializer = " = null!";
-        }
-
-        const semicolon = initializer ? ";" : "";
-        return `${attr}\npublic ${renderedType} ${propName} { get; set; }${initializer}${semicolon}`;
-      },
-    },
-  };
-}
 
 // ---- Generate ----
 

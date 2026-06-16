@@ -8,6 +8,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "node --test src/*.test.ts",
     "generate": "node src/generate-protocol-dtos.ts && dotnet csharpier format --include-generated ../Runtime/Core/Protocol/",
     "round-trip": "dotnet run --project round-trip/",
     "verify:protocol-dtos": "pnpm run generate && git diff --exit-code -- ../Runtime/Core/Protocol/ round-trip/Program.cs"
