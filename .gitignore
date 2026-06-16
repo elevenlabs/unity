@@ -115,3 +115,13 @@ Bridge~/dist/
 
 # Allow project-level Claude context despite global gitignore rules
 !.claude/CLAUDE.md
+
+# TestProject~ — dev host Unity project (~ keeps it out of UPM consumers)
+# Track only Packages/manifest.json and ProjectSettings/; exclude Unity-generated dirs.
+TestProject~/[Ll]ibrary/
+TestProject~/[Tt]emp/
+TestProject~/[Oo]bj/
+TestProject~/[Bb]uild/
+TestProject~/[Ll]ogs/
+TestProject~/[Uu]ser[Ss]ettings/
+TestProject~/[Aa]ssets/
