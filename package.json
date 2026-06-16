@@ -18,6 +18,17 @@
     "agents",
     "webgl"
   ],
+  "files": [
+    "Runtime",
+    "Runtime.meta",
+    "Editor",
+    "Editor.meta",
+    "Tests",
+    "Tests.meta",
+    "Plugins",
+    "Plugins.meta",
+    "CONTRIBUTING.md"
+  ],
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   }
