@@ -1,0 +1,13 @@
+<!--
+  Preserves the function-pointer-only static methods on BridgeStaticCallbacks
+  from IL2CPP's stripping pass on release builds. Without this, the stripper
+  may delete the [MonoPInvokeCallback]-decorated methods because no managed
+  code calls them — they are only reachable from JS via wasm function
+  pointers. The bug only surfaces in stripped release builds; debug-build
+  testing will not catch it. See Docs~/plans/dyncall-migration.md.
+-->
+<linker>
+  <assembly fullname="ElevenLabs.Agents.WebGL">
+    <type fullname="ElevenLabs.WebGL.BridgeStaticCallbacks" preserve="all" />
+  </assembly>
+</linker>
