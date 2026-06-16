@@ -86,11 +86,19 @@ Open via Unity Hub (point it at `TestProject/`) or headless:
   -batchmode -nographics -projectPath TestProject -logFile - -quit
 ```
 
-Until HP.10 lands the package's API compat level isn't set up for
-`System.Text.Json` / `IsExternalInit`, so `Runtime/Core/Protocol/*.g.cs`
-fails to compile under the default Unity settings. Phase 3 C# work and
-the Unity Test Runner are gated on HP.10. Once HP.5 lands, the documented
-local-test command (with `-runTests`) goes here.
+### Edit Mode tests
+
+Run the Unity Test Runner in headless batchmode:
+
+```bash
+bash TestProject/run-tests.sh
+```
+
+Results are written to `TestProject/test-results.xml`.
+
+> **Note:** Do not pass `-quit` with `-runTests` — Unity honors `-quit` before
+> the test runner fires and exits silently with no results. The test runner
+> exits the editor itself once tests finish.
 
 ## Language conventions
 

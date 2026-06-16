@@ -130,6 +130,7 @@ TestProject/[Uu]ser[Ss]ettings/
 TestProject/[Aa]ssets/*
 !TestProject/[Aa]ssets/.gitkeep
 TestProject/Packages/packages-lock.json
+TestProject/test-results.xml
 
 # Memtrace
 /.memdb/
