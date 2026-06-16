@@ -631,4 +631,4 @@ The bridge primitives are complete when:
 - Validation assertions V1–V4 pass in a real browser (SendMessage timing confirmed synchronous; Awaitable continuations can call DllImport; observer events arrive in order; handler invocation round-trip completes)
 - No leaked GameObjects across scene transitions (bridge singleton survives, all observer/promise registries are cleaned up)
 - Public C# API is documented with XML doc comments
-- The package installs cleanly via `"com.elevenlabs.agents": "https://github.com/elevenlabs/elevenlabs-unity.git#<tag>"` into a fresh Unity 2023.1+ project
+- The package installs cleanly via `"io.elevenlabs.agents": "https://github.com/elevenlabs/unity.git#<tag>"` into a fresh Unity 2023.1+ project

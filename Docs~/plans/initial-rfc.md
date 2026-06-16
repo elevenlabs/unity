@@ -112,12 +112,12 @@ What's **not** generated: the connection lifecycle, the public `Conversation` AP
 **Phase 1: UPM via Git URL.** Standard for developer-focused Unity SDKs. Customers add a line to `manifest.json`:
 
 ```json
-"com.elevenlabs.agents": "https://github.com/elevenlabs/unityelevenlabs-unity-sdk.git#v0.1.0"
+"io.elevenlabs.agents": "https://github.com/elevenlabs/unity.git#v0.1.0"
 ```
 
 Zero infrastructure, version-pinned via git tags, no Git LFS.
 
-**Phase 2: [UPM scoped registry](https://docs.unity3d.com/6000.1/Documentation/Manual/upm-scoped.html)** (`com.elevenlabs.*` on [npmjs.com](http://npmjs.com), GitHub packages or self-hosted) once the SDK stabilizes. Gives semantic versioning, discoverability, and the install UX Unity developers expect.
+**Phase 2: [UPM scoped registry](https://docs.unity3d.com/6000.1/Documentation/Manual/upm-scoped.html)** (`io.elevenlabs.*` on [npmjs.com](http://npmjs.com), GitHub packages or self-hosted) once the SDK stabilizes. Gives semantic versioning, discoverability, and the install UX Unity developers expect.
 
 **Asset Store:** deferred. Heavy publishing process, less developer-friendly UX. Worth considering once we have a paying Unity customer base. It could give us a more “approved by Unity” feel, but we expect we don’t actually need that to gain traction initially.
 
