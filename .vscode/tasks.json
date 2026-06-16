@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Unity: Run Edit Mode Tests",
+      "detail": "Headless Unity 6 batchmode run of the Edit Mode test suite via TestProject/run-tests.ts. Failures parsed from TestProject/test-results.xml and surfaced in the Problems panel.",
+      "type": "shell",
+      "command": "node",
+      "args": ["${workspaceFolder}/TestProject/run-tests.ts"],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        {
+          "owner": "unity-tests",
+          "source": "Unity",
+          "fileLocation": "absolute",
+          "severity": "error",
+          "pattern": {
+            "regexp": "^(.+\\.cs):(\\d+): error (\\S+): (.*)$",
+            "file": 1,
+            "line": 2,
+            "code": 3,
+            "message": 4
+          }
+        }
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "echo": true,
+        "showReuseMessage": false
+      }
+    }
+  ]
+}

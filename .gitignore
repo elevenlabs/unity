@@ -153,6 +153,7 @@ TestProject/Packages/packages-lock.json
 # Unity auto-generates per-package sub-directories under ProjectSettings/Packages/ on import
 TestProject/ProjectSettings/Packages/
 TestProject/test-results.xml
+TestProject/node_modules/
 
 # Memtrace
 /.memdb/

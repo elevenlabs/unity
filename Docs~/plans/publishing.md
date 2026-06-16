@@ -86,7 +86,7 @@ Decision points (defer until v0.2 closes; capture rationale here):
   `npm publish --access public` after the existing `verify:*` gates
   (`csharpier check`, `Bridge~ verify:primitives`,
   `Bridge~ verify:connection`, `Codegen~ verify:protocol-dtos`,
-  `TestProject/run-tests.sh`). New file:
+  `TestProject/run-tests.ts`). New file:
   `.github/workflows/release.yml`.
 - **README install section** gains a scoped-registry stanza for
   `Packages/manifest.json`:
@@ -163,7 +163,7 @@ For Phase 1 (git URL):
    re-run after any `files` change).
 2. In a throwaway Unity 6 project, add the git-URL line against the
    `v0.1.0` tag, let UPM resolve, and run the bundled sanity test via
-   `TestProject/run-tests.sh` adapted to the consumer project (or run
+   `TestProject/run-tests.ts` adapted to the consumer project (or run
    the package's `Tests/` assembly through the Test Runner UI).
 3. WebGL smoke: `TestProject/build-webgl.sh` from the consumer project
    to confirm the `Plugins/WebGL/*.jslib` artefacts ship and link.
