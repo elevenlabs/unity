@@ -14,7 +14,7 @@ namespace ElevenLabs.Agents
     /// never cross the bridge); on native, the input emits PCM frames that
     /// the C# <see cref="Conversation"/> wraps as <c>UserAudioChunk</c>.
     /// </remarks>
-    public interface IInputController
+    internal interface IInputController
     {
         /// <summary>Current mute state. Updated synchronously by <see cref="SetMuted"/>.</summary>
         bool IsMuted { get; }

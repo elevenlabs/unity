@@ -17,7 +17,7 @@ namespace ElevenLabs.Agents
     /// .NET multicast events — user code wires up its own callbacks against the
     /// <see cref="Conversation"/> surface, not against the connection directly.
     /// </remarks>
-    public interface IConnection
+    internal interface IConnection
     {
         /// <summary>Server-assigned conversation identifier.</summary>
         string ConversationId { get; }

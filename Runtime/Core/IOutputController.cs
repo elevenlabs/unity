@@ -14,7 +14,7 @@ namespace ElevenLabs.Agents
     /// C# <see cref="Conversation"/> routes incoming audio chunks into a Unity
     /// <c>AudioSource</c>.
     /// </remarks>
-    public interface IOutputController
+    internal interface IOutputController
     {
         /// <summary>Tear down the audio playback pipeline. Idempotent.</summary>
         Awaitable Close();
