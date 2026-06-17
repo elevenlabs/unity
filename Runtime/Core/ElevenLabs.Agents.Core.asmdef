@@ -1,13 +1,8 @@
 {
-    "name": "ElevenLabs.Agents.WebGL",
-    "rootNamespace": "ElevenLabs.WebGL",
-    "references": [
-        "ElevenLabs.Agents.Core"
-    ],
-    "includePlatforms": [
-        "Editor",
-        "WebGL"
-    ],
+    "name": "ElevenLabs.Agents.Core",
+    "rootNamespace": "ElevenLabs.Agents",
+    "references": [],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,
