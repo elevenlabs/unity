@@ -1,0 +1,111 @@
+# Lint lane — no Unity, no secrets.
+# Runs the same JS/TS/C# checks documented in `.claude/CLAUDE.md`
+# (Verification commands) and tracked as task 5.3.1 in `Docs~/plans/ci.md`.
+#
+# The Unity-gated lanes (Edit Mode tests, WebGL build, browser-mode
+# integration tests) are tracked separately as 5.3.2-5.3.4 and remain
+# blocked on the Unity licensing question.
+
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint, typecheck, test (no Unity)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "23"
+          cache: pnpm
+          cache-dependency-path: |
+            Bridge~/pnpm-lock.yaml
+            Codegen~/pnpm-lock.yaml
+            TestProject/pnpm-lock.yaml
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Restore .NET tools (csharpier)
+        run: dotnet tool restore
+
+      - name: Install Bridge~ dependencies
+        working-directory: "Bridge~"
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Codegen~ dependencies
+        working-directory: "Codegen~"
+        run: pnpm install --frozen-lockfile
+
+      - name: Install TestProject dependencies
+        working-directory: TestProject
+        run: pnpm install --frozen-lockfile
+
+      # C# formatting — repo root, covers Runtime/, Editor/, Tests/, etc.
+      - name: C# format check (csharpier)
+        run: dotnet csharpier check .
+
+      # Bridge~ — TypeScript sources for the WebGL .jslib bridge.
+      - name: Bridge~ typecheck
+        working-directory: "Bridge~"
+        run: pnpm run typecheck
+
+      - name: Bridge~ format check (prettier)
+        working-directory: "Bridge~"
+        run: pnpm run format:check
+
+      - name: Bridge~ lint (eslint)
+        working-directory: "Bridge~"
+        run: pnpm run lint
+
+      - name: Bridge~ test (vitest)
+        working-directory: "Bridge~"
+        run: pnpm run test
+
+      - name: Bridge~ verify ElevenLabsBridge.jslib is fresh
+        working-directory: "Bridge~"
+        run: pnpm run verify:primitives
+
+      - name: Bridge~ verify ElevenLabsConnection.jslib is fresh
+        working-directory: "Bridge~"
+        run: pnpm run verify:connection
+
+      # Codegen~ — Protocol DTO generator (AsyncAPI → C#).
+      - name: Codegen~ typecheck
+        working-directory: "Codegen~"
+        run: pnpm run typecheck
+
+      - name: Codegen~ format check (prettier)
+        working-directory: "Codegen~"
+        run: pnpm run format:check
+
+      - name: Codegen~ lint (eslint)
+        working-directory: "Codegen~"
+        run: pnpm run lint
+
+      - name: Codegen~ verify generated protocol DTOs are fresh
+        working-directory: "Codegen~"
+        run: pnpm run verify:protocol-dtos
+
+      # TestProject — Unity host project's headless test-runner glue.
+      - name: TestProject typecheck
+        working-directory: TestProject
+        run: pnpm run typecheck

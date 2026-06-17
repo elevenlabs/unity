@@ -310,7 +310,7 @@ lanes.
 
 ## Implementation order
 
-- [ ] **5.3.1 — Lint workflow.** Lands `.github/workflows/lint.yml`. No secrets needed; **unblocked**, can land independently of the Unity-credentials answer.
+- [x] **5.3.1 — Lint workflow.** Lands `.github/workflows/lint.yml`. No secrets needed; **unblocked**, can land independently of the Unity-credentials answer.
 - [ ] **5.3.2 — Repo secrets configured.** Maintainer provisions the CI Unity ID (per Option A or B once Unity responds), deletes the current Service Account placeholder secrets, adds `UNITY_SERIAL` / `UNITY_EMAIL` / `UNITY_PASSWORD`. **Blocked on Unity response.**
 - [ ] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` using game-ci/unity-test-runner@v4. Depends on 5.3.2.
 - [ ] **5.3.4 — Integration workflow.** `.github/workflows/integration.yml` chaining unity-builder + Playwright. Depends on 5.3.3 (proves the license activation works).
