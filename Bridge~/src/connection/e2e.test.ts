@@ -18,6 +18,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  $EL_AllocString,
+  $EL_DecodeReturnShape,
+  $EL_ParseArgs,
+  $EL_SettleWith,
   EL_FunctionCallAsync,
   EL_InvokeFactoryAsync,
   EL_ObjectCallAsync,
@@ -95,9 +99,9 @@ function makePtr(s: string): number {
 }
 
 type ElGlobals = typeof globalThis & {
-  _EL_Objects: Record<number, unknown>;
-  _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-  _EL_CallbackPtr: number;
+  EL_Objects: Record<number, unknown>;
+  EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+  EL_CallbackPtr: number;
   dynCall_vii: ReturnType<typeof vi.fn>;
   dynCall_viii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
@@ -124,31 +128,35 @@ beforeEach(() => {
   nextPtr = 1000;
   vi.clearAllMocks();
 
-  vi.stubGlobal("_EL_Objects", {});
-  vi.stubGlobal("_EL_Functions", {});
-  vi.stubGlobal("_EL_Factories", {});
-  vi.stubGlobal("_EL_NextHandleId", 1);
+  vi.stubGlobal("EL_Objects", {});
+  vi.stubGlobal("EL_Functions", {});
+  vi.stubGlobal("EL_Factories", {});
+  vi.stubGlobal("EL_NextHandleId", 1);
 
-  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
-  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
-  vi.stubGlobal("_EL_LookupFactory", $EL_LookupFactory);
-  vi.stubGlobal("_EL_LookupObject", $EL_LookupObject);
-  vi.stubGlobal("_EL_LookupFunction", $EL_LookupFunction);
-  vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
-  vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
+  vi.stubGlobal("EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("EL_LookupFactory", $EL_LookupFactory);
+  vi.stubGlobal("EL_LookupObject", $EL_LookupObject);
+  vi.stubGlobal("EL_LookupFunction", $EL_LookupFunction);
+  vi.stubGlobal("EL_ReleaseObject", $EL_ReleaseObject);
+  vi.stubGlobal("EL_ReleaseFunction", $EL_ReleaseFunction);
 
-  vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);
-  vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
-  vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
-  vi.stubGlobal("_EL_Settle", $EL_Settle);
-  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("EL_Rehydrate", $EL_Rehydrate);
+  vi.stubGlobal("EL_EncodeReturn", $EL_EncodeReturn);
+  vi.stubGlobal("EL_InvokeCallback", $EL_InvokeCallback);
+  vi.stubGlobal("EL_AllocString", $EL_AllocString);
+  vi.stubGlobal("EL_DecodeReturnShape", $EL_DecodeReturnShape);
+  vi.stubGlobal("EL_ParseArgs", $EL_ParseArgs);
+  vi.stubGlobal("EL_SettleWith", $EL_SettleWith);
+  vi.stubGlobal("EL_Settle", $EL_Settle);
+  vi.stubGlobal("EL_SettlePtr", 42);
   vi.stubGlobal("dynCall_viii", vi.fn());
   vi.stubGlobal(
     "stringToNewUTF8",
     vi.fn(() => nextPtr++),
   );
   vi.stubGlobal("_free", vi.fn());
-  vi.stubGlobal("_EL_CallbackPtr", 100);
+  vi.stubGlobal("EL_CallbackPtr", 100);
   vi.stubGlobal("dynCall_vii", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
@@ -264,7 +272,7 @@ describe("WebSocket session happy path", () => {
     const { detachHandle } = await startSession();
 
     expect(detachHandle).toBeGreaterThan(0);
-    expect(g._EL_Functions[detachHandle]).toBeTypeOf("function");
+    expect(g.EL_Functions[detachHandle]).toBeTypeOf("function");
     expect(attachInputToConnection).toHaveBeenCalledTimes(1);
     expect(attachConnectionToOutput).toHaveBeenCalledTimes(1);
   });
@@ -401,9 +409,9 @@ describe("WebSocket session happy path", () => {
     EL_ObjectRelease(outputHandle);
     EL_FunctionRelease(detachHandle);
 
-    expect(g._EL_Objects[connHandle]).toBeUndefined();
-    expect(g._EL_Objects[inputHandle]).toBeUndefined();
-    expect(g._EL_Objects[outputHandle]).toBeUndefined();
-    expect(g._EL_Functions[detachHandle]).toBeUndefined();
+    expect(g.EL_Objects[connHandle]).toBeUndefined();
+    expect(g.EL_Objects[inputHandle]).toBeUndefined();
+    expect(g.EL_Objects[outputHandle]).toBeUndefined();
+    expect(g.EL_Functions[detachHandle]).toBeUndefined();
   });
 });

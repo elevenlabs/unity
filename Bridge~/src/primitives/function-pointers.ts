@@ -15,12 +15,12 @@ export const $EL_CallbackPtr = 0;
 
 export const EL_SetSettleCallback__deps = ["$EL_SettlePtr"];
 export function EL_SetSettleCallback(ptr: number): void {
-  _EL_SettlePtr = ptr;
+  EL_SettlePtr = ptr;
 }
 
 export const EL_SetInvokeCallbackPtr__deps = ["$EL_CallbackPtr"];
 export function EL_SetInvokeCallbackPtr(ptr: number): void {
-  _EL_CallbackPtr = ptr;
+  EL_CallbackPtr = ptr;
 }
 
 // Returns 1 if Module.wasmTable is in scope (Use WebAssembly.Table is enabled),

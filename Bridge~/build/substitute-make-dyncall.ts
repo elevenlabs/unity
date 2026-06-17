@@ -1,7 +1,11 @@
 // Rolldown renderChunk plugin: rewrites
-//   dynCall_<sig>(_EL_<var>, arg1, arg2, …)
+//   dynCall_<sig>(EL_<var>, arg1, arg2, …)
 // to the Emscripten macro form
-//   {{{ makeDynCall('<sig>', '_EL_<var>') }}}(arg1, arg2, …)
+//   {{{ makeDynCall('<sig>', 'EL_<var>') }}}(arg1, arg2, …)
+//
+// The source and macro identifier are both `EL_<var>` (no underscore — that's
+// the runtime name of a `$`-prefixed Emscripten library entry; see
+// Bridge~/src/primitives/globals.d.ts for the naming convention).
 //
 // Runs in renderChunk (after Rolldown has finished bundling) so the
 // {{{ }}} preprocessor syntax appears only in the final .jslib file.
@@ -65,7 +69,11 @@ export function transformDyncalls(code: string, ast: AstNode): string | null {
     const firstArg = args[0];
     if (firstArg.type !== "Identifier") return;
     const fnVarName = firstArg.name as string | undefined;
-    if (!fnVarName || !fnVarName.startsWith("_EL_")) return;
+    // Match the no-underscore source name (e.g. `EL_SettlePtr`) that the
+    // naming convention uses for $-prefixed library entries. The macro emits
+    // the same identifier — Emscripten doesn't prepend an underscore for
+    // `$`-prefixed entries (those are JS-internal, not C-callable).
+    if (!fnVarName || !fnVarName.startsWith("EL_")) return;
 
     const restArgs = args.slice(1);
     const restStr =

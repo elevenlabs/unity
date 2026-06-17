@@ -8,7 +8,7 @@ namespace ElevenLabs.WebGL.Samples
 {
     /// <summary>
     /// WebGL smoke-test MonoBehaviour that exercises every bridge primitive surface
-    /// end-to-end against the mathFactory registered by BridgePrimitiveSmokeTest.jslib.
+    /// end-to-end against the mathFactory registered by ElevenLabsBridge.jslib.
     /// Add to a scene and build for WebGL; results are logged to the browser console.
     /// </summary>
     public class BridgePrimitiveSmokeTest : MonoBehaviour
@@ -27,6 +27,9 @@ namespace ElevenLabs.WebGL.Samples
 
         private async Awaitable RunSmokeTestAsync()
         {
+            // Registers the mathFactory in the JS registry. Defined in
+            // smoke-test-factory.ts and bundled into ElevenLabsBridge.jslib so
+            // EL_RegisterFactory is in scope when the call lands.
             EL_SmokeTest_RegisterMathFactory();
 
             using var math = await JsBridge.InvokeFactoryAsync<JsObject>("mathFactory");

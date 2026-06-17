@@ -23467,7 +23467,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 		createMediaDeviceOutput: (config) => MediaDeviceOutput.create(config)
 	};
 	const $EL_ConnectionFactories__deps = ["$EL_RegisterFactory"];
-	const $EL_ConnectionFactories__postset = "Object.keys(_EL_ConnectionFactories).forEach(function(k){_EL_RegisterFactory(k,_EL_ConnectionFactories[k]);});";
+	const $EL_ConnectionFactories__postset = "Object.keys(EL_ConnectionFactories).forEach(function(k){EL_RegisterFactory(k,EL_ConnectionFactories[k]);});";
 
 //#endregion
 //#region src/connection/audio-glue.ts
@@ -23499,7 +23499,7 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 		};
 	} };
 	const $EL_AudioGlueFactories__deps = ["$EL_RegisterFactory"];
-	const $EL_AudioGlueFactories__postset = "Object.keys(_EL_AudioGlueFactories).forEach(function(k){_EL_RegisterFactory(k,_EL_AudioGlueFactories[k]);});";
+	const $EL_AudioGlueFactories__postset = "Object.keys(EL_AudioGlueFactories).forEach(function(k){EL_RegisterFactory(k,EL_AudioGlueFactories[k]);});";
 
 //#endregion
 //#region src/connection/index.ts

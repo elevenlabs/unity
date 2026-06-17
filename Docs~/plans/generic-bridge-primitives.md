@@ -631,9 +631,16 @@ Phase 3 was redesigned on 2026-06-12 around the DynCall path (see [dyncall-migra
 
 ### Phase 5 — Automated integration (requires Phase 4 complete)
 
-- [ ] **5.1 — Vitest browser-mode harness.** Playwright provider loads the WebGL build; the harness drives the smoke-test scene from JS and asserts on the bridge protocol.
+- [x] **5.1 — Vitest browser-mode harness.** New `IntegrationTests~/` host project (Vitest + Playwright + a minimal HTTP server that handles Unity's pre-compressed `.gz` artifacts). `src/webgl-smoke.test.ts` drives the smoke build at `TestProject/Build/WebGL/` through Chromium and asserts on the `[SmokeTest]` console-log trail; the test passes in ~5 seconds end-to-end. Two big learnings landed alongside the harness — both were latent in the previous Phase 4 manual verification and only surfaced once an automated browser run actually exercised the bridge:
+
+  - **Emscripten `$EL_` library-entry naming.** Source code originally referenced `_EL_*` (underscore-prefixed) ambient globals — that's the C-callable form. But for `$`-prefixed library entries the Emscripten linker strips the `$` and does NOT add `_`: `$EL_Factories` is emitted as `var EL_Factories` (no underscore). Function bodies referencing `_EL_Factories` instead silently created implicit globals that bypassed the real registry and ended up holding stale data. Fixed by renaming `_EL_X → EL_X` for every `$`-prefixed entry across `globals.d.ts`, the four primitive modules, the two connection modules, the `substitute-make-dyncall` plugin, and every Vitest test stub. The `$` prefix is retained — it's meaningful (distinguishes JS-internal helpers from C-callable DllImport targets); only the reference names needed correcting.
+
+  - **Per-entry extraction destroys module closure.** Emscripten's library loader takes each `mergeInto(LibraryManager.library, {…})` entry and emits its function text as a top-level definition in the framework — it does NOT preserve the surrounding Rolldown IIFE. Module-private helpers (`settleWith`, `parseArgs`, `decodeReturnShape`, `allocString`, `rehydrateImpl`, the `RETURN_SHAPES` const) became `ReferenceError: X is not defined` at runtime even though they compiled and unit-tested cleanly. Fixed by promoting each helper to a `$EL_*` library entry with its own `__deps` declaration; recursive helpers (`$EL_Rehydrate`) self-reference by the hoisted name. Inlined trivially-small data (`RETURN_SHAPES`) directly into function bodies. Vitest tests now stub the new helper globals so unit-test behaviour matches framework behaviour.
+
+  Both issues are now caught by the integration test, which gives the project a real "runs in a browser" gate going forward.
+
 - [ ] **5.2 — Edge cases.** Double-dispose, orphaned handles on bridge destroy, special chars in payload (colons, newlines, Unicode), large payloads (>100KB), rapid-fire callback invocations from JS.
-- [ ] **5.3 — Cross-browser CI.** Chrome, Firefox, Safari.
+- [ ] **5.3 — Cross-browser CI.** Chrome, Firefox, Safari. The 5.1 harness already runs cleanly in headless Chromium (~3-4s end-to-end on macOS) — an earlier round of testing saw GPU-process crashes ~40s into the load, but those were a side-effect of the bridge bugs the integration test surfaced (the page sat idle waiting for a settle that never arrived, and the GPU eventually timed out). Once the bridge actually completes its async round-trip, headless finishes long before any GPU watchdog fires. CI integration still has to be wired up.
 
 ## Definition of done
 

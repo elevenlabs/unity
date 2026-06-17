@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { $EL_Settle } from "./promise-settle";
 
 type ElGlobals = typeof globalThis & {
-  _EL_SettlePtr: number;
+  EL_SettlePtr: number;
   dynCall_viii: (
     fnPtr: number,
     arg0: number,
@@ -19,7 +19,7 @@ const FAKE_PTR = 0xdeadbeef;
 const FAKE_SETTLE_PTR = 42;
 
 beforeEach(() => {
-  vi.stubGlobal("_EL_SettlePtr", FAKE_SETTLE_PTR);
+  vi.stubGlobal("EL_SettlePtr", FAKE_SETTLE_PTR);
   vi.stubGlobal(
     "stringToNewUTF8",
     vi.fn(() => FAKE_PTR),
@@ -83,8 +83,8 @@ describe("$EL_Settle", () => {
     expect(g._free).toHaveBeenCalledWith(FAKE_PTR);
   });
 
-  it("passes the current _EL_SettlePtr at call time", () => {
-    vi.stubGlobal("_EL_SettlePtr", 99);
+  it("passes the current EL_SettlePtr at call time", () => {
+    vi.stubGlobal("EL_SettlePtr", 99);
     $EL_Settle(1, "ok", "null");
     expect(g.dynCall_viii).toHaveBeenCalledWith(99, 1, 0, FAKE_PTR);
   });

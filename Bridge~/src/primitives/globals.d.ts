@@ -1,49 +1,75 @@
-// Ambient declarations for runtime globals that Unity injects but @types/emscripten
-// doesn't cover: the hoisted _EL_* globals that Unity creates from $-prefixed
-// mergeInto entries when another function lists them in its __deps array.
+// Ambient declarations for runtime globals that the Emscripten jslib loader
+// makes available, but @types/emscripten doesn't cover.
+//
+// Naming convention: Emscripten library entries prefixed with `$` are JS-internal
+// (NOT exported to C). After Emscripten links the library, `$Foo` becomes `Foo`
+// at runtime — the `$` is stripped, and NO underscore is added. Function bodies
+// in other primitive modules therefore reference these entries by their stripped
+// (no-underscore) name.
+//
+// Non-$ entries are different: a library entry like `EL_InvokeFactoryAsync` gets
+// the standard `_` prefix because it's C-callable, becoming `_EL_InvokeFactoryAsync`.
+// Those are called from C, not from inside this library bundle, so they don't
+// need ambient declarations here.
+//
 // UTF8ToString is already declared by @types/emscripten.
 
-declare function _EL_Log(
+// --- $EL_Log helper from log.ts ---
+declare function EL_Log(
   level: "info" | "warn" | "error",
   scope: string,
   msg: string,
 ): void;
 
-// Registry tables — Unity hoists these from the $EL_-prefixed library entries.
-// Other primitive modules declare them in __deps and reference them via the
-// `_EL_*` names below.
-declare const _EL_Objects: Record<number, unknown>;
-declare const _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-declare const _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
-declare let _EL_NextHandleId: number;
+// --- Registry tables (from registries.ts $-prefixed entries) ---
+declare const EL_Objects: Record<number, unknown>;
+declare const EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+declare const EL_Factories: Record<string, (...args: unknown[]) => unknown>;
+declare let EL_NextHandleId: number;
 
-// Registry helpers — hoisted by Unity when listed in __deps.
-declare function _EL_AllocateObject(obj: unknown): number;
-declare function _EL_AllocateFunction(
+// --- Registry helpers (from registries.ts $-prefixed entries) ---
+declare function EL_RegisterFactory(
+  name: string,
+  fn: (...args: unknown[]) => unknown,
+): void;
+declare function EL_AllocateObject(obj: unknown): number;
+declare function EL_AllocateFunction(
   fn: (...args: unknown[]) => unknown,
 ): number;
-declare function _EL_LookupObject(handle: number): unknown;
-declare function _EL_LookupFunction(
+declare function EL_LookupObject(handle: number): unknown;
+declare function EL_LookupFunction(
   handle: number,
 ): ((...args: unknown[]) => unknown) | undefined;
-declare function _EL_LookupFactory(
+declare function EL_LookupFactory(
   name: string,
 ): ((...args: unknown[]) => unknown) | undefined;
-declare function _EL_ReleaseObject(handle: number): void;
-declare function _EL_ReleaseFunction(handle: number): void;
+declare function EL_ReleaseObject(handle: number): void;
+declare function EL_ReleaseFunction(handle: number): void;
 
-// Marshalling helpers — hoisted from marshalling.ts.
-declare function _EL_Rehydrate(value: unknown): unknown;
-declare function _EL_EncodeReturn(
+// --- Marshalling helpers (from marshalling.ts $-prefixed entries) ---
+declare function EL_Rehydrate(value: unknown): unknown;
+declare function EL_EncodeReturn(
   value: unknown,
   shape: "object" | "function" | "value" | "void",
 ): unknown;
 
-// Callback dispatch — hoisted from $EL_InvokeCallback in callbacks.ts.
-declare function _EL_InvokeCallback(handle: number, payload: string): void;
+// --- Dispatcher helpers (from dispatcher.ts $-prefixed entries) ---
+declare function EL_DecodeReturnShape(
+  code: number,
+): "object" | "function" | "value" | "void";
+declare function EL_AllocString(s: string): number;
+declare function EL_ParseArgs(argsJsonPtr: number): unknown[];
+declare function EL_SettleWith(
+  promiseId: number,
+  resultOrPromise: unknown,
+  returnShape: "object" | "function" | "value" | "void",
+): void;
 
-// Settle channel — hoisted from $EL_Settle in promise-settle.ts.
-declare function _EL_Settle(
+// --- Callback dispatch (from $EL_InvokeCallback in callbacks.ts) ---
+declare function EL_InvokeCallback(handle: number, payload: string): void;
+
+// --- Settle channel (from $EL_Settle in promise-settle.ts) ---
+declare function EL_Settle(
   promiseId: number,
   status: "ok" | "err",
   payload: string,
@@ -57,8 +83,8 @@ declare const Module: EmscriptenModule & { wasmTable?: WebAssembly.Table };
 // Function-pointer slots for the DynCall bridge channels (function-pointers.ts).
 // Initialised to 0; set once at bridge startup by EL_SetSettleCallback /
 // EL_SetInvokeCallbackPtr before any async or callback operation can fire.
-declare let _EL_SettlePtr: number;
-declare let _EL_CallbackPtr: number;
+declare let EL_SettlePtr: number;
+declare let EL_CallbackPtr: number;
 
 // DynCall macro entry points — at runtime these are the implementations the
 // `{{{ makeDynCall('sig', 'fnVar') }}}` macro expands to, but in TypeScript we

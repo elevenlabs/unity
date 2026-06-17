@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { $EL_InvokeCallback } from "./callbacks";
 
 type ElGlobals = typeof globalThis & {
-  _EL_CallbackPtr: number;
+  EL_CallbackPtr: number;
   dynCall_vii: (fnPtr: number, arg0: number, arg1: number) => void;
   stringToNewUTF8: (str: string) => number;
   _free: (ptr: number) => void;
@@ -14,7 +14,7 @@ const FAKE_PTR = 0xdeadbeef;
 const FAKE_CALLBACK_PTR = 42;
 
 beforeEach(() => {
-  vi.stubGlobal("_EL_CallbackPtr", FAKE_CALLBACK_PTR);
+  vi.stubGlobal("EL_CallbackPtr", FAKE_CALLBACK_PTR);
   vi.stubGlobal(
     "stringToNewUTF8",
     vi.fn(() => FAKE_PTR),
@@ -29,8 +29,8 @@ describe("$EL_InvokeCallback", () => {
     expect(g.dynCall_vii).toHaveBeenCalledWith(FAKE_CALLBACK_PTR, 42, FAKE_PTR);
   });
 
-  it("uses the current _EL_CallbackPtr at call time", () => {
-    vi.stubGlobal("_EL_CallbackPtr", 99);
+  it("uses the current EL_CallbackPtr at call time", () => {
+    vi.stubGlobal("EL_CallbackPtr", 99);
     $EL_InvokeCallback(7, "{}");
     expect(g.dynCall_vii).toHaveBeenCalledWith(99, 7, FAKE_PTR);
   });

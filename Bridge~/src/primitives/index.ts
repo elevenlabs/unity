@@ -18,6 +18,10 @@ import * as marshalling from "./marshalling";
 import * as callbacks from "./callbacks";
 import * as promiseSettle from "./promise-settle";
 import * as dispatcher from "./dispatcher";
+// EL_SmokeTest_RegisterMathFactory is bundled here so that its call to
+// $EL_RegisterFactory is in the same Closure compilation unit (no cross-jslib
+// renaming mismatch). See smoke-test-factory.ts for the full rationale.
+import * as smokeTestFactory from "./smoke-test-factory";
 
 const library = {
   ...functionPointers,
@@ -27,6 +31,7 @@ const library = {
   ...callbacks,
   ...promiseSettle,
   ...dispatcher,
+  ...smokeTestFactory,
 };
 
 export default library;

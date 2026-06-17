@@ -14,7 +14,7 @@ export const $EL_InvokeCallback__deps = ["$EL_CallbackPtr"];
 export function $EL_InvokeCallback(handle: number, payload: string): void {
   const payloadPtr = stringToNewUTF8(payload);
   try {
-    dynCall_vii(_EL_CallbackPtr, handle, payloadPtr);
+    dynCall_vii(EL_CallbackPtr, handle, payloadPtr);
   } finally {
     _free(payloadPtr);
   }

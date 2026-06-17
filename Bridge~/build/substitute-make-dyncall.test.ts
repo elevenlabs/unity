@@ -16,25 +16,25 @@ function transform(code: string): string | null {
 
 describe("substituteMakeDyncall — transformDyncalls", () => {
   it("rewrites dynCall_viii with plain int args", () => {
-    const code = `dynCall_viii(_EL_SettlePtr, promiseId, statusCode, payloadPtr);`;
+    const code = `dynCall_viii(EL_SettlePtr, promiseId, statusCode, payloadPtr);`;
     const result = transform(code);
     expect(result).toContain(
-      `{{{ makeDynCall('viii', '_EL_SettlePtr') }}}(promiseId, statusCode, payloadPtr)`,
+      `{{{ makeDynCall('viii', 'EL_SettlePtr') }}}(promiseId, statusCode, payloadPtr)`,
     );
   });
 
   it("rewrites dynCall_vii with a nested JSON.stringify argument", () => {
-    const code = `dynCall_vii(_EL_CallbackPtr, handle, JSON.stringify(arg));`;
+    const code = `dynCall_vii(EL_CallbackPtr, handle, JSON.stringify(arg));`;
     const result = transform(code);
     expect(result).toContain(
-      `{{{ makeDynCall('vii', '_EL_CallbackPtr') }}}(handle, JSON.stringify(arg))`,
+      `{{{ makeDynCall('vii', 'EL_CallbackPtr') }}}(handle, JSON.stringify(arg))`,
     );
   });
 
   it("rewrites a multi-line call preserving all arguments verbatim", () => {
     const code = [
       "dynCall_viii(",
-      "  _EL_SettlePtr,",
+      "  EL_SettlePtr,",
       "  promiseId,",
       "  statusCode,",
       "  payloadPtr",
@@ -42,26 +42,26 @@ describe("substituteMakeDyncall — transformDyncalls", () => {
     ].join("\n");
     const result = transform(code);
     expect(result).not.toBeNull();
-    expect(result).toContain(`{{{ makeDynCall('viii', '_EL_SettlePtr') }}}`);
+    expect(result).toContain(`{{{ makeDynCall('viii', 'EL_SettlePtr') }}}`);
     expect(result).toContain("promiseId");
     expect(result).toContain("statusCode");
     expect(result).toContain("payloadPtr");
   });
 
   it("rewrites a zero-rest-args call (function pointer is the only argument)", () => {
-    const code = `dynCall_v(_EL_SomePtr);`;
+    const code = `dynCall_v(EL_SomePtr);`;
     const result = transform(code);
-    expect(result).toBe(`{{{ makeDynCall('v', '_EL_SomePtr') }}}();`);
+    expect(result).toBe(`{{{ makeDynCall('v', 'EL_SomePtr') }}}();`);
   });
 
-  it("leaves the call unchanged when the first arg is not an _EL_ identifier", () => {
+  it("leaves the call unchanged when the first arg is not an EL_ identifier", () => {
     const code = `dynCall_viii(someOtherVar, a, b, c);`;
     const result = transform(code);
     expect(result).toBeNull();
   });
 
   it("leaves non-dynCall functions unchanged", () => {
-    const code = `someFunction(_EL_Ptr, a, b);`;
+    const code = `someFunction(EL_Ptr, a, b);`;
     const result = transform(code);
     expect(result).toBeNull();
   });
@@ -74,12 +74,12 @@ describe("substituteMakeDyncall — transformDyncalls", () => {
 
   it("rewrites multiple dynCall sites in one pass", () => {
     const code = [
-      "dynCall_viii(_EL_SettlePtr, a, b, c);",
-      "dynCall_vii(_EL_CallbackPtr, x, y);",
+      "dynCall_viii(EL_SettlePtr, a, b, c);",
+      "dynCall_vii(EL_CallbackPtr, x, y);",
     ].join("\n");
     const result = transform(code);
     expect(result).not.toBeNull();
-    expect(result).toContain(`{{{ makeDynCall('viii', '_EL_SettlePtr') }}}`);
-    expect(result).toContain(`{{{ makeDynCall('vii', '_EL_CallbackPtr') }}}`);
+    expect(result).toContain(`{{{ makeDynCall('viii', 'EL_SettlePtr') }}}`);
+    expect(result).toContain(`{{{ makeDynCall('vii', 'EL_CallbackPtr') }}}`);
   });
 });

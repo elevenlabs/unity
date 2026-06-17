@@ -35,11 +35,11 @@ var library = (function() {
 	const $EL_CallbackPtr = 0;
 	const EL_SetSettleCallback__deps = ["$EL_SettlePtr"];
 	function EL_SetSettleCallback(ptr) {
-		_EL_SettlePtr = ptr;
+		EL_SettlePtr = ptr;
 	}
 	const EL_SetInvokeCallbackPtr__deps = ["$EL_CallbackPtr"];
 	function EL_SetInvokeCallbackPtr(ptr) {
-		_EL_CallbackPtr = ptr;
+		EL_CallbackPtr = ptr;
 	}
 	function EL_ProbeWasmTable() {
 		return typeof Module.wasmTable !== "undefined" ? 1 : 0;
@@ -85,39 +85,39 @@ var library = (function() {
 	const $EL_NextHandleId = 1;
 	const $EL_RegisterFactory__deps = ["$EL_Factories"];
 	function $EL_RegisterFactory(name, fn) {
-		_EL_Factories[name] = fn;
+		EL_Factories[name] = fn;
 	}
 	const $EL_AllocateObject__deps = ["$EL_Objects", "$EL_NextHandleId"];
 	function $EL_AllocateObject(obj) {
-		const handle = _EL_NextHandleId++;
-		_EL_Objects[handle] = obj;
+		const handle = EL_NextHandleId++;
+		EL_Objects[handle] = obj;
 		return handle;
 	}
 	const $EL_LookupObject__deps = ["$EL_Objects"];
 	function $EL_LookupObject(handle) {
-		return _EL_Objects[handle];
+		return EL_Objects[handle];
 	}
 	const $EL_ReleaseObject__deps = ["$EL_Objects"];
 	function $EL_ReleaseObject(handle) {
-		delete _EL_Objects[handle];
+		delete EL_Objects[handle];
 	}
 	const $EL_AllocateFunction__deps = ["$EL_Functions", "$EL_NextHandleId"];
 	function $EL_AllocateFunction(fn) {
-		const handle = _EL_NextHandleId++;
-		_EL_Functions[handle] = fn;
+		const handle = EL_NextHandleId++;
+		EL_Functions[handle] = fn;
 		return handle;
 	}
 	const $EL_LookupFunction__deps = ["$EL_Functions"];
 	function $EL_LookupFunction(handle) {
-		return _EL_Functions[handle];
+		return EL_Functions[handle];
 	}
 	const $EL_ReleaseFunction__deps = ["$EL_Functions"];
 	function $EL_ReleaseFunction(handle) {
-		delete _EL_Functions[handle];
+		delete EL_Functions[handle];
 	}
 	const $EL_LookupFactory__deps = ["$EL_Factories"];
 	function $EL_LookupFactory(name) {
-		return _EL_Factories[name];
+		return EL_Factories[name];
 	}
 
 //#endregion
@@ -128,30 +128,27 @@ var library = (function() {
 		$EL_Rehydrate: () => $EL_Rehydrate,
 		$EL_Rehydrate__deps: () => $EL_Rehydrate__deps
 	});
-	function rehydrateImpl(value) {
-		if (value === null || typeof value !== "object") return value;
-		const obj = value;
-		if ("$ref" in obj) return _EL_Objects[obj.$ref];
-		if ("$fn" in obj) return _EL_Functions[obj.$fn];
-		if ("$cb" in obj) {
-			const handle = obj.$cb;
-			return (arg) => _EL_InvokeCallback(handle, JSON.stringify(arg));
-		}
-		if (Array.isArray(value)) return value.map(rehydrateImpl);
-		return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, rehydrateImpl(v)]));
-	}
 	const $EL_Rehydrate__deps = [
 		"$EL_Objects",
 		"$EL_Functions",
 		"$EL_InvokeCallback"
 	];
 	function $EL_Rehydrate(value) {
-		return rehydrateImpl(value);
+		if (value === null || typeof value !== "object") return value;
+		const obj = value;
+		if ("$ref" in obj) return EL_Objects[obj.$ref];
+		if ("$fn" in obj) return EL_Functions[obj.$fn];
+		if ("$cb" in obj) {
+			const handle = obj.$cb;
+			return (arg) => EL_InvokeCallback(handle, JSON.stringify(arg));
+		}
+		if (Array.isArray(value)) return value.map((v) => EL_Rehydrate(v));
+		return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, EL_Rehydrate(v)]));
 	}
 	const $EL_EncodeReturn__deps = ["$EL_AllocateObject", "$EL_AllocateFunction"];
 	function $EL_EncodeReturn(value, shape) {
-		if (shape === "object") return { $ref: _EL_AllocateObject(value) };
-		if (shape === "function") return { $fn: _EL_AllocateFunction(value) };
+		if (shape === "object") return { $ref: EL_AllocateObject(value) };
+		if (shape === "function") return { $fn: EL_AllocateFunction(value) };
 		if (shape === "void") return null;
 		return value;
 	}
@@ -166,7 +163,7 @@ var library = (function() {
 	function $EL_InvokeCallback(handle, payload) {
 		const payloadPtr = stringToNewUTF8(payload);
 		try {
-			{{{ makeDynCall('vii', '_EL_CallbackPtr') }}}(handle, payloadPtr);
+			{{{ makeDynCall('vii', 'EL_CallbackPtr') }}}(handle, payloadPtr);
 		} finally {
 			_free(payloadPtr);
 		}
@@ -183,7 +180,7 @@ var library = (function() {
 		const statusCode = status === "ok" ? 0 : 1;
 		const payloadPtr = stringToNewUTF8(payload);
 		try {
-			{{{ makeDynCall('viii', '_EL_SettlePtr') }}}(promiseId, statusCode, payloadPtr);
+			{{{ makeDynCall('viii', 'EL_SettlePtr') }}}(promiseId, statusCode, payloadPtr);
 		} finally {
 			_free(payloadPtr);
 		}
@@ -192,6 +189,12 @@ var library = (function() {
 //#endregion
 //#region src/primitives/dispatcher.ts
 	var dispatcher_exports = /* @__PURE__ */ __exportAll({
+		$EL_AllocString: () => $EL_AllocString,
+		$EL_DecodeReturnShape: () => $EL_DecodeReturnShape,
+		$EL_ParseArgs: () => $EL_ParseArgs,
+		$EL_ParseArgs__deps: () => $EL_ParseArgs__deps,
+		$EL_SettleWith: () => $EL_SettleWith,
+		$EL_SettleWith__deps: () => $EL_SettleWith__deps,
 		EL_Free: () => EL_Free,
 		EL_FunctionCallAsync: () => EL_FunctionCallAsync,
 		EL_FunctionCallAsync__deps: () => EL_FunctionCallAsync__deps,
@@ -212,153 +215,199 @@ var library = (function() {
 		EL_ObjectRelease: () => EL_ObjectRelease,
 		EL_ObjectRelease__deps: () => EL_ObjectRelease__deps
 	});
-	const RETURN_SHAPES = [
-		"value",
-		"object",
-		"function",
-		"void"
-	];
-	function decodeReturnShape(code) {
-		return RETURN_SHAPES[code] ?? "value";
+	function $EL_DecodeReturnShape(code) {
+		return [
+			"value",
+			"object",
+			"function",
+			"void"
+		][code] ?? "value";
 	}
-	function allocString(s) {
+	function $EL_AllocString(s) {
 		const len = lengthBytesUTF8(s) + 1;
 		const buf = _malloc(len);
 		stringToUTF8(s, buf, len);
 		return buf;
 	}
-	function parseArgs(argsJsonPtr) {
+	const $EL_ParseArgs__deps = ["$EL_Rehydrate"];
+	function $EL_ParseArgs(argsJsonPtr) {
 		const json = argsJsonPtr ? UTF8ToString(argsJsonPtr) : "[]";
-		return JSON.parse(json || "[]").map((v) => _EL_Rehydrate(v));
+		return JSON.parse(json || "[]").map((v) => EL_Rehydrate(v));
 	}
-	function settleWith(promiseId, resultOrPromise, returnShape) {
+	const $EL_SettleWith__deps = ["$EL_EncodeReturn", "$EL_Settle"];
+	function $EL_SettleWith(promiseId, resultOrPromise, returnShape) {
 		Promise.resolve(resultOrPromise).then((result) => {
-			const encoded = _EL_EncodeReturn(result, returnShape);
-			_EL_Settle(promiseId, "ok", JSON.stringify(encoded) ?? "null");
+			const encoded = EL_EncodeReturn(result, returnShape);
+			EL_Settle(promiseId, "ok", JSON.stringify(encoded) ?? "null");
 		}).catch((e) => {
-			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
+			EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		});
 	}
 	const EL_InvokeFactoryAsync__deps = [
 		"$EL_LookupFactory",
-		"$EL_Rehydrate",
-		"$EL_EncodeReturn",
+		"$EL_ParseArgs",
+		"$EL_DecodeReturnShape",
+		"$EL_SettleWith",
 		"$EL_Settle"
 	];
 	function EL_InvokeFactoryAsync(factoryNamePtr, argsJsonPtr, returnShape, promiseId) {
 		const name = UTF8ToString(factoryNamePtr);
 		try {
-			const fn = _EL_LookupFactory(name);
+			const fn = EL_LookupFactory(name);
 			if (!fn) throw new Error(`Unknown factory: ${name}`);
-			settleWith(promiseId, fn(...parseArgs(argsJsonPtr)), decodeReturnShape(returnShape));
+			EL_SettleWith(promiseId, fn(...EL_ParseArgs(argsJsonPtr)), EL_DecodeReturnShape(returnShape));
 		} catch (e) {
-			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
+			EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		}
 	}
 	const EL_InvokeFactorySync__deps = [
 		"$EL_LookupFactory",
-		"$EL_Rehydrate",
-		"$EL_EncodeReturn"
+		"$EL_ParseArgs",
+		"$EL_DecodeReturnShape",
+		"$EL_EncodeReturn",
+		"$EL_AllocString"
 	];
 	function EL_InvokeFactorySync(factoryNamePtr, argsJsonPtr, returnShape) {
 		try {
 			const name = UTF8ToString(factoryNamePtr);
-			const fn = _EL_LookupFactory(name);
+			const fn = EL_LookupFactory(name);
 			if (!fn) throw new Error(`Unknown factory: ${name}`);
-			const result = fn(...parseArgs(argsJsonPtr));
-			return allocString(JSON.stringify(_EL_EncodeReturn(result, decodeReturnShape(returnShape))) ?? "null");
+			const result = fn(...EL_ParseArgs(argsJsonPtr));
+			return EL_AllocString(JSON.stringify(EL_EncodeReturn(result, EL_DecodeReturnShape(returnShape))) ?? "null");
 		} catch (e) {
-			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
+			return EL_AllocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}
 	}
 	const EL_ObjectCallAsync__deps = [
 		"$EL_LookupObject",
-		"$EL_Rehydrate",
-		"$EL_EncodeReturn",
+		"$EL_ParseArgs",
+		"$EL_DecodeReturnShape",
+		"$EL_SettleWith",
 		"$EL_Settle"
 	];
 	function EL_ObjectCallAsync(handle, methodPtr, argsJsonPtr, returnShape, promiseId) {
 		const method = UTF8ToString(methodPtr);
 		try {
-			const obj = _EL_LookupObject(handle);
+			const obj = EL_LookupObject(handle);
 			if (obj === void 0) throw new Error(`unknown handle: ${handle}`);
 			const fn = obj[method];
 			if (typeof fn !== "function") throw new Error(`No method '${method}' on handle ${handle}`);
-			settleWith(promiseId, fn.apply(obj, parseArgs(argsJsonPtr)), decodeReturnShape(returnShape));
+			EL_SettleWith(promiseId, fn.apply(obj, EL_ParseArgs(argsJsonPtr)), EL_DecodeReturnShape(returnShape));
 		} catch (e) {
-			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
+			EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		}
 	}
 	const EL_ObjectCallSync__deps = [
 		"$EL_LookupObject",
-		"$EL_Rehydrate",
-		"$EL_EncodeReturn"
+		"$EL_ParseArgs",
+		"$EL_DecodeReturnShape",
+		"$EL_EncodeReturn",
+		"$EL_AllocString"
 	];
 	function EL_ObjectCallSync(handle, methodPtr, argsJsonPtr, returnShape) {
 		try {
 			const method = UTF8ToString(methodPtr);
-			const obj = _EL_LookupObject(handle);
+			const obj = EL_LookupObject(handle);
 			if (obj === void 0) throw new Error(`unknown handle: ${handle}`);
 			const fn = obj[method];
 			if (typeof fn !== "function") throw new Error(`No method '${method}' on handle ${handle}`);
-			const result = fn.apply(obj, parseArgs(argsJsonPtr));
-			return allocString(JSON.stringify(_EL_EncodeReturn(result, decodeReturnShape(returnShape))) ?? "null");
+			const result = fn.apply(obj, EL_ParseArgs(argsJsonPtr));
+			return EL_AllocString(JSON.stringify(EL_EncodeReturn(result, EL_DecodeReturnShape(returnShape))) ?? "null");
 		} catch (e) {
-			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
+			return EL_AllocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}
 	}
-	const EL_ObjectGet__deps = ["$EL_LookupObject"];
+	const EL_ObjectGet__deps = ["$EL_LookupObject", "$EL_AllocString"];
 	function EL_ObjectGet(handle, propPtr) {
 		try {
 			const prop = UTF8ToString(propPtr);
-			const obj = _EL_LookupObject(handle);
+			const obj = EL_LookupObject(handle);
 			if (obj === void 0) throw new Error(`unknown handle: ${handle}`);
 			const value = obj[prop];
-			return allocString(JSON.stringify(value) ?? "null");
+			return EL_AllocString(JSON.stringify(value) ?? "null");
 		} catch (e) {
-			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
+			return EL_AllocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}
 	}
 	const EL_ObjectRelease__deps = ["$EL_ReleaseObject"];
 	function EL_ObjectRelease(handle) {
-		_EL_ReleaseObject(handle);
+		EL_ReleaseObject(handle);
 	}
 	const EL_FunctionCallAsync__deps = [
 		"$EL_LookupFunction",
-		"$EL_Rehydrate",
-		"$EL_EncodeReturn",
+		"$EL_ParseArgs",
+		"$EL_DecodeReturnShape",
+		"$EL_SettleWith",
 		"$EL_Settle"
 	];
 	function EL_FunctionCallAsync(handle, argsJsonPtr, returnShape, promiseId) {
 		try {
-			const fn = _EL_LookupFunction(handle);
+			const fn = EL_LookupFunction(handle);
 			if (!fn) throw new Error(`unknown handle: ${handle}`);
-			settleWith(promiseId, fn(...parseArgs(argsJsonPtr)), decodeReturnShape(returnShape));
+			EL_SettleWith(promiseId, fn(...EL_ParseArgs(argsJsonPtr)), EL_DecodeReturnShape(returnShape));
 		} catch (e) {
-			_EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
+			EL_Settle(promiseId, "err", e instanceof Error ? e.message : String(e));
 		}
 	}
 	const EL_FunctionCallSync__deps = [
 		"$EL_LookupFunction",
-		"$EL_Rehydrate",
-		"$EL_EncodeReturn"
+		"$EL_ParseArgs",
+		"$EL_DecodeReturnShape",
+		"$EL_EncodeReturn",
+		"$EL_AllocString"
 	];
 	function EL_FunctionCallSync(handle, argsJsonPtr, returnShape) {
 		try {
-			const fn = _EL_LookupFunction(handle);
+			const fn = EL_LookupFunction(handle);
 			if (!fn) throw new Error(`unknown handle: ${handle}`);
-			const result = fn(...parseArgs(argsJsonPtr));
-			return allocString(JSON.stringify(_EL_EncodeReturn(result, decodeReturnShape(returnShape))) ?? "null");
+			const result = fn(...EL_ParseArgs(argsJsonPtr));
+			return EL_AllocString(JSON.stringify(EL_EncodeReturn(result, EL_DecodeReturnShape(returnShape))) ?? "null");
 		} catch (e) {
-			return allocString("!err:" + (e instanceof Error ? e.message : String(e)));
+			return EL_AllocString("!err:" + (e instanceof Error ? e.message : String(e)));
 		}
 	}
 	const EL_FunctionRelease__deps = ["$EL_ReleaseFunction"];
 	function EL_FunctionRelease(handle) {
-		_EL_ReleaseFunction(handle);
+		EL_ReleaseFunction(handle);
 	}
 	function EL_Free(ptr) {
 		_free(ptr);
+	}
+
+//#endregion
+//#region src/primitives/smoke-test-factory.ts
+	var smoke_test_factory_exports = /* @__PURE__ */ __exportAll({
+		EL_SmokeTest_RegisterMathFactory: () => EL_SmokeTest_RegisterMathFactory,
+		EL_SmokeTest_RegisterMathFactory__deps: () => EL_SmokeTest_RegisterMathFactory__deps
+	});
+	const EL_SmokeTest_RegisterMathFactory__deps = ["$EL_RegisterFactory"];
+	function EL_SmokeTest_RegisterMathFactory() {
+		EL_RegisterFactory("mathFactory", () => {
+			const listeners = [];
+			return {
+				add: (a, b) => a + b,
+				addAsync: (a, b) => Promise.resolve(a + b),
+				pi: Math.PI,
+				addTickListener: (cb) => {
+					listeners.push(cb);
+					return () => {
+						const idx = listeners.indexOf(cb);
+						if (idx >= 0) listeners.splice(idx, 1);
+					};
+				},
+				invokeTick: (value) => {
+					[...listeners].forEach((cb) => cb(value));
+				},
+				invokeTickFromPromise: (value) => Promise.resolve().then(() => {
+					[...listeners].forEach((cb) => cb(value));
+				}),
+				invokeTickN: (count) => {
+					const lns = [...listeners];
+					for (let i = 0; i < count; i++) for (const cb of lns) cb(i);
+				},
+				makeAdder: (n) => (x) => n + x
+			};
+		});
 	}
 
 //#endregion
@@ -370,7 +419,8 @@ var library = (function() {
 		...marshalling_exports,
 		...callbacks_exports,
 		...promise_settle_exports,
-		...dispatcher_exports
+		...dispatcher_exports,
+		...smoke_test_factory_exports
 	};
 
 //#endregion

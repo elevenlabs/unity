@@ -1,6 +1,7 @@
 // Internal logging helper. Never called from C# ($ prefix keeps it out of
 // DllImport resolution). Functions that use it declare `$EL_Log` as a dep
-// and call it as `_EL_Log(level, scope, message)`.
+// and call it as `EL_Log(level, scope, message)` (the `$` is stripped at
+// runtime — see globals.d.ts naming convention).
 //
 // level: "info" | "warn" | "error"
 export function $EL_Log(

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  $EL_AllocString,
+  $EL_DecodeReturnShape,
+  $EL_ParseArgs,
+  $EL_SettleWith,
   EL_FunctionCallAsync,
   EL_FunctionCallSync,
   EL_FunctionRelease,
@@ -30,11 +34,11 @@ const SHAPE_FUNCTION = 2;
 const SHAPE_VOID = 3;
 
 type ElGlobals = typeof globalThis & {
-  _EL_Objects: Record<number, unknown>;
-  _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-  _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
-  _EL_NextHandleId: number;
-  _EL_SettlePtr: number;
+  EL_Objects: Record<number, unknown>;
+  EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+  EL_Factories: Record<string, (...args: unknown[]) => unknown>;
+  EL_NextHandleId: number;
+  EL_SettlePtr: number;
   dynCall_viii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
   _free: ReturnType<typeof vi.fn>;
@@ -63,26 +67,33 @@ beforeEach(() => {
   nextPtr = 1000;
 
   // Registries
-  vi.stubGlobal("_EL_Objects", {});
-  vi.stubGlobal("_EL_Functions", {});
-  vi.stubGlobal("_EL_Factories", {});
-  vi.stubGlobal("_EL_NextHandleId", 1);
-  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
-  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
-  vi.stubGlobal("_EL_LookupFactory", $EL_LookupFactory);
-  vi.stubGlobal("_EL_LookupObject", $EL_LookupObject);
-  vi.stubGlobal("_EL_LookupFunction", $EL_LookupFunction);
-  vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
-  vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
+  vi.stubGlobal("EL_Objects", {});
+  vi.stubGlobal("EL_Functions", {});
+  vi.stubGlobal("EL_Factories", {});
+  vi.stubGlobal("EL_NextHandleId", 1);
+  vi.stubGlobal("EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("EL_LookupFactory", $EL_LookupFactory);
+  vi.stubGlobal("EL_LookupObject", $EL_LookupObject);
+  vi.stubGlobal("EL_LookupFunction", $EL_LookupFunction);
+  vi.stubGlobal("EL_ReleaseObject", $EL_ReleaseObject);
+  vi.stubGlobal("EL_ReleaseFunction", $EL_ReleaseFunction);
 
   // Marshalling
-  vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);
-  vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
-  vi.stubGlobal("_EL_InvokeCallback", vi.fn()); // needed by $EL_Rehydrate for $cb markers
+  vi.stubGlobal("EL_Rehydrate", $EL_Rehydrate);
+  vi.stubGlobal("EL_EncodeReturn", $EL_EncodeReturn);
+  vi.stubGlobal("EL_InvokeCallback", vi.fn()); // needed by $EL_Rehydrate for $cb markers
+
+  // Dispatcher private helpers (exposed as $-prefixed library entries so they
+  // survive Emscripten's per-entry extraction in the framework build).
+  vi.stubGlobal("EL_AllocString", $EL_AllocString);
+  vi.stubGlobal("EL_DecodeReturnShape", $EL_DecodeReturnShape);
+  vi.stubGlobal("EL_ParseArgs", $EL_ParseArgs);
+  vi.stubGlobal("EL_SettleWith", $EL_SettleWith);
 
   // Settlement (uses real implementation; assertions via DynCall mocks)
-  vi.stubGlobal("_EL_Settle", $EL_Settle);
-  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("EL_Settle", $EL_Settle);
+  vi.stubGlobal("EL_SettlePtr", 42);
   vi.stubGlobal("dynCall_viii", vi.fn());
   vi.stubGlobal(
     "stringToNewUTF8",
@@ -119,7 +130,7 @@ describe("EL_InvokeFactoryAsync", () => {
     await Promise.resolve();
 
     expect(settlementMessage()).toBe('5:ok:{"$ref":1}');
-    expect(g._EL_Objects[1]).toEqual({ w: 10, h: 20 });
+    expect(g.EL_Objects[1]).toEqual({ w: 10, h: 20 });
   });
 
   it("settles ok with a plain value when shape is VALUE", async () => {
@@ -222,7 +233,7 @@ describe("EL_InvokeFactorySync", () => {
       SHAPE_OBJECT,
     );
     expect(readPtr(ptr)).toBe('{"$ref":1}');
-    expect(g._EL_Objects[1]).toEqual({ x: 1 });
+    expect(g.EL_Objects[1]).toEqual({ x: 1 });
   });
 
   it("returns !err: prefix when the factory is not registered", () => {
@@ -283,7 +294,7 @@ describe("EL_ObjectCallAsync", () => {
     expect(settlementMessage()).toMatch(/^6:ok:\{"\$fn":\d+\}$/);
     const fnHandle = JSON.parse(settlementMessage().slice("6:ok:".length))
       .$fn as number;
-    expect(g._EL_Functions[fnHandle]).toBe(removeListener);
+    expect(g.EL_Functions[fnHandle]).toBe(removeListener);
   });
 
   it("rehydrates { $ref } markers in args before calling the method", async () => {

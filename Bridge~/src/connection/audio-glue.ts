@@ -62,14 +62,15 @@ type Input = Parameters<typeof attachInputToConnection>[0];
 type Output = Parameters<typeof attachConnectionToOutput>[1];
 
 // $EL_AudioGlueFactories is a jslib library entry (non-function). Emscripten
-// hoists it as _EL_AudioGlueFactories so the __postset below can iterate and
-// register each entry with _EL_RegisterFactory.
+// hoists it as EL_AudioGlueFactories (no underscore — see globals.d.ts naming
+// convention) so the __postset below can iterate and register each entry with
+// EL_RegisterFactory.
 //
 // Args arrive positionally from C#:
 //   [connection, input, output, bridgeCallback]
 // where the first three are {$ref:N} markers rehydrated to live SDK objects
 // and bridgeCallback is a {$cb:N} marker rehydrated to a JS function that
-// fires _EL_InvokeCallback back into C# when called.
+// fires EL_InvokeCallback back into C# when called.
 //
 // Return shape is "function" (per Plan B task 2.3) — the dispatcher allocates
 // a JsFunction handle for the returned detach closure so C# can call it later
@@ -101,4 +102,4 @@ export const $EL_AudioGlueFactories: Record<
 export const $EL_AudioGlueFactories__deps = ["$EL_RegisterFactory"];
 
 export const $EL_AudioGlueFactories__postset =
-  "Object.keys(_EL_AudioGlueFactories).forEach(function(k){_EL_RegisterFactory(k,_EL_AudioGlueFactories[k]);});";
+  "Object.keys(EL_AudioGlueFactories).forEach(function(k){EL_RegisterFactory(k,EL_AudioGlueFactories[k]);});";

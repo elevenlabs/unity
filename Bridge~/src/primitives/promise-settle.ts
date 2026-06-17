@@ -15,7 +15,7 @@ export function $EL_Settle(
   const statusCode = status === "ok" ? 0 : 1;
   const payloadPtr = stringToNewUTF8(payload);
   try {
-    dynCall_viii(_EL_SettlePtr, promiseId, statusCode, payloadPtr);
+    dynCall_viii(EL_SettlePtr, promiseId, statusCode, payloadPtr);
   } finally {
     _free(payloadPtr);
   }

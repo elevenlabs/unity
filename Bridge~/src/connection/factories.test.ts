@@ -14,6 +14,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  $EL_AllocString,
+  $EL_DecodeReturnShape,
+  $EL_ParseArgs,
+  $EL_SettleWith,
   EL_InvokeFactoryAsync,
   EL_ObjectCallAsync,
   EL_ObjectRelease,
@@ -100,23 +104,27 @@ beforeEach(() => {
   heap.clear();
   nextPtr = 1000;
 
-  vi.stubGlobal("_EL_Objects", {});
-  vi.stubGlobal("_EL_Functions", {});
-  vi.stubGlobal("_EL_Factories", {});
-  vi.stubGlobal("_EL_NextHandleId", 1);
+  vi.stubGlobal("EL_Objects", {});
+  vi.stubGlobal("EL_Functions", {});
+  vi.stubGlobal("EL_Factories", {});
+  vi.stubGlobal("EL_NextHandleId", 1);
 
-  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
-  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
-  vi.stubGlobal("_EL_LookupFactory", $EL_LookupFactory);
-  vi.stubGlobal("_EL_LookupObject", $EL_LookupObject);
-  vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
-  vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
+  vi.stubGlobal("EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("EL_LookupFactory", $EL_LookupFactory);
+  vi.stubGlobal("EL_LookupObject", $EL_LookupObject);
+  vi.stubGlobal("EL_ReleaseObject", $EL_ReleaseObject);
+  vi.stubGlobal("EL_ReleaseFunction", $EL_ReleaseFunction);
 
-  vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);
-  vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
-  vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
-  vi.stubGlobal("_EL_Settle", $EL_Settle);
-  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("EL_Rehydrate", $EL_Rehydrate);
+  vi.stubGlobal("EL_EncodeReturn", $EL_EncodeReturn);
+  vi.stubGlobal("EL_InvokeCallback", $EL_InvokeCallback);
+  vi.stubGlobal("EL_AllocString", $EL_AllocString);
+  vi.stubGlobal("EL_DecodeReturnShape", $EL_DecodeReturnShape);
+  vi.stubGlobal("EL_ParseArgs", $EL_ParseArgs);
+  vi.stubGlobal("EL_SettleWith", $EL_SettleWith);
+  vi.stubGlobal("EL_Settle", $EL_Settle);
+  vi.stubGlobal("EL_SettlePtr", 42);
   vi.stubGlobal("dynCall_viii", vi.fn());
   vi.stubGlobal(
     "stringToNewUTF8",
@@ -124,7 +132,7 @@ beforeEach(() => {
   );
   vi.stubGlobal("_free", vi.fn());
   // SendMessage still used by callbacks.ts (not yet rewritten to DynCall).
-  vi.stubGlobal("_EL_BridgeName", "__ElevenLabsBridge__");
+  vi.stubGlobal("EL_BridgeName", "__ElevenLabsBridge__");
   vi.stubGlobal("SendMessage", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
@@ -247,8 +255,8 @@ describe("createWebSocketConnection factory", () => {
 
     EL_ObjectRelease(handle);
 
-    const objects = (g as unknown as { _EL_Objects: Record<number, unknown> })
-      ._EL_Objects;
+    const objects = (g as unknown as { EL_Objects: Record<number, unknown> })
+      .EL_Objects;
     expect(objects[handle]).toBeUndefined();
   });
 });

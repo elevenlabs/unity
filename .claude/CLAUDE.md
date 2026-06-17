@@ -79,6 +79,20 @@ pnpm --dir TestProject run typecheck   # TypeScript (tsc --noEmit on run-tests.t
 lives under [Unity-side verification → Edit Mode tests](#edit-mode-tests) below.
 `pnpm --dir TestProject install` once after cloning to fetch the devDeps.
 
+### Browser-mode integration tests (IntegrationTests~/)
+
+```bash
+pnpm --dir IntegrationTests~ install           # one-time after cloning
+pnpm --dir IntegrationTests~ run setup         # one-time: download Playwright Chromium
+pnpm --dir IntegrationTests~ run typecheck     # TypeScript
+pnpm --dir IntegrationTests~ run test          # Vitest + Playwright
+```
+
+Drives the WebGL build at `TestProject/Build/WebGL/` through Playwright-managed
+Chromium, asserts on the smoke test's console log trail. Runs headless,
+completes in ~4 seconds end-to-end. Requires that `bash TestProject/build-webgl.sh`
+has been run at least once so the build exists.
+
 ## Unity-side verification
 
 Unity **6000.3.6f1** (Unity 6 LTS) is installed locally at

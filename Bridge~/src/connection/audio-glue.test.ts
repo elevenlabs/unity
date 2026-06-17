@@ -9,6 +9,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  $EL_AllocString,
+  $EL_DecodeReturnShape,
+  $EL_ParseArgs,
+  $EL_SettleWith,
   EL_FunctionCallAsync,
   EL_InvokeFactoryAsync,
 } from "../primitives/dispatcher.js";
@@ -144,31 +148,35 @@ beforeEach(() => {
   nextPtr = 1000;
   vi.clearAllMocks();
 
-  vi.stubGlobal("_EL_Objects", {});
-  vi.stubGlobal("_EL_Functions", {});
-  vi.stubGlobal("_EL_Factories", {});
-  vi.stubGlobal("_EL_NextHandleId", 1);
+  vi.stubGlobal("EL_Objects", {});
+  vi.stubGlobal("EL_Functions", {});
+  vi.stubGlobal("EL_Factories", {});
+  vi.stubGlobal("EL_NextHandleId", 1);
 
-  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
-  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
-  vi.stubGlobal("_EL_LookupFactory", $EL_LookupFactory);
-  vi.stubGlobal("_EL_LookupObject", $EL_LookupObject);
-  vi.stubGlobal("_EL_LookupFunction", $EL_LookupFunction);
-  vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
-  vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
+  vi.stubGlobal("EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("EL_LookupFactory", $EL_LookupFactory);
+  vi.stubGlobal("EL_LookupObject", $EL_LookupObject);
+  vi.stubGlobal("EL_LookupFunction", $EL_LookupFunction);
+  vi.stubGlobal("EL_ReleaseObject", $EL_ReleaseObject);
+  vi.stubGlobal("EL_ReleaseFunction", $EL_ReleaseFunction);
 
-  vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);
-  vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
-  vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
-  vi.stubGlobal("_EL_Settle", $EL_Settle);
-  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("EL_Rehydrate", $EL_Rehydrate);
+  vi.stubGlobal("EL_EncodeReturn", $EL_EncodeReturn);
+  vi.stubGlobal("EL_InvokeCallback", $EL_InvokeCallback);
+  vi.stubGlobal("EL_AllocString", $EL_AllocString);
+  vi.stubGlobal("EL_DecodeReturnShape", $EL_DecodeReturnShape);
+  vi.stubGlobal("EL_ParseArgs", $EL_ParseArgs);
+  vi.stubGlobal("EL_SettleWith", $EL_SettleWith);
+  vi.stubGlobal("EL_Settle", $EL_Settle);
+  vi.stubGlobal("EL_SettlePtr", 42);
   vi.stubGlobal("dynCall_viii", vi.fn());
   vi.stubGlobal(
     "stringToNewUTF8",
     vi.fn(() => nextPtr++),
   );
   vi.stubGlobal("_free", vi.fn());
-  vi.stubGlobal("_EL_CallbackPtr", 100);
+  vi.stubGlobal("EL_CallbackPtr", 100);
   vi.stubGlobal("dynCall_vii", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
@@ -188,7 +196,7 @@ beforeEach(() => {
 });
 
 type ElGlobals = typeof globalThis & {
-  _EL_CallbackPtr: number;
+  EL_CallbackPtr: number;
   dynCall_vii: ReturnType<typeof vi.fn>;
   dynCall_viii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
@@ -276,7 +284,7 @@ describe("attachDefaultAudio factory", () => {
     } as unknown as IncomingSocketEvent);
 
     // The {$cb:7} marker was rehydrated to a closure that fires
-    // _EL_InvokeCallback(7, JSON.stringify(arg)) → dynCall_vii with the
+    // EL_InvokeCallback(7, JSON.stringify(arg)) → dynCall_vii with the
     // stripped event as payload.
     expect(g.dynCall_vii).toHaveBeenCalledWith(100, 7, expect.any(Number));
     const payloadStr = g.stringToNewUTF8.mock.calls[

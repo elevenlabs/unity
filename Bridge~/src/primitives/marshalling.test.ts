@@ -6,23 +6,27 @@ import { $EL_AllocateFunction, $EL_AllocateObject } from "./registries";
 // functions can mutate and read them exactly as they would in a live WebGL
 // build. vitest restores them between tests (unstubGlobals in vitest.config.ts).
 type ElGlobals = typeof globalThis & {
-  _EL_Objects: Record<number, unknown>;
-  _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-  _EL_NextHandleId: number;
-  _EL_AllocateObject: typeof $EL_AllocateObject;
-  _EL_AllocateFunction: typeof $EL_AllocateFunction;
-  _EL_InvokeCallback: (handle: number, payload: string) => void;
+  EL_Objects: Record<number, unknown>;
+  EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+  EL_NextHandleId: number;
+  EL_AllocateObject: typeof $EL_AllocateObject;
+  EL_AllocateFunction: typeof $EL_AllocateFunction;
+  EL_InvokeCallback: (handle: number, payload: string) => void;
 };
 
 const g = globalThis as ElGlobals;
 
 beforeEach(() => {
-  vi.stubGlobal("_EL_Objects", {});
-  vi.stubGlobal("_EL_Functions", {});
-  vi.stubGlobal("_EL_NextHandleId", 1);
-  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
-  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
-  vi.stubGlobal("_EL_InvokeCallback", vi.fn());
+  vi.stubGlobal("EL_Objects", {});
+  vi.stubGlobal("EL_Functions", {});
+  vi.stubGlobal("EL_NextHandleId", 1);
+  vi.stubGlobal("EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("EL_InvokeCallback", vi.fn());
+  // $EL_Rehydrate is recursive: its body calls EL_Rehydrate (the hoisted global
+  // form) to walk arrays/objects. Stub it so recursion resolves in Node tests
+  // the same way the Emscripten framework resolves it at runtime.
+  vi.stubGlobal("EL_Rehydrate", $EL_Rehydrate);
 });
 
 describe("$EL_Rehydrate", () => {
@@ -45,19 +49,19 @@ describe("$EL_Rehydrate", () => {
     expect($EL_Rehydrate({ $fn: handle })).toBe(fn);
   });
 
-  it("resolves { $cb } to a closure that fires _EL_InvokeCallback", () => {
+  it("resolves { $cb } to a closure that fires EL_InvokeCallback", () => {
     const handle = 99;
     const closure = $EL_Rehydrate({ $cb: handle }) as (arg: unknown) => void;
     expect(typeof closure).toBe("function");
     closure("my-payload");
-    expect(g._EL_InvokeCallback).toHaveBeenCalledWith(handle, '"my-payload"');
+    expect(g.EL_InvokeCallback).toHaveBeenCalledWith(handle, '"my-payload"');
   });
 
   it("{ $cb } closure serialises object args to JSON", () => {
     const handle = 7;
     const closure = $EL_Rehydrate({ $cb: handle }) as (arg: unknown) => void;
     closure({ x: 1, y: 2 });
-    expect(g._EL_InvokeCallback).toHaveBeenCalledWith(handle, '{"x":1,"y":2}');
+    expect(g.EL_InvokeCallback).toHaveBeenCalledWith(handle, '{"x":1,"y":2}');
   });
 
   it("passes through plain objects without markers", () => {
@@ -119,7 +123,7 @@ describe("$EL_EncodeReturn", () => {
     const encoded = $EL_EncodeReturn(obj, "object") as { $ref: number };
     expect(encoded).toHaveProperty("$ref");
     expect(typeof encoded.$ref).toBe("number");
-    expect(g._EL_Objects[encoded.$ref]).toBe(obj);
+    expect(g.EL_Objects[encoded.$ref]).toBe(obj);
   });
 
   it("shape=function allocates a registry entry and returns { $fn }", () => {
@@ -127,7 +131,7 @@ describe("$EL_EncodeReturn", () => {
     const encoded = $EL_EncodeReturn(fn, "function") as { $fn: number };
     expect(encoded).toHaveProperty("$fn");
     expect(typeof encoded.$fn).toBe("number");
-    expect(g._EL_Functions[encoded.$fn]).toBe(fn);
+    expect(g.EL_Functions[encoded.$fn]).toBe(fn);
   });
 
   it("shape=void returns null regardless of value", () => {

@@ -10,6 +10,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  $EL_AllocString,
+  $EL_DecodeReturnShape,
+  $EL_ParseArgs,
+  $EL_SettleWith,
   EL_FunctionCallAsync,
   EL_FunctionRelease,
   EL_InvokeFactoryAsync,
@@ -38,12 +42,12 @@ const SHAPE_FUNCTION = 2;
 const SHAPE_VOID = 3;
 
 type ElGlobals = typeof globalThis & {
-  _EL_Objects: Record<number, unknown>;
-  _EL_Functions: Record<number, (...args: unknown[]) => unknown>;
-  _EL_Factories: Record<string, (...args: unknown[]) => unknown>;
-  _EL_NextHandleId: number;
-  _EL_SettlePtr: number;
-  _EL_CallbackPtr: number;
+  EL_Objects: Record<number, unknown>;
+  EL_Functions: Record<number, (...args: unknown[]) => unknown>;
+  EL_Factories: Record<string, (...args: unknown[]) => unknown>;
+  EL_NextHandleId: number;
+  EL_SettlePtr: number;
+  EL_CallbackPtr: number;
   dynCall_viii: ReturnType<typeof vi.fn>;
   dynCall_vii: ReturnType<typeof vi.fn>;
   stringToNewUTF8: ReturnType<typeof vi.fn>;
@@ -88,32 +92,37 @@ beforeEach(() => {
   nextPtr = 1000;
   listeners.length = 0;
 
-  vi.stubGlobal("_EL_Objects", {});
-  vi.stubGlobal("_EL_Functions", {});
-  vi.stubGlobal("_EL_Factories", {});
-  vi.stubGlobal("_EL_NextHandleId", 1);
+  vi.stubGlobal("EL_Objects", {});
+  vi.stubGlobal("EL_Functions", {});
+  vi.stubGlobal("EL_Factories", {});
+  vi.stubGlobal("EL_NextHandleId", 1);
 
-  vi.stubGlobal("_EL_AllocateObject", $EL_AllocateObject);
-  vi.stubGlobal("_EL_AllocateFunction", $EL_AllocateFunction);
-  vi.stubGlobal("_EL_LookupFactory", $EL_LookupFactory);
-  vi.stubGlobal("_EL_LookupObject", $EL_LookupObject);
-  vi.stubGlobal("_EL_LookupFunction", $EL_LookupFunction);
-  vi.stubGlobal("_EL_ReleaseObject", $EL_ReleaseObject);
-  vi.stubGlobal("_EL_ReleaseFunction", $EL_ReleaseFunction);
+  vi.stubGlobal("EL_AllocateObject", $EL_AllocateObject);
+  vi.stubGlobal("EL_AllocateFunction", $EL_AllocateFunction);
+  vi.stubGlobal("EL_LookupFactory", $EL_LookupFactory);
+  vi.stubGlobal("EL_LookupObject", $EL_LookupObject);
+  vi.stubGlobal("EL_LookupFunction", $EL_LookupFunction);
+  vi.stubGlobal("EL_ReleaseObject", $EL_ReleaseObject);
+  vi.stubGlobal("EL_ReleaseFunction", $EL_ReleaseFunction);
 
-  vi.stubGlobal("_EL_Rehydrate", $EL_Rehydrate);
-  vi.stubGlobal("_EL_EncodeReturn", $EL_EncodeReturn);
-  vi.stubGlobal("_EL_InvokeCallback", $EL_InvokeCallback);
+  vi.stubGlobal("EL_Rehydrate", $EL_Rehydrate);
+  vi.stubGlobal("EL_EncodeReturn", $EL_EncodeReturn);
+  vi.stubGlobal("EL_InvokeCallback", $EL_InvokeCallback);
 
-  vi.stubGlobal("_EL_Settle", $EL_Settle);
-  vi.stubGlobal("_EL_SettlePtr", 42);
+  vi.stubGlobal("EL_AllocString", $EL_AllocString);
+  vi.stubGlobal("EL_DecodeReturnShape", $EL_DecodeReturnShape);
+  vi.stubGlobal("EL_ParseArgs", $EL_ParseArgs);
+  vi.stubGlobal("EL_SettleWith", $EL_SettleWith);
+
+  vi.stubGlobal("EL_Settle", $EL_Settle);
+  vi.stubGlobal("EL_SettlePtr", 42);
   vi.stubGlobal("dynCall_viii", vi.fn());
   vi.stubGlobal(
     "stringToNewUTF8",
     vi.fn(() => nextPtr++),
   );
   vi.stubGlobal("_free", vi.fn());
-  vi.stubGlobal("_EL_CallbackPtr", 100);
+  vi.stubGlobal("EL_CallbackPtr", 100);
   vi.stubGlobal("dynCall_vii", vi.fn());
 
   vi.stubGlobal("UTF8ToString", (ptr: number) => heap.get(ptr) ?? "");
@@ -150,7 +159,7 @@ describe("mathFactory end-to-end", () => {
     await Promise.resolve();
 
     expect(lastSettleMessage()).toBe('1:ok:{"$ref":1}');
-    expect(g._EL_Objects[1]).toBe(mathObj);
+    expect(g.EL_Objects[1]).toBe(mathObj);
   });
 
   it("sync method add(3, 4) → 7", async () => {
@@ -234,10 +243,10 @@ describe("mathFactory end-to-end", () => {
     expect(settleMsg).toMatch(/^3:ok:\{"\$fn":\d+\}$/);
     const removeListenerHandle = JSON.parse(settleMsg.slice("3:ok:".length))
       .$fn as number;
-    expect(g._EL_Functions[removeListenerHandle]).toBeTypeOf("function");
+    expect(g.EL_Functions[removeListenerHandle]).toBeTypeOf("function");
     expect(listeners.length).toBe(1);
 
-    // Tick — the rehydrated $cb closure fires _EL_InvokeCallback → dynCall_vii
+    // Tick — the rehydrated $cb closure fires EL_InvokeCallback → dynCall_vii
     listeners[0](42);
     expect(g.dynCall_vii).toHaveBeenCalledWith(
       100,
@@ -289,7 +298,7 @@ describe("mathFactory end-to-end", () => {
 
     EL_ObjectRelease(mathHandle);
 
-    expect(g._EL_Objects[mathHandle]).toBeUndefined();
+    expect(g.EL_Objects[mathHandle]).toBeUndefined();
   });
 
   it("dispose: EL_FunctionRelease clears the function handle", async () => {
@@ -315,6 +324,6 @@ describe("mathFactory end-to-end", () => {
       .$fn as number;
 
     EL_FunctionRelease(fnHandle);
-    expect(g._EL_Functions[fnHandle]).toBeUndefined();
+    expect(g.EL_Functions[fnHandle]).toBeUndefined();
   });
 });

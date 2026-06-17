@@ -3,35 +3,23 @@
 // Rehydration converts a JSON-decoded value into the live JS value it
 // represents. Three marker shapes are recognised:
 //
-//   { $ref: handle } → object from _EL_Objects registry
-//   { $fn: handle }  → function from _EL_Functions registry
-//   { $cb: handle }  → closure that fires _EL_InvokeCallback(handle, payload)
+//   { $ref: handle } → object from EL_Objects registry
+//   { $fn: handle }  → function from EL_Functions registry
+//   { $cb: handle }  → closure that fires EL_InvokeCallback(handle, payload)
 //
 // Plain objects and arrays are walked recursively. All other values pass through.
 //
 // Return encoding converts a JS return value to a JSON-serialisable shape for
-// the C# decoder. The returnShape hint (registered per factory/method) tells the
-// dispatcher whether to treat the return as a handle, a function ref, void, or
-// a plain JSON value.
+// the C# decoder. The returnShape hint (passed per call by the dispatcher) tells
+// it whether to treat the return as a handle, a function ref, void, or a plain
+// JSON value.
+//
+// Recursion uses self-reference (EL_Rehydrate inside its own body), not a
+// module-private helper, because Emscripten's library loader extracts each
+// `$EL_*` entry separately and module-private helpers do not survive. The
+// self-reference resolves at runtime to the hoisted EL_Rehydrate global.
 
 import type { ReturnShape } from "./registries";
-
-// Private recursive helper so the exported wrapper can reference _EL_* globals
-// while recursion stays local (avoids the global-self-reference pattern).
-function rehydrateImpl(value: unknown): unknown {
-  if (value === null || typeof value !== "object") return value;
-  const obj = value as Record<string, unknown>;
-  if ("$ref" in obj) return _EL_Objects[obj.$ref as number];
-  if ("$fn" in obj) return _EL_Functions[obj.$fn as number];
-  if ("$cb" in obj) {
-    const handle = obj.$cb as number;
-    return (arg: unknown) => _EL_InvokeCallback(handle, JSON.stringify(arg));
-  }
-  if (Array.isArray(value)) return value.map(rehydrateImpl);
-  return Object.fromEntries(
-    Object.entries(obj).map(([k, v]) => [k, rehydrateImpl(v)]),
-  );
-}
 
 export const $EL_Rehydrate__deps = [
   "$EL_Objects",
@@ -39,7 +27,18 @@ export const $EL_Rehydrate__deps = [
   "$EL_InvokeCallback",
 ];
 export function $EL_Rehydrate(value: unknown): unknown {
-  return rehydrateImpl(value);
+  if (value === null || typeof value !== "object") return value;
+  const obj = value as Record<string, unknown>;
+  if ("$ref" in obj) return EL_Objects[obj.$ref as number];
+  if ("$fn" in obj) return EL_Functions[obj.$fn as number];
+  if ("$cb" in obj) {
+    const handle = obj.$cb as number;
+    return (arg: unknown) => EL_InvokeCallback(handle, JSON.stringify(arg));
+  }
+  if (Array.isArray(value)) return value.map((v) => EL_Rehydrate(v));
+  return Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [k, EL_Rehydrate(v)]),
+  );
 }
 
 export const $EL_EncodeReturn__deps = [
@@ -47,10 +46,10 @@ export const $EL_EncodeReturn__deps = [
   "$EL_AllocateFunction",
 ];
 export function $EL_EncodeReturn(value: unknown, shape: ReturnShape): unknown {
-  if (shape === "object") return { $ref: _EL_AllocateObject(value) };
+  if (shape === "object") return { $ref: EL_AllocateObject(value) };
   if (shape === "function")
     return {
-      $fn: _EL_AllocateFunction(value as (...args: unknown[]) => unknown),
+      $fn: EL_AllocateFunction(value as (...args: unknown[]) => unknown),
     };
   if (shape === "void") return null;
   return value;
