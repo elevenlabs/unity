@@ -115,14 +115,18 @@ Open via Unity Hub (point it at `TestProject/`) or headless:
 Run the Unity Test Runner in headless batchmode:
 
 ```bash
-node TestProject/run-tests.ts            # silent unless Unity fails; failures summarised at the end
-node TestProject/run-tests.ts --verbose  # stream Unity's batchmode log live
+pnpm --dir TestProject run test                   # silent unless Unity fails; failures summarised at the end
+pnpm --dir TestProject run test -- --verbose      # stream Unity's batchmode log live
 ```
 
+The `--` separates pnpm's own args from the script's args; without it, pnpm
+may eat flags like `--verbose` before the runner sees them. Other runner args
+(`--xml <path>`, `--unity <path>`) work the same way: pass them after `--`.
+
 Results are written to `TestProject/test-results.xml` by default (override
-with `--xml <path>`, useful in CI). Per-failure lines are printed in a format
-the `.vscode/tasks.json` problem matcher consumes so failures show up in the
-VS Code Problems panel.
+with `-- --xml <path>`, useful in CI). Per-failure lines are printed in a
+format the `.vscode/tasks.json` problem matcher consumes so failures show up
+in the VS Code Problems panel.
 
 > **Note:** Do not pass `-quit` with `-runTests` — Unity honors `-quit` before
 > the test runner fires and exits silently with no results. The test runner
@@ -140,7 +144,7 @@ The simplest way to trigger import is to run the test runner — it opens the
 project, refreshes the asset pipeline, and exits:
 
 ```bash
-node TestProject/run-tests.ts
+pnpm --dir TestProject run test
 ```
 
 After that command, `git status` will show the new `.meta` files as

@@ -38,7 +38,7 @@ Six distinct check commands run today, with very different infra needs.
 | 2 | `pnpm run typecheck && format:check && lint && test` | `Bridge~/` | Node 23+, pnpm | ~10 s | No |
 | 3 | `pnpm run typecheck && format:check && lint && verify:protocol-dtos` | `Codegen~/` | Node 23+, pnpm, .NET (for round-trip) | ~15 s | No |
 | 4 | `pnpm run typecheck` | `TestProject/` | Node 23+, pnpm | ~3 s | No |
-| 5 | `node TestProject/run-tests.ts` (Edit Mode tests) | repo root | Unity 6000.3.6f1 + license | ~90 s | **Yes** |
+| 5 | `pnpm --dir TestProject run test` (Edit Mode tests) | repo root | Unity 6000.3.6f1 + license | ~90 s | **Yes** |
 | 6 | `pnpm --dir IntegrationTests~ run test` (browser-mode WebGL) | repo root | Node + Playwright + a fresh WebGL build at `TestProject/Build/WebGL/` | ~5 s + WebGL build (~3-5 min) | **Yes** (build only) |
 
 (1)-(4) are the **lint lane** — pure JS/TS/C# tooling, runs in any
@@ -214,7 +214,7 @@ Operational caveats:
 
 The Industry trial expires 2026-07-19. If the path forward (paid
 Industry, downgrade to Pro, switch to Personal-only) is undecided,
-keep Unity CI manual (the existing local `node TestProject/run-tests.ts`
+keep Unity CI manual (the existing local `pnpm --dir TestProject run test`
 + `bash TestProject/build-webgl.sh` flow) and only land the lint
 workflow now. Revisit once the licensing model is stable.
 
