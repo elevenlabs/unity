@@ -24,5 +24,12 @@
   "dependencies": {
     "@asyncapi/modelina": "^5.10.1",
     "@asyncapi/parser": "^3.6.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "ajv@<6.14.0": "^6.14.0",
+      "js-yaml@<4.2.0": "^4.2.0",
+      "jsonpath-plus@<10.3.0": "^10.3.0"
+    }
   }
 }

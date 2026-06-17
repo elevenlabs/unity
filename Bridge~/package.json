@@ -18,7 +18,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "esbuild@<0.28.1": "^0.28.1"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

@@ -13,5 +13,13 @@
     "playwright": "^1.52.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ],
+    "overrides": {
+      "esbuild@<0.28.1": "^0.28.1"
+    }
   }
 }
