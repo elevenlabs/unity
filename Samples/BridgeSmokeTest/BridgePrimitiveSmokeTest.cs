@@ -122,6 +122,118 @@ namespace ElevenLabs.WebGL.Samples
             Assert(v4r3 == 13, $"V4: expected 13, got {v4r3}");
             Debug.Log("[SmokeTest] V4 JsFunction multiple sync calls ✓");
 
+            // --- E1: Double-dispose is idempotent across every handle type.
+            // Each handle has its own `_disposed` guard; the second call returns
+            // before reaching EL_*Release / CallbackRegistry.TryRemove.
+            var e1Object = await JsBridge.InvokeFactoryAsync<JsObject>("mathFactory");
+            e1Object.Dispose();
+            e1Object.Dispose();
+            var e1Function = math.Call<JsFunction>("makeAdder", 100);
+            e1Function.Dispose();
+            e1Function.Dispose();
+            var e1Callback = BridgeCallback.Wrap<int>(_ => { });
+            e1Callback.Dispose();
+            e1Callback.Dispose();
+            Debug.Log("[SmokeTest] E1 double-dispose ✓");
+
+            // --- E2: Operations on orphaned handles surface a clean BridgeException
+            // (sync + async paths); JS invocations of a disposed BridgeCallback
+            // wrapper miss the C# registry and no-op silently.
+            var e2Object = await JsBridge.InvokeFactoryAsync<JsObject>("mathFactory");
+            e2Object.Dispose();
+            bool e2SyncThrew = false;
+            try
+            {
+                e2Object.Call<int>("add", 1, 2);
+            }
+            catch (BridgeException)
+            {
+                e2SyncThrew = true;
+            }
+            Assert(e2SyncThrew, "E2: disposed JsObject.Call must throw BridgeException");
+            bool e2AsyncThrew = false;
+            try
+            {
+                await e2Object.CallAsync<int>("add", 1, 2);
+            }
+            catch (BridgeException)
+            {
+                e2AsyncThrew = true;
+            }
+            Assert(e2AsyncThrew, "E2: disposed JsObject.CallAsync must throw BridgeException");
+
+            var e2Function = math.Call<JsFunction>("makeAdder", 5);
+            e2Function.Dispose();
+            bool e2FunctionThrew = false;
+            try
+            {
+                e2Function.Call<int>(1);
+            }
+            catch (BridgeException)
+            {
+                e2FunctionThrew = true;
+            }
+            Assert(e2FunctionThrew, "E2: disposed JsFunction.Call must throw BridgeException");
+
+            int e2CallbackHits = 0;
+            var e2Callback = BridgeCallback.Wrap<int>(_ => e2CallbackHits++);
+            var e2Remove = await math.CallAsync<JsFunction>("addTickListener", e2Callback);
+            e2Callback.Dispose();
+            await math.CallAsync("invokeTick", 1);
+            Assert(
+                e2CallbackHits == 0,
+                $"E2: disposed callback should not fire (hits={e2CallbackHits})"
+            );
+            // Drop the orphan wrapper from the JS listeners array so later
+            // sections don't pay for dead-handle dispatch.
+            await e2Remove.CallAsync();
+            e2Remove.Dispose();
+            Debug.Log("[SmokeTest] E2 orphaned handles ✓");
+
+            // --- E3: payloads with colons, newlines, quotes, backslashes, and
+            // Unicode (BMP + astral) round-trip cleanly across the DynCall
+            // payload buffer and the JSON encode/decode boundary.
+            string e3Payload = "colon:newline\n\"quote\"\\backslash☃snowman😀emoji";
+            string e3SyncResult = math.Call<string>("echo", e3Payload);
+            Assert(e3SyncResult == e3Payload, $"E3 sync echo mismatch: got '{e3SyncResult}'");
+            string e3AsyncResult = await math.CallAsync<string>("echoAsync", e3Payload);
+            Assert(e3AsyncResult == e3Payload, $"E3 async echo mismatch: got '{e3AsyncResult}'");
+            Debug.Log("[SmokeTest] E3 special-char payload round-trip ✓");
+
+            // --- E4: 150 KB payloads survive arg-encoding (C#→JS) and
+            // return-encoding (JS→C#). Exercises the heap-string + UTF-8 path
+            // at sizes well beyond a normal bridge call.
+            const int largeSize = 150 * 1024;
+            string e4Outbound = new string('A', largeSize);
+            string e4Inbound = math.Call<string>("echo", e4Outbound);
+            Assert(
+                e4Inbound.Length == largeSize && e4Inbound == e4Outbound,
+                $"E4 echo length mismatch: expected {largeSize}, got {e4Inbound.Length}"
+            );
+            string e4JsGenerated = math.Call<string>("bigString", largeSize);
+            Assert(
+                e4JsGenerated.Length == largeSize,
+                $"E4 bigString length mismatch: expected {largeSize}, got {e4JsGenerated.Length}"
+            );
+            Debug.Log($"[SmokeTest] E4 large payload ({largeSize} B) round-trip ✓");
+
+            // --- E5: 1000 callbacks fired in a single sync JS loop arrive in
+            // C# in order and none are dropped. Pushes the rapid-fire path
+            // well past V3's 5-callback baseline.
+            var e5Received = new List<int>();
+            using var e5Cb = BridgeCallback.Wrap<int>(e5Received.Add);
+            using var e5Remove = await math.CallAsync<JsFunction>("addTickListener", e5Cb);
+            const int e5Count = 1000;
+            await math.CallAsync("invokeTickN", e5Count);
+            Assert(
+                e5Received.Count == e5Count,
+                $"E5 callback count: expected {e5Count}, got {e5Received.Count}"
+            );
+            for (int i = 0; i < e5Count; i++)
+                Assert(e5Received[i] == i, $"E5 position {i} expected {i}, got {e5Received[i]}");
+            await e5Remove.CallAsync();
+            Debug.Log($"[SmokeTest] E5 rapid-fire {e5Count} callbacks ✓");
+
             Debug.Log("[SmokeTest] All smoke tests passed!");
         }
 

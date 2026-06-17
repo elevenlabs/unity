@@ -58,6 +58,22 @@ export function EL_SmokeTest_RegisterMathFactory(): void {
 
       // V4 variant: returns a JS function that adds `n` to its argument.
       makeAdder: (n: number) => (x: number) => n + x,
+
+      // Edge-case helpers — used by BridgePrimitiveSmokeTest section E1-E5.
+
+      // E3/E4: echoes its argument back unchanged. Sync version round-trips
+      // through JSON.stringify in EL_ObjectCallSync, covering special chars
+      // (colons, newlines, quotes, Unicode) and large payloads in one direction.
+      echo: (value: unknown) => value,
+
+      // E4: same as echo via the async settle channel — exercises the DynCall
+      // payload buffer at sizes well beyond a typical call.
+      echoAsync: (value: unknown) => Promise.resolve(value),
+
+      // E4: generates a string of the requested length on the JS side so C#
+      // can verify large JS→C# returns without first having to send the bytes.
+      // Uses a repeating ASCII pattern so size dominates the comparison.
+      bigString: (length: number) => "x".repeat(length),
     };
   });
 }

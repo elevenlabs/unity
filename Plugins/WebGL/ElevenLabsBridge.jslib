@@ -405,7 +405,10 @@ var library = (function() {
 					const lns = [...listeners];
 					for (let i = 0; i < count; i++) for (const cb of lns) cb(i);
 				},
-				makeAdder: (n) => (x) => n + x
+				makeAdder: (n) => (x) => n + x,
+				echo: (value) => value,
+				echoAsync: (value) => Promise.resolve(value),
+				bigString: (length) => "x".repeat(length)
 			};
 		});
 	}
