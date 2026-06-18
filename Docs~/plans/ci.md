@@ -1,21 +1,48 @@
 # CI Plan — Test Surface, Credentials, Workflow Shape
 
-## Status — 2026-06-17
+## Status — 2026-06-18
 
-**Unity lanes are BLOCKED pending a response from Unity support** on
-whether the ElevenLabs Industry org can host a CI bot user without
-consuming a paid seat. Initial attempt used a Unity Service Account,
-but those issue API-only credentials (Key ID + Secret, HTTP Basic)
-that cannot activate the Unity Editor inside game-ci's Docker
-container — game-ci needs a real Unity ID with email + password +
-serial. A regular org member would consume a seat, which conflicts
-with the 1-seat Industry trial. Email out to Unity contact 2026-06-17
-asking about a build-user / CI-bot tier. See "Credential-type detour"
-below for the full path through this trap so it doesn't get re-walked
-on the next revisit.
+**Unity lanes are UNBLOCKED — Option A (Industry serial) is active.**
+Repo secrets `UNITY_EMAIL` / `UNITY_PASSWORD` / `UNITY_SERIAL` are
+configured. The Service Account placeholder secrets are deleted.
+Task 5.3.2 is complete; 5.3.3 is the next workflow to land.
 
-The **lint lane** (no Unity, no secrets) remains unblocked and can
-land independently as task 5.3.1.
+History (kept terse so the trap-paths don't get re-walked):
+
+- **Round 1, 2026-06-17.** Asked Unity whether the Industry org
+  could host a CI bot user without consuming a paid seat.
+- **Round 2 reply, 2026-06-18.** Unity pointed at **Build Server
+  licenses** (included in the Industry trial), distributed via a
+  self-hosted Unity **Licensing Server**. That's Option C below, and
+  it's infeasible at this project's scale — single maintainer,
+  GitHub-hosted runners only, no always-on infrastructure (the
+  License Server is hardware-bound to its registration machine, so
+  the "boot inside the Actions job" pattern doesn't work either).
+- **Resolution, 2026-06-18 (independent of Unity's reply).** The
+  Industry trial exposes a serial via the Unity ID web dashboard
+  (Unity ID → My Seats → reveal serial). That serial works with
+  game-ci's standard Pro/Plus serial-activation flow — same shape
+  the action has supported for years. No further Unity
+  correspondence needed; a previously drafted round-3 follow-up
+  asking about ephemeral / Unity-hosted Licensing Server delivery
+  was never sent because the trial serial closed the loop.
+
+One trap-path confirmed dead and documented below so it doesn't
+get re-walked:
+
+- **Service Accounts** (Key ID + Secret) cannot activate the Editor
+  — wrong credential system entirely (see "Credential-type detour 1").
+
+A second documented-but-corrected detour:
+
+- **Industry uses Named User Licensing in normal Hub operation**,
+  which initially looked like it ruled out the serial flow entirely.
+  It doesn't, for the Industry **trial** specifically — see
+  "Credential-type detour 2" for the corrected reasoning and the
+  open question about what happens at trial conversion.
+
+The **lint lane** (no Unity, no secrets) has landed as task 5.3.1
+and is unaffected.
 
 ## Goal
 
@@ -54,7 +81,7 @@ which pulls a ~7 GB Docker image and activates a Unity license.
 Once the WebGL bundle exists, the Playwright Chromium harness runs in
 under 5 seconds.
 
-## Credential-type detour — Unity Service Accounts are NOT for Editor activation
+## Credential-type detour 1 — Unity Service Accounts are NOT for Editor activation
 
 A trap worth documenting before the recommendation, because we walked
 into it on 2026-06-17 and it ate a round-trip. Unity has two
@@ -80,6 +107,41 @@ artifact. That's a separate workflow shape (not game-ci) and is
 build-only — it doesn't run Edit Mode tests. Path noted but not
 expanded; not the current direction.
 
+## Credential-type detour 2 — Industry uses NUL in normal operation, but the trial exposes a serial
+
+A second detour that surfaced on 2026-06-18 and was then partially
+corrected the same day. Unity has two licensing **models**
+(orthogonal to the credential-system distinction above):
+
+| Model | How it activates | Tiers using it |
+|---|---|---|
+| **Named User Licensing (NUL)** | Sign in via Unity Hub → entitlement auto-binds to the Unity ID. | Industry, Enterprise, modern Pro (normal day-to-day Hub flow) |
+| **Serial / ULF-based licensing** | Activate via serial key (`XX-XXXX-XXXX-XXXX-XXXX-XXXX`) through Unity Hub or CLI; Personal seats export a ULF instead. | Legacy Pro/Plus, the Industry **trial** (serial revealed in the Unity ID web dashboard), Personal (ULF) |
+
+The initial reading was "Industry is NUL-only, so no serial exists
+for `UNITY_SERIAL` to hold, so Option A doesn't apply." That's true
+of normal Industry Hub sign-in, but it missed an empirical fact:
+the Industry **trial** in fact does expose a serial via the Unity ID
+web dashboard (Unity ID → My Seats → reveal serial). The serial
+activates the seat through game-ci's standard Pro/Plus serial flow,
+same as legacy Pro. Option A is therefore viable for the trial
+window; the maintainer has confirmed this by configuring the secret
+and the activation path opens for the duration of the trial.
+
+**Open question for the next revisit:** when the trial converts to
+paid Industry (or expires unconverted), does the same Unity ID
+still expose a serial in the web dashboard, or does the
+entitlement flip to strict NUL-only operation that requires a
+Licensing Server? If the latter, this section's earlier conclusion
+turns out to be correct for paid Industry — and the project would
+need to fall back to Option B or accept Option C's infrastructure
+cost. The calendar reminder around the trial expiry (2026-07-19) is
+the gate.
+
+Personal seats still use the older ULF export path, which is why
+Option B (separate CI Unity ID holding a free Personal seat) is
+documented as the fallback if the trial-serial path closes.
+
 ## Credentials required for the Unity lanes
 
 The repo maintainer has an active **Unity Industry Trial** (org slug
@@ -94,70 +156,79 @@ and Industry seats both use.
 Three activation options follow, recommendation now ordered around the
 serial-based path.
 
-### Option A — Industry serial + dedicated CI Unity ID (recommended, BLOCKED on seat-cost confirmation)
+### Option A — Industry trial serial + maintainer's Unity ID (ACTIVE)
 
-The Industry trial is `UnityPro`-tagged, so game-ci's serial-based
-activation works identically to a Pro/Plus seat. Two activations per
-seat are allowed (Pro tier baseline), so concurrency:2 is the natural
-ceiling — no Personal-seat single-machine contention.
+**Resolution 2026-06-18:** This is the active path. The Industry
+trial exposes a serial via the Unity ID web dashboard, which
+game-ci's standard Pro/Plus serial flow activates against. Secrets
+are configured on the repo; the Service Account placeholders are
+deleted. Trial-conversion behaviour is the open question — see
+"Credential-type detour 2" for the gate.
 
-Credentials should sit on a **dedicated CI Unity ID** invited to the
-ElevenLabs org as a member, not the maintainer's personal Unity ID.
-That isolates the credentials and avoids 2FA conflicts. **Open
-question:** does Industry let us add such a CI member without
-consuming a paid seat? A regular member normally does; Unity Service
-Accounts don't help here (see detour above). Awaiting response from
-Unity support (email out 2026-06-17). Until then, every secret-name
-detail below is provisional.
+For the trial window, we're using the **maintainer's** Unity ID
+directly rather than provisioning a separate CI Unity ID — the trial
+is single-seat and adding a second account doesn't help. If we later
+convert to paid Industry with multiple seats, splitting to a
+dedicated CI identity becomes worthwhile (smaller blast radius if a
+secret leaks; 2FA can stay on for the personal account).
 
-Secrets to add (once unblocked):
+Secrets configured on the repo:
 
 | Secret | Source |
 |---|---|
 | `UNITY_SERIAL` | Serial key from the Unity ID web dashboard, format `XX-XXXX-XXXX-XXXX-XXXX-XXXX`. Treat as sensitive — anyone with the serial + email + password can activate against the seat. |
-| `UNITY_EMAIL` | CI Unity ID email (e.g. `elevenlabs-unity-ci@…`), invited to the ElevenLabs Unity org as a member |
-| `UNITY_PASSWORD` | CI Unity ID password — **must be alphanumeric mixed-case only** (game-ci docs explicitly call out failures on special characters). Easy to satisfy since this account is fresh and not used interactively. |
+| `UNITY_EMAIL` | Maintainer's Unity ID email. |
+| `UNITY_PASSWORD` | Maintainer's Unity ID password — **must be alphanumeric mixed-case only** (game-ci docs explicitly call out failures on special characters). |
 
-The three secrets currently configured on the repo
-(`UNITY_AUTHORIZATION_HEADER`, `UNITY_KEY_ID`, `UNITY_SECRET_KEY`)
-correspond to a Unity Service Account API key (see detour above) and
-will need to be deleted once the real CI Unity ID is provisioned —
-they're not usable for game-ci.
+The three Service Account placeholder secrets that previously
+occupied these slots (`UNITY_AUTHORIZATION_HEADER`, `UNITY_KEY_ID`,
+`UNITY_SECRET_KEY`) have been deleted — they were for the wrong
+credential system (see "Credential-type detour 1").
 
 Operational caveats:
 
 - **Trial expiry 2026-07-19.** When the trial ends, CI breaks until
-  the license converts to paid Industry (rotates the serial), is
-  downgraded to Pro, or the workflow falls back to Option B (Personal
-  seat). Set a calendar reminder for ~3 days before expiry to revisit.
+  the license converts to paid Industry (which may or may not rotate
+  the serial / may or may not flip to NUL-only — see "Credential-type
+  detour 2"), is downgraded to Pro/Plus, or the workflow falls back
+  to Option B (Personal seat on a dedicated CI Unity ID). Set a
+  calendar reminder for ~3 days before expiry to revisit.
 - **Concurrency: 2.** Pro/Industry seats allow up to 2 simultaneous
   activations. The workflow can run two PRs in parallel before
   hitting `LICENSE_ALREADY_IN_USE`. Use
-  `concurrency.group: unity-ci-${{ github.ref }}`,
+  `concurrency.group: unity-tests-${{ github.ref }}`,
   `cancel-in-progress: true` so a force-push doesn't fight against
   itself. No global guard needed for low-throughput cadence; tighten
-  to `group: unity-ci` (no ref suffix) if seat-fighting appears.
+  to `group: unity-tests` (no ref suffix) if seat-fighting appears.
 - **Activation eats one seat slot for the duration of the job.** Pair
   game-ci/unity-test-runner / unity-builder with
   game-ci/unity-return-license at the end of the workflow so the seat
   is freed promptly even when later steps fail (use `if: always()`).
   Without it, an aborted run can leave a seat locked until the
   activation TTL expires.
-- **Service account scope.** Provision with only the rights CI needs
-  — Unity org member, no admin, no billing, no project ownership. A
-  leaked service-account secret then exposes only what the workflow
-  could do anyway, not the broader Unity ID surface.
-- **2FA.** Service accounts let you skip 2FA without weakening the
-  maintainer's personal account. Don't enable 2FA on the service
-  account — game-ci has no app-password flow and the activation will
-  fail.
+- **Using the maintainer's Unity ID directly (trial scope only).**
+  No separate CI Unity ID is provisioned for the trial — the single
+  seat means a second account doesn't help. Blast radius if the
+  secrets leak: anyone with the trio can activate the seat (consuming
+  the one-of-two slot) and use the Unity Editor under the
+  maintainer's identity until the password is rotated. At paid
+  Industry conversion, revisit splitting to a dedicated CI Unity ID.
+- **2FA on the maintainer's account.** game-ci has no app-password
+  flow, so 2FA can't be enabled on the Unity ID whose credentials
+  are in the secrets. If 2FA becomes a security requirement, the
+  workaround is to provision a dedicated CI Unity ID (2FA-off) and
+  invite it into the org — same shape as the Option B fallback,
+  but with the trial serial instead of a Personal ULF.
 
-### Option B — Free Personal seat on a dedicated CI Unity ID
+### Option B — Free Personal seat on a dedicated CI Unity ID (documented fallback, not active)
 
-Fallback if Option A becomes unavailable (trial expiry without
-renewal, organization-policy concerns about exposing the maintainer's
-Unity ID to GitHub Actions secrets). A separate CI-only Unity ID holds
-a free Personal seat; game-ci uses the ULF activation path.
+**Fallback if the trial-serial path closes.** Option A is currently
+active. If trial conversion flips the entitlement to strict NUL-only
+(see "Credential-type detour 2"), or if the trial expires without
+conversion, the next viable path is a separate CI-only Unity ID
+holding a free Personal seat. game-ci uses the standard ULF
+activation flow against `UNITY_LICENSE` / `UNITY_EMAIL` /
+`UNITY_PASSWORD`.
 
 A Unity ID can hold multiple license entitlements. The maintainer
 keeps the Industry trial on their primary ID for local dev; a separate
@@ -186,47 +257,71 @@ Operational caveats:
   (game-ci/unity-license-activate handles this, or run the manual ULF
   refresh annually).
 
-### Option C — Unity License Server (floating Industry seats)
+### Option C — Unity Licensing Server (the official Industry-CI path, INFEASIBLE for this project)
 
-The Unity-official path for Industry tier in CI: stand up a
-self-hosted Unity License Server (Docker container) that issues
-floating seats from the org's Industry pool. game-ci's
-`unityLicensingServer: <url>` input acquires a seat before the build
-and returns it after.
+**Confirmed by Unity 2026-06-18 as the only sanctioned path for
+using Industry entitlements in CI.** Build Server licenses are
+included in the Industry trial seat, are **floating-only by design**,
+and can only be distributed via a Unity Licensing Server that the
+customer operates. game-ci's `unityLicensingServer: <url>` input
+acquires a seat before the build and returns it after.
 
 | Secret | Source |
 |---|---|
-| `UNITY_LICENSING_SERVER_URL` | URL of the self-hosted license server (must be reachable from GitHub runners — either publicly addressable, or a self-hosted runner inside the same network) |
-| `UNITY_SERVICES_CONFIG` | Base64-encoded `services-config.json` issued by the license server admin console |
+| `UNITY_LICENSING_SERVER_URL` | URL of the self-hosted licensing server (must be reachable from CI runners) |
+| `UNITY_SERVICES_CONFIG` | Base64-encoded `services-config.json` issued by the licensing server during setup |
 
-Operational caveats:
+Operational reality for this project (single maintainer, public repo,
+GitHub-hosted runners only):
 
-- Requires Unity Industry admin approval to issue floating seats from
-  the org pool — depends on how the trial converts to a paid plan.
-- Hosting the license server is a real operational concern (DNS, TLS,
-  uptime). Public exposure of the server is the default; a self-hosted
-  GitHub runner inside the same VPC sidesteps that.
-- Costs scale with concurrent activations rather than per-developer.
-- Overkill for the current single-maintainer / low-PR-throughput
-  scenario but the right end state once Industry converts to paid.
+- The Licensing Server is an **ASP.NET HTTP/S service** the customer
+  installs, registers with the Unity ID portal, and operates. There
+  is no Unity-hosted / SaaS version.
+- Setup binds the server license to the **hardware fingerprint**
+  (MAC, CPU) of the registration machine. Cloud-VM hosting is
+  officially unsupported because instance restarts can invalidate
+  the binding and require a Unity Customer Service ticket to reset.
+- Two viable hosting shapes, both blocked at our infrastructure
+  scale:
+  - **Self-hosted GitHub runner** on always-on local hardware (Mac /
+    workstation) with the Licensing Server co-located. We have no
+    self-hosted runner pool and committing to one for a small OSS
+    package isn't justified.
+  - **Publicly addressable Licensing Server** with our own TLS cert,
+    firewall, uptime monitoring. Same maintenance burden plus
+    public-attack-surface concerns.
+- Ephemeral pattern ("boot the Licensing Server inside the GitHub
+  Actions job, acquire a seat, tear down") **does not work** on
+  GitHub-hosted runners — every job runs on a fresh VM with a
+  different hardware fingerprint, and the license archive is bound
+  to the registration machine.
 
-### Option D — Defer Unity CI until the trial converts
+This option is the **right end-state** if the project ever justifies
+self-hosted CI infrastructure (paid Industry conversion + multiple
+maintainers + higher PR throughput), and **not viable now**.
 
-The Industry trial expires 2026-07-19. If the path forward (paid
-Industry, downgrade to Pro, switch to Personal-only) is undecided,
-keep Unity CI manual (the existing local `pnpm --dir TestProject run test`
-+ `bash TestProject/build-webgl.sh` flow) and only land the lint
-workflow now. Revisit once the licensing model is stable.
+### Option D — Defer Unity CI (obsolete; was the state while Options A/B were unresolved)
+
+Kept as a historical anchor only. While the licensing question was
+open (2026-06-17 → 2026-06-18), Unity CI stayed manual via the local
+`pnpm --dir TestProject run test` + `bash TestProject/build-webgl.sh`
+flow and only the lint workflow ran in GitHub Actions. Superseded by
+Option A on 2026-06-18.
 
 ### Recommendation
 
-**Option A (Industry serial + dedicated CI Unity ID)** is the target
-shape, pending Unity confirmation that the CI member can be added
-without a seat cost. If Unity confirms a free build-user pattern,
-proceed directly. If not, fall through to Option B (Personal seat on
-a separate Unity ID, free, concurrency:1) — slightly worse ergonomics
-but unblocks the Unity lanes immediately. Option C stays as the
-long-term right-shape for paid Industry with parallel throughput.
+**Option A — Industry trial serial + maintainer's Unity ID.** Active
+as of 2026-06-18; secrets configured. Decision tree at trial expiry
+(2026-07-19) or if conversion flips to NUL-only:
+
+- **Option B** if the trial-serial path closes (free Personal seat
+  on a dedicated CI Unity ID). Lower throughput (concurrency:1) and
+  the ergonomic cost of maintaining a second Unity ID, but free,
+  infrastructure-light, and works on GitHub-hosted runners out of
+  the box.
+- **Option C** if the project ever justifies self-hosted CI
+  infrastructure (paid Industry conversion + multiple maintainers +
+  higher PR throughput). Right long-term shape, infeasible now.
 
 ## Recommended workflow shape
 
@@ -275,22 +370,13 @@ lanes.
 
 ## Open decisions
 
-1. **License type — BLOCKED on Unity response 2026-06-17.** Target
-   shape is Option A (Industry serial + dedicated CI Unity ID). Open
-   question to Unity: can the org host a CI bot member without
-   consuming a paid seat? Falls back to Option B (Personal seat on a
-   separate Unity ID) if the answer is no. Either way the maintainer
-   will need to:
-   - Provision the CI Unity ID with minimum rights (member only, no
-     admin/billing); set an alphanumeric mixed-case password; leave
-     2FA off
-   - Delete the current placeholder secrets
-     (`UNITY_AUTHORIZATION_HEADER`, `UNITY_KEY_ID`, `UNITY_SECRET_KEY`)
-     — those are for the wrong credential system (see detour)
-   - Add `UNITY_SERIAL` / `UNITY_EMAIL` / `UNITY_PASSWORD` as the
-     real secrets
-   - Calendar a 2026-07-16 (3 days pre-expiry) reminder to rotate
-     `UNITY_SERIAL` if the trial converts to a paid Industry/Pro seat
+1. ~~**License type.**~~ **Resolved 2026-06-18:** Option A active
+   via the Industry trial serial; `UNITY_EMAIL` / `UNITY_PASSWORD` /
+   `UNITY_SERIAL` configured; Service Account placeholders deleted.
+   Re-decide at trial expiry (2026-07-19): if paid Industry
+   conversion still exposes a serial, stay on Option A; if it flips
+   to strict NUL-only, fall back to Option B (provision a CI-only
+   Unity ID, generate a Personal ULF, swap the secrets).
 
 2. ~~**Repo visibility.**~~ **Resolved 2026-06-17:** repo is going
    public. GitHub Actions minutes are unlimited on public repos, so
@@ -310,9 +396,9 @@ lanes.
 
 ## Implementation order
 
-- [x] **5.3.1 — Lint workflow.** Lands `.github/workflows/lint.yml`. No secrets needed; **unblocked**, can land independently of the Unity-credentials answer.
-- [ ] **5.3.2 — Repo secrets configured.** Maintainer provisions the CI Unity ID (per Option A or B once Unity responds), deletes the current Service Account placeholder secrets, adds `UNITY_SERIAL` / `UNITY_EMAIL` / `UNITY_PASSWORD`. **Blocked on Unity response.**
-- [ ] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` using game-ci/unity-test-runner@v4. Depends on 5.3.2.
+- [x] **5.3.1 — Lint workflow.** Landed `.github/workflows/lint.yml`. No secrets needed.
+- [x] **5.3.2 — Repo secrets configured.** `UNITY_EMAIL` / `UNITY_PASSWORD` / `UNITY_SERIAL` configured against the maintainer's Unity ID + Industry trial serial; Service Account placeholders (`UNITY_AUTHORIZATION_HEADER`, `UNITY_KEY_ID`, `UNITY_SECRET_KEY`) deleted.
+- [ ] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` using game-ci/unity-test-runner@v4.
 - [ ] **5.3.4 — Integration workflow.** `.github/workflows/integration.yml` chaining unity-builder + Playwright. Depends on 5.3.3 (proves the license activation works).
 
 Each task lands as its own commit and is independently revertable.
