@@ -326,7 +326,22 @@ as of 2026-06-18; secrets configured. Decision tree at trial expiry
 ## Recommended workflow shape
 
 Three separate workflow files, each with its own runtime profile and
-secrets requirements:
+secrets requirements.
+
+**Org-level Actions allowlist (constraint).** The `elevenlabs` org
+restricts third-party Actions via `elevenlabs-terraform`
+`projects/eleven-github/org_actions.tf` — `github_owned_allowed = true`
+covers `actions/*` and `pnpm/action-setup` is on the named allowlist,
+but anything outside that list (including the `game-ci/*` family) fails
+the workflow at startup with `startup_failure` in 0 seconds, before any
+job queues. Per the file's "Less trustworthy actions are pinned to a
+specific commit" convention, each `game-ci/*` action used by the Unity
+lanes must be added pinned to its release commit SHA, and the
+workflow's `uses:` must reference the same SHA so the allowlist match
+is literal. `game-ci/unity-test-runner`, `game-ci/unity-builder`, and
+`game-ci/unity-return-license` are queued for the allowlist via
+elevenlabs-terraform PR #9064; until that's applied, the Unity Edit
+Mode workflow fails at startup even though the file itself is correct.
 
 ### `.github/workflows/lint.yml` (no secrets)
 
@@ -343,16 +358,17 @@ secrets requirements:
 ### `.github/workflows/unity-tests.yml` (Unity secrets)
 
 - Trigger: every PR + push to `main`
-- Concurrency: `group: unity-${{ github.ref }}`, `cancel-in-progress: true`
+- Concurrency: `group: unity-tests-${{ github.ref }}`, `cancel-in-progress: true`
   (so a force-push doesn't queue two activations)
 - Runner: `ubuntu-latest` (game-ci needs Linux for the Docker images)
-- Action: `game-ci/unity-test-runner@v4`
+- Action: `game-ci/unity-test-runner` pinned to the v4.3.1 commit SHA
+  (`0ff419b...`) — matches the org allowlist entry
 - Inputs:
   - `unityVersion: 6000.3.6f1`
-  - `testMode: EditMode`
+  - `testMode: editmode`
   - `projectPath: TestProject`
-  - `customImage: unityci/editor:ubuntu-6000.3.6f1-webgl-3` (confirmed available, ~7 GB)
-- Cache: `actions/cache@v4` on `TestProject/Library/` keyed by `Packages/packages-lock.json` + `ProjectSettings/ProjectSettings.asset`
+  - `customImage: unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2` (pinned)
+- Cache: `actions/cache@v5` on `TestProject/Library/` keyed by `Packages/packages-lock.json` + `ProjectSettings/ProjectSettings.asset`
 - Expected wall time: 8-15 minutes (mostly the Library cache miss on first run, then ~3 minutes warm)
 
 ### `.github/workflows/integration.yml` (Unity secrets)
@@ -360,7 +376,11 @@ secrets requirements:
 - Trigger: every PR + push to `main`
 - Same concurrency guard as unity-tests
 - Two jobs in sequence:
-  1. **build-webgl** — `game-ci/unity-builder@v4` with `targetPlatform: WebGL`, uploads `TestProject/Build/WebGL/` as a workflow artifact (~7 MB compressed)
+  1. **build-webgl** — `game-ci/unity-builder` pinned to the v5.0.0
+     commit SHA (`d829bfc...`, pre-allowlisted via the same
+     `elevenlabs-terraform` PR #9064 as unity-test-runner) with
+     `targetPlatform: WebGL`, uploads `TestProject/Build/WebGL/` as
+     a workflow artifact (~7 MB compressed)
   2. **integration-test** — `needs: build-webgl`, downloads artifact, runs `pnpm --dir IntegrationTests~ install && run setup && run test`
 - Expected wall time: ~15 minutes warm, ~25 minutes cold
 
@@ -398,7 +418,7 @@ lanes.
 
 - [x] **5.3.1 — Lint workflow.** Landed `.github/workflows/lint.yml`. No secrets needed.
 - [x] **5.3.2 — Repo secrets configured.** `UNITY_EMAIL` / `UNITY_PASSWORD` / `UNITY_SERIAL` configured against the maintainer's Unity ID + Industry trial serial; Service Account placeholders (`UNITY_AUTHORIZATION_HEADER`, `UNITY_KEY_ID`, `UNITY_SECRET_KEY`) deleted.
-- [ ] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` using game-ci/unity-test-runner@v4.
-- [ ] **5.3.4 — Integration workflow.** `.github/workflows/integration.yml` chaining unity-builder + Playwright. Depends on 5.3.3 (proves the license activation works).
+- [ ] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` landed on main (uses game-ci/unity-test-runner pinned to v4.3.1 SHA). Verification gated on elevenlabs-terraform PR #9064 (org Actions allowlist) + elevenlabs/unity PR #3 (which switches the workflow `uses:` from `@v4` to the SHA so the allowlist match is literal). Until terraform applies, the workflow returns `startup_failure` in 0s. Check off once the first non-startup_failure run succeeds.
+- [ ] **5.3.4 — Integration workflow.** `.github/workflows/integration.yml` chaining unity-builder + Playwright. Depends on 5.3.3 (proves the license activation works). unity-builder is pre-allowlisted in the same terraform PR.
 
 Each task lands as its own commit and is independently revertable.
