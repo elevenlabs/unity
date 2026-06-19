@@ -14,10 +14,24 @@
 
 name: Integration tests
 
+# `paths-ignore` skips the (~5–17 min) WebGL build whenever EVERY
+# changed file falls under one of these patterns — i.e. docs-only PRs
+# and main pushes pay no integration-test cost. Only added to this
+# workflow; lint.yml and unity-tests.yml stay unfiltered because both
+# are required status checks under branch protection (a skipped
+# required check is "expected but never reported" → PR blocked).
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "Docs~/**"
+      - "**.md"
+      - ".claude/**"
   pull_request:
+    paths-ignore:
+      - "Docs~/**"
+      - "**.md"
+      - ".claude/**"
 
 # Same scoping as unity-tests.yml: a force-push cancels the previous
 # run on the branch rather than fighting itself for a seat. Distinct
