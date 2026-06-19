@@ -9,25 +9,29 @@ isn't gated on a JS SDK release whenever the protocol changes.
 
 Wire protocol for the Conversational AI WebSocket.
 
-| Field         | Value                                                                    |
-| ------------- | ------------------------------------------------------------------------ |
-| Upstream repo | `elevenlabs/xi` (private)                                                |
-| Upstream path | `docs/convai-asyncapi.yml`                                               |
-| Pinned commit | `49a9dc283ad663910870b4308897e6d3a7ba73d7`                               |
-| Commit date   | 2026-06-11                                                               |
-| Source branch | `cursor/fix-convai-asyncapi-ref-c38c` ([PR #37707][pr] - not yet merged) |
+| Field         | Value                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------- |
+| Upstream repo | `elevenlabs/xi` (private)                                                               |
+| Upstream path | `docs/convai-asyncapi.yml`                                                              |
+| Pinned commit | `3b73154ddaf2176e297c037b9af8e69231b8d42d`                                              |
+| Commit date   | 2026-06-19                                                                              |
+| Source branch | `cursor/fix-convai-asyncapi-ref-c38c` ([PR #37707][pr] - rebased onto post-#38542 main) |
 
 [pr]: https://github.com/elevenlabs/xi/pull/37707
 
-> The current pin is the head of an open PR (it contains the fix for the
-> `DynamicVariableNestedValueType` ref needed to parse the spec). Re-pin to
-> the merged-to-`main` commit once #37707 lands.
+> The current pin is the head of an open PR. It carries both the
+> `DynamicVariableNestedValueType` ref fix (needed to parse the spec) and the
+> `feedback` outgoing message declared by the merged [#38542][feedback-pr],
+> picked up via a rebase onto post-#38542 `main`. Re-pin to the
+> merged-to-`main` commit once #37707 lands.
+
+[feedback-pr]: https://github.com/elevenlabs/xi/pull/38542
 
 Verify the vendored content matches the pin:
 
 ```
 cd /path/to/xi
-git show 49a9dc283ad663910870b4308897e6d3a7ba73d7:docs/convai-asyncapi.yml \
+git show 3b73154ddaf2176e297c037b9af8e69231b8d42d:docs/convai-asyncapi.yml \
   | diff - /path/to/elevenlabs-unity/Codegen~/schemas/convai-asyncapi.yml
 ```
 

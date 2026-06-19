@@ -38,6 +38,7 @@ Console.WriteLine(Roundtrip(new Ping()));
 
 // --- OutgoingSocketEvent subtypes ---
 Console.WriteLine(Roundtrip(new UserAudioChunk()));
+Console.WriteLine(Roundtrip(new Feedback()));
 Console.WriteLine(Roundtrip(new UserMessage()));
 Console.WriteLine(Roundtrip(new UserActivity()));
 Console.WriteLine(Roundtrip(new MultimodalMessage()));

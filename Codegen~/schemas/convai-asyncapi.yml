@@ -51,6 +51,7 @@ channels:
       message:
         oneOf:
         - $ref: '#/components/messages/UserAudioChunk'
+        - $ref: '#/components/messages/Feedback'
         - $ref: '#/components/messages/UserMessage'
         - $ref: '#/components/messages/UserActivity'
         - $ref: '#/components/messages/MultimodalMessage'
@@ -127,6 +128,12 @@ channels:
             agent_response: I'd be happy to help with your voice cloning project. Could you tell me what specific aspects
               you need assistance with?
             event_id: 43
+      - type: publish
+        messageId: Feedback
+        value:
+          type: feedback
+          score: like
+          event_id: 43
       - type: subscribe
         messageId: AudioResponse
         value:
@@ -269,6 +276,11 @@ components:
       description: Send audio data chunks from the user to the server for processing.
       payload:
         $ref: '#/components/schemas/UserAudioChunk'
+    Feedback:
+      name: Feedback
+      description: Feedback score for a specific agent response event.
+      payload:
+        $ref: '#/components/schemas/Feedback'
     UserMessage:
       name: User Message
       description: Text message sent by the user to the conversation.
@@ -569,6 +581,23 @@ components:
           type: string
       required:
       - user_audio_chunk
+      type: object
+    Feedback:
+      properties:
+        type:
+          x-fern-type: literal<"feedback">
+        event_id:
+          description: ID of the agent response event being rated.
+          type: integer
+        score:
+          enum:
+          - like
+          - dislike
+          type: string
+          description: Feedback score for the referenced agent response.
+      required:
+      - event_id
+      - score
       type: object
     UserMessage:
       properties:

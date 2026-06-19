@@ -17,6 +17,18 @@ namespace ElevenLabs.Protocol
         public string UserAudioChunkData { get; set; } = "";
     }
 
+    public class Feedback : OutgoingSocketEvent
+    {
+        [JsonProperty("type")]
+        public string Type { get; init; } = "feedback";
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+
+        [JsonProperty("score")]
+        public string Score { get; set; } = "";
+    }
+
     public class UserMessage : OutgoingSocketEvent
     {
         [JsonProperty("type")]
