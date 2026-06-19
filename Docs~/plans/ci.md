@@ -1,11 +1,28 @@
 # CI Plan — Test Surface, Credentials, Workflow Shape
 
-## Status — 2026-06-18
+## Status — 2026-06-19
 
-**Unity lanes are UNBLOCKED — Option A (Industry serial) is active.**
-Repo secrets `UNITY_EMAIL` / `UNITY_PASSWORD` / `UNITY_SERIAL` are
-configured. The Service Account placeholder secrets are deleted.
-Task 5.3.2 is complete; 5.3.3 is the next workflow to land.
+**All three CI workflows are live and branch protection is on `main`.**
+Lint (5.3.1), Unity Edit Mode (5.3.3), and the integration WebGL build
++ Playwright lane (5.3.4) all run on every PR and push to `main`.
+Branch protection requires lint + Edit Mode green to merge a PR;
+integration is informational (see decision 3). Trial-serial licensing
+(Option A) is active until 2026-07-19.
+
+**Outstanding work:**
+
+1. **PR #4 — first green Integration run.** The `Build WebGL` check is
+   mid-cold-cache (~25 min). On green, tick 5.3.4 and squash-merge.
+   That's the last task in the implementation order.
+2. **Repo visibility flip to public.** Blocked at the org level by the
+   `elevenlabs` ruleset "No public repos, no delete/transfers" (id
+   `4126218`). Needs a platform-team exception via
+   `elevenlabs-terraform`. Not a CI-plan task; tracked as a follow-up
+   in decision 2.
+3. **Trial expiry re-decision, 2026-07-19.** If conversion still
+   exposes a serial, stay on Option A. If it flips to NUL-only, fall
+   back to Option B (Personal-seat CI Unity ID). Calendar gate; no
+   action until then.
 
 History (kept terse so the trap-paths don't get re-walked):
 
@@ -41,19 +58,12 @@ A second documented-but-corrected detour:
   "Credential-type detour 2" for the corrected reasoning and the
   open question about what happens at trial conversion.
 
-The **lint lane** (no Unity, no secrets) has landed as task 5.3.1
-and is unaffected.
-
 ## Goal
 
 Run the existing local test surface in GitHub Actions on every PR and on
 pushes to `main`. Land the workflow incrementally — the no-Unity checks
 first (they're free and self-contained), then the Unity-gated jobs once
 the license decision is made.
-
-This doc is the gating analysis. No `.github/workflows/*.yml` exists
-yet; landing one needs a license-type decision from a repo maintainer
-(see "Open decisions" at the bottom).
 
 ## Test surface inventory
 
