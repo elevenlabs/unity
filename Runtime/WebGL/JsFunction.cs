@@ -6,7 +6,7 @@ using UnityEngine;
 namespace ElevenLabs.WebGL
 {
     /// <summary>Handle to a JavaScript function reference returned from a bridge call.</summary>
-    public sealed class JsFunction : IDisposable, IAsyncDisposable
+    public sealed class JsFunction : IJsFunction, IAsyncDisposable
     {
         private bool _disposed;
 

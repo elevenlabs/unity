@@ -29,7 +29,7 @@ namespace ElevenLabs.WebGL.Bridged
     {
         private static readonly IncomingSocketEventConverter MessageConverter = new();
 
-        private readonly JsObject _connection;
+        private readonly IJsObject _connection;
         private readonly BridgeCallback _onMessageCallback;
         private readonly BridgeCallback _onDisconnectCallback;
         private readonly BridgeCallback _onModeChangeCallback;
@@ -49,7 +49,12 @@ namespace ElevenLabs.WebGL.Bridged
         public event Action<DisconnectionDetails>? OnDisconnect;
         public event Action<Mode>? OnModeChange;
 
-        internal BridgedWebRTCConnection(JsObject connection)
+        /// <summary>
+        /// Wraps an already-created JS <c>WebRTCConnection</c> handle. Typed
+        /// against <see cref="IJsObject"/> so router-level tests can substitute
+        /// a stub without going through the WebGL primitives.
+        /// </summary>
+        internal BridgedWebRTCConnection(IJsObject connection)
         {
             _connection = connection ?? throw new ArgumentNullException(nameof(connection));
 
@@ -93,14 +98,14 @@ namespace ElevenLabs.WebGL.Bridged
         /// <see cref="Conversation"/> expects.
         /// </summary>
         internal BridgedInputController GetCoupledInput() =>
-            new(_connection.Get<JsObject>("input"));
+            new(_connection.Get<IJsObject>("input"));
 
         /// <summary>
         /// Returns a bridged wrapper over the connection's pre-wired output
         /// controller. See <see cref="GetCoupledInput"/> for context.
         /// </summary>
         internal BridgedOutputController GetCoupledOutput() =>
-            new(_connection.Get<JsObject>("output"));
+            new(_connection.Get<IJsObject>("output"));
 
         private void HandleJsMessage(string payload)
         {

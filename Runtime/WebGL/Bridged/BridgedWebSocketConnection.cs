@@ -26,11 +26,20 @@ namespace ElevenLabs.WebGL.Bridged
     {
         private static readonly IncomingSocketEventConverter MessageConverter = new();
 
-        private readonly JsObject _connection;
+        private readonly IJsObject _connection;
         private readonly BridgeCallback _onMessageCallback;
         private readonly BridgeCallback _onDisconnectCallback;
         private readonly BridgeCallback _onModeChangeCallback;
+        private IJsFunction? _audioDetach;
         private bool _disposed;
+
+        // Exposed for BridgedSession.StartAsync — attachDefaultAudio re-wires
+        // JS-side `connection.onMessage` through `withoutAudioPayload`, and
+        // passing the SAME BridgeCallback (rather than allocating a parallel
+        // one) keeps one C# delegate / one disposal site even though the JS
+        // subscription is set twice during setup (once in this constructor,
+        // once by attachDefaultAudio — the latter wins).
+        internal BridgeCallback IncomingMessageCallback => _onMessageCallback;
 
         public string ConversationId => _connection.Get<string>("conversationId") ?? string.Empty;
 
@@ -51,8 +60,10 @@ namespace ElevenLabs.WebGL.Bridged
         /// caller is responsible for constructing <paramref name="connection"/>
         /// via <c>JsBridge.InvokeFactoryAsync&lt;JsObject&gt;("createWebSocketConnection", config)</c>
         /// — this wrapper takes ownership of the handle from that point on.
+        /// Typed against <see cref="IJsObject"/> so router-level tests can
+        /// substitute a stub without going through the WebGL primitives.
         /// </summary>
-        internal BridgedWebSocketConnection(JsObject connection)
+        internal BridgedWebSocketConnection(IJsObject connection)
         {
             _connection = connection ?? throw new ArgumentNullException(nameof(connection));
 
@@ -77,6 +88,25 @@ namespace ElevenLabs.WebGL.Bridged
             _connection.Call("sendMessage", message);
         }
 
+        /// <summary>
+        /// Register the audio-wiring detach handle returned from the
+        /// JS <c>attachDefaultAudio</c> factory. <see cref="Close"/> invokes it
+        /// before the JS-side <c>connection.close()</c> so
+        /// <c>attachInputToConnection</c> / <c>attachConnectionToOutput</c>
+        /// see a live transport during their detach. Idempotent at most once
+        /// per instance; calling twice is a setup bug.
+        /// </summary>
+        internal void AttachAudioDetach(IJsFunction detach)
+        {
+            if (detach == null)
+                throw new ArgumentNullException(nameof(detach));
+            if (_audioDetach != null)
+                throw new InvalidOperationException(
+                    "Audio detach handle already attached to this connection."
+                );
+            _audioDetach = detach;
+        }
+
         public void Close()
         {
             if (_disposed)
@@ -88,6 +118,22 @@ namespace ElevenLabs.WebGL.Bridged
             // leak entries in the JS registry.
             try
             {
+                // Sever JS-internal audio wiring first so the input controller
+                // stops feeding bytes into the connection before we tear it
+                // down. Failure here doesn't block the close — finally still
+                // runs and releases every other handle.
+                if (_audioDetach != null)
+                {
+                    try
+                    {
+                        _audioDetach.Call();
+                    }
+                    finally
+                    {
+                        _audioDetach.Dispose();
+                        _audioDetach = null;
+                    }
+                }
                 _connection.Call("close");
             }
             finally

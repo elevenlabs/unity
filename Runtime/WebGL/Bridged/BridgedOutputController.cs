@@ -18,10 +18,15 @@ namespace ElevenLabs.WebGL.Bridged
     /// </remarks>
     internal sealed class BridgedOutputController : IOutputController
     {
-        private readonly JsObject _output;
+        private readonly IJsObject _output;
         private bool _disposed;
 
-        internal BridgedOutputController(JsObject output)
+        /// <summary>
+        /// Wraps an already-created JS <c>MediaDeviceOutput</c> handle. Typed
+        /// against <see cref="IJsObject"/> so router-level tests can substitute
+        /// a stub without going through the WebGL primitives.
+        /// </summary>
+        internal BridgedOutputController(IJsObject output)
         {
             _output = output ?? throw new System.ArgumentNullException(nameof(output));
         }

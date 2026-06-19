@@ -18,12 +18,17 @@ namespace ElevenLabs.WebGL.Bridged
     /// </remarks>
     internal sealed class BridgedInputController : IInputController
     {
-        private readonly JsObject _input;
+        private readonly IJsObject _input;
         private bool _disposed;
 
         public bool IsMuted => _input.Get<bool>("isMuted");
 
-        internal BridgedInputController(JsObject input)
+        /// <summary>
+        /// Wraps an already-created JS <c>MediaDeviceInput</c> handle. Typed
+        /// against <see cref="IJsObject"/> so router-level tests can substitute
+        /// a stub without going through the WebGL primitives.
+        /// </summary>
+        internal BridgedInputController(IJsObject input)
         {
             _input = input ?? throw new System.ArgumentNullException(nameof(input));
         }

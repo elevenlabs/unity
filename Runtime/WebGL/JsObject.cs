@@ -6,7 +6,7 @@ using UnityEngine;
 namespace ElevenLabs.WebGL
 {
     /// <summary>Handle to a remote JavaScript object whose lifetime is owned by C#.</summary>
-    public sealed class JsObject : IDisposable, IAsyncDisposable
+    public sealed class JsObject : IJsObject, IAsyncDisposable
     {
         private bool _disposed;
 
