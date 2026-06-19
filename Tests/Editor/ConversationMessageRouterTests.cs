@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using ElevenLabs.Agents;
 using ElevenLabs.Protocol;
+using ElevenLabs.WebGL;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -931,11 +932,30 @@ namespace ElevenLabs.WebGL.Tests
         // Lifecycle ---------------------------------------------------------
 
         [Test]
-        public void StartSessionAsync_Throws_NotImplementedException()
+        public void StartSessionAsync_NullOptions_ThrowsArgumentNull()
         {
-            Assert.Throws<NotImplementedException>(() =>
-                Conversation.StartSessionAsync(new ConversationOptions())
+            Assert.Throws<ArgumentNullException>(() => Conversation.StartSessionAsync(null!));
+        }
+
+        [Test]
+        public void StartSessionAsync_OnNonWebGL_RoutesThroughBridge_PropagatesBridgeException()
+        {
+            // BridgedSessionLauncher's [InitializeOnLoadMethod] registers
+            // BridgedSession.StartAsync as Conversation.SessionFactory at
+            // Editor load, so a static StartSessionAsync call dispatches into
+            // the bridge — which, off-WebGL, settles the first factory call
+            // with a BridgeException carrying the DllImport's
+            // PlatformNotSupportedException. If this assertion changes shape,
+            // the WebGL launcher has stopped registering its factory.
+            var task = Conversation.StartSessionAsync(
+                new ConversationOptions { AgentId = "agent-test" }
             );
+            Assert.Throws<BridgeException>(() => task.GetAwaiter().GetResult());
+            // Stale registry state can bleed into sibling tests; clean up
+            // both the promise that surfaced the failure and any callback
+            // BridgedWebSocketConnection registered before the throw.
+            ElevenLabs.WebGL.Internal.PromiseRegistry.ResetForTests();
+            ElevenLabs.WebGL.Internal.CallbackRegistry.ResetForTests();
         }
 
         [Test]

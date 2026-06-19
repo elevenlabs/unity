@@ -174,6 +174,13 @@ namespace ElevenLabs.Agents
 
         // Lifecycle -----------------------------------------------------------
 
+        // Set by the active platform's session launcher (WebGL:
+        // BridgedSessionLauncher; native: Phase 7) via RuntimeInitializeOnLoad
+        // + InitializeOnLoad. Last-write-wins; in practice only one launcher
+        // ships per build because each platform asmdef's includePlatforms
+        // gates which assembly is included.
+        internal static Func<ConversationOptions, Awaitable<Conversation>>? SessionFactory;
+
         /// <summary>
         /// Open a session against the agent identified by <paramref name="options"/>.
         /// Returns once the underlying transport handshake completes, audio
@@ -183,14 +190,18 @@ namespace ElevenLabs.Agents
         /// <param name="options">Session inputs — agent id, transport, device selection.</param>
         public static Awaitable<Conversation> StartSessionAsync(ConversationOptions options)
         {
-            _ = options;
-            // Phase 5.3 (BridgedSession orchestration) wires the WebGL branch
-            // here via #if UNITY_WEBGL; Phase 7 wires the native branch. The
-            // skeleton intentionally throws so callers don't get a half-built
-            // Conversation back.
-            throw new NotImplementedException(
-                "StartSessionAsync is wired in Phase 5.4 — see Docs~/plans/plan-b.md."
-            );
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+            var factory = SessionFactory;
+            if (factory == null)
+            {
+                throw new InvalidOperationException(
+                    "No session factory is registered for the current platform. "
+                        + "Ensure ElevenLabs.Agents.WebGL (or the native impl in v0.2) is "
+                        + "included in your build target."
+                );
+            }
+            return factory(options);
         }
 
         /// <summary>Tear down the session: close the transport, release the audio devices, idempotent.</summary>
