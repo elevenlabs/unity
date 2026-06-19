@@ -365,16 +365,17 @@ console.log(`Wrote ${outgoingPath}`);
 // ---- Per-event dispatcher (sibling of the DTO classes) ----
 
 /**
- * Returns the source for `IncomingEventDispatcher.g.cs` — an abstract base
- * class with one `event System.Action<T>` per incoming wire payload plus an
- * `OnUnhandled` fallback, and a `protected void Dispatch(IncomingSocketEvent)`
- * switch that fans an instance into the matching event. `Conversation`
- * inherits this and turns the wire events into its args-typed surface.
+ * Returns the source for `IncomingEventDispatcher.g.cs` — a sealed helper
+ * class with one `internal event System.Action<T>` per incoming wire payload
+ * plus an `OnUnhandled` fallback, and an `internal void Dispatch(IncomingSocketEvent)`
+ * switch that fans an instance into the matching event. `Conversation` owns
+ * one as a field, subscribes internally, and re-raises into its args-typed
+ * user-facing surface. The wire types stay out of `Conversation`'s public DX.
  */
 function emitIncomingDispatcher(payloads: Payload[]): string {
   const eventDecls = payloads.map((p) => {
     const summary = renderSummaryDoc(p.description, 2);
-    const decl = `        public event System.Action<${p.name}>? On${p.name};`;
+    const decl = `        internal event System.Action<${p.name}>? On${p.name};`;
     return summary ? `${summary}\n${decl}` : decl;
   });
   const cases = payloads.map(
@@ -393,10 +394,11 @@ function emitIncomingDispatcher(payloads: Payload[]): string {
     "    /// <summary>",
     '    /// Internal fan-out from a parsed <see cref="IncomingSocketEvent"/> to one',
     '    /// strongly-typed event per wire payload. <see cref="ElevenLabs.Agents.Conversation"/>',
-    "    /// inherits and subscribes to these so its message router can translate",
-    "    /// wire events into the args-typed user-facing event surface.",
+    "    /// owns one as a private field, subscribes to these events in its",
+    "    /// constructor, and translates each wire payload into its args-typed",
+    "    /// user-facing event surface.",
     "    /// </summary>",
-    "    public abstract class IncomingEventDispatcher",
+    "    public sealed class IncomingEventDispatcher",
     "    {",
     eventDecls.join("\n\n"),
     "",
@@ -405,9 +407,9 @@ function emitIncomingDispatcher(payloads: Payload[]): string {
     "        /// (mirrors <c>@elevenlabs/client</c> <c>BaseConversation</c>'s",
     "        /// <c>onDebug</c> arm).",
     "        /// </summary>",
-    "        public event System.Action<IncomingSocketEvent>? OnUnhandled;",
+    "        internal event System.Action<IncomingSocketEvent>? OnUnhandled;",
     "",
-    "        protected void Dispatch(IncomingSocketEvent evt)",
+    "        internal void Dispatch(IncomingSocketEvent evt)",
     "        {",
     "            switch (evt)",
     "            {",

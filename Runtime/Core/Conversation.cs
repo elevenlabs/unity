@@ -37,12 +37,17 @@ namespace ElevenLabs.Agents
     /// <c>internal</c>; game code never sees them.
     /// </para>
     /// </remarks>
-    public sealed class Conversation : IncomingEventDispatcher
+    public sealed class Conversation
     {
         private readonly IConnection _connection;
         private readonly IInputController _inputController;
         private readonly IOutputController _outputController;
         private readonly ConversationOptions _options;
+
+        // Generated wire-event fan-out. Composition (not inheritance) keeps
+        // the wire types out of Conversation's public surface — the dispatcher
+        // is an implementation detail of the router, never a user-facing API.
+        private readonly IncomingEventDispatcher _dispatcher = new();
 
         // Mirrors BaseConversation's currentEventId / lastFeedbackEventId /
         // lastInterruptTimestamp. Initial values match the JS SDK so the
@@ -154,17 +159,17 @@ namespace ElevenLabs.Agents
             // Dispatcher fan-out — translate each wire-typed event into the
             // args-typed user-facing event, applying suppression and
             // side-effects per BaseConversation.onMessage.
-            OnConversationInitiationMetadata += HandleConversationInitiationMetadata;
-            OnAgentResponse += HandleAgentResponse;
-            OnAgentResponseComplete += HandleAgentResponseComplete;
-            OnUserTranscript += HandleUserTranscript;
-            OnAgentResponseCorrection += HandleAgentResponseCorrection;
-            OnAudioResponse += HandleAudioResponse;
-            OnInterruption += HandleInterruption;
-            OnVadScore += HandleVadScore;
-            OnPing += HandlePing;
-            OnClientToolCall += HandleClientToolCall;
-            OnAgentToolResponseFullPayload += HandleAgentToolResponseFullPayload;
+            _dispatcher.OnConversationInitiationMetadata += HandleConversationInitiationMetadata;
+            _dispatcher.OnAgentResponse += HandleAgentResponse;
+            _dispatcher.OnAgentResponseComplete += HandleAgentResponseComplete;
+            _dispatcher.OnUserTranscript += HandleUserTranscript;
+            _dispatcher.OnAgentResponseCorrection += HandleAgentResponseCorrection;
+            _dispatcher.OnAudioResponse += HandleAudioResponse;
+            _dispatcher.OnInterruption += HandleInterruption;
+            _dispatcher.OnVadScore += HandleVadScore;
+            _dispatcher.OnPing += HandlePing;
+            _dispatcher.OnClientToolCall += HandleClientToolCall;
+            _dispatcher.OnAgentToolResponseFullPayload += HandleAgentToolResponseFullPayload;
         }
 
         // Lifecycle -----------------------------------------------------------
@@ -305,9 +310,9 @@ namespace ElevenLabs.Agents
         // Connection-level handlers -------------------------------------------
 
         // Connection's OnMessage delivers wire events straight into the
-        // generated dispatcher; per-event handlers below subscribe to the
+        // owned dispatcher; per-event handlers below subscribe to the
         // dispatcher's typed events and re-raise the user-facing surface.
-        private void OnConnectionMessage(IncomingSocketEvent evt) => Dispatch(evt);
+        private void OnConnectionMessage(IncomingSocketEvent evt) => _dispatcher.Dispatch(evt);
 
         // The transport closed on its own (network error, agent end_call, …).
         // Drive the same teardown sequence as the user-initiated path; the
