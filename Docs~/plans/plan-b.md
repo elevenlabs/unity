@@ -52,6 +52,7 @@ for that.
 - [ ] **`ConversationOptions` parity** with the JS SDK's `Options` (overrides, dynamic variables, custom LLM body, user/source info) via the already-generated DTOs — [#10](https://github.com/elevenlabs/unity/issues/10).
 - [ ] **Method + event parity** with `@elevenlabs/client` (changeInput/OutputDevice, multimodal, file upload, MCP approval; the JS SDK's wider callback surface) — [#11](https://github.com/elevenlabs/unity/issues/11). Includes an upfront investigation pass classifying each missing callback as wire-event-driven vs. derived-state, since not every JS callback maps to a wire type the AsyncAPI spec declares.
 - [ ] **Spec re-vendor** (or wait on the automated workflow at [#7](https://github.com/elevenlabs/unity/issues/7)) so the wire-event-driven half of #11 has codegen output to lean on.
+- [ ] **Docs + samples for going public** (README quickstart, end-user sample project, CHANGELOG refresh, ARCHITECTURE.md audit, package.json metadata + samples registration) — [#12](https://github.com/elevenlabs/unity/issues/12).
 
 Nothing else from this plan blocks the tag — Phases 1–6 are receipts for verified work,
 and the remaining `## Pending Human Approval` items below are either resolved or tracked
