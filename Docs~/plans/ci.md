@@ -326,7 +326,35 @@ as of 2026-06-18; secrets configured. Decision tree at trial expiry
 ## Recommended workflow shape
 
 Three separate workflow files, each with its own runtime profile and
-secrets requirements:
+secrets requirements.
+
+**Org-level Actions allowlist (constraint).** The `elevenlabs` org
+restricts third-party Actions via `elevenlabs-terraform`
+`projects/eleven-github/org_actions.tf` — `github_owned_allowed = true`
+covers `actions/*` and `pnpm/action-setup` is on the named allowlist,
+but anything outside that list (including the `game-ci/*` family) fails
+the workflow at startup with `startup_failure` in 0 seconds, before any
+job queues. Per the file's "Less trustworthy actions are pinned to a
+specific commit" convention, each `game-ci/*` action used by the Unity
+lanes must be added pinned to its release commit SHA, and the
+workflow's `uses:` must reference the same SHA so the allowlist match
+is literal. `game-ci/unity-test-runner`, `game-ci/unity-builder`, and
+`game-ci/unity-return-license` were queued for the allowlist via
+elevenlabs-terraform PR #9064 and applied 2026-06-19; the first
+post-allowlist Unity run now reaches the Docker pull step.
+
+**Disk-space constraint on `ubuntu-latest`.** The Unity editor image
+(`unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2`) is ~7 GB compressed
+and ~20 GB extracted. GitHub-hosted `ubuntu-latest` runners ship with
+only ~14 GB free on the root partition; the cold pull aborts partway
+with `failed to register layer: write …: no space left on device` and
+docker exits 125. The Unity workflow reclaims ~25 GB before the pull
+by `sudo rm -rf`-ing pre-installed toolchains we don't use (Android
+SDK ~9 GB, dotnet ~1.7 GB, GHC ~5 GB, CodeQL ~5 GB, boost +
+powershell ~2 GB, plus the wider hostedtoolcache). Inlined as a shell
+step rather than adopting `jlumbroso/free-disk-space` so we don't
+need another org Actions allowlist round-trip. The same step belongs
+in the integration workflow (5.3.4) since it pulls the same image.
 
 ### `.github/workflows/lint.yml` (no secrets)
 
@@ -343,16 +371,19 @@ secrets requirements:
 ### `.github/workflows/unity-tests.yml` (Unity secrets)
 
 - Trigger: every PR + push to `main`
-- Concurrency: `group: unity-${{ github.ref }}`, `cancel-in-progress: true`
+- Concurrency: `group: unity-tests-${{ github.ref }}`, `cancel-in-progress: true`
   (so a force-push doesn't queue two activations)
 - Runner: `ubuntu-latest` (game-ci needs Linux for the Docker images)
-- Action: `game-ci/unity-test-runner@v4`
+- Pre-step: inline `Free disk space for Unity image` (~25 GB reclaim)
+  before the Unity image pull — see "Disk-space constraint" above
+- Action: `game-ci/unity-test-runner` pinned to the v4.3.1 commit SHA
+  (`0ff419b...`) — matches the org allowlist entry
 - Inputs:
   - `unityVersion: 6000.3.6f1`
-  - `testMode: EditMode`
+  - `testMode: editmode`
   - `projectPath: TestProject`
-  - `customImage: unityci/editor:ubuntu-6000.3.6f1-webgl-3` (confirmed available, ~7 GB)
-- Cache: `actions/cache@v4` on `TestProject/Library/` keyed by `Packages/packages-lock.json` + `ProjectSettings/ProjectSettings.asset`
+  - `customImage: unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2` (pinned)
+- Cache: `actions/cache@v5` on `TestProject/Library/` keyed by `Packages/packages-lock.json` + `ProjectSettings/ProjectSettings.asset`
 - Expected wall time: 8-15 minutes (mostly the Library cache miss on first run, then ~3 minutes warm)
 
 ### `.github/workflows/integration.yml` (Unity secrets)
@@ -360,7 +391,11 @@ secrets requirements:
 - Trigger: every PR + push to `main`
 - Same concurrency guard as unity-tests
 - Two jobs in sequence:
-  1. **build-webgl** — `game-ci/unity-builder@v4` with `targetPlatform: WebGL`, uploads `TestProject/Build/WebGL/` as a workflow artifact (~7 MB compressed)
+  1. **build-webgl** — `game-ci/unity-builder` pinned to the v5.0.0
+     commit SHA (`d829bfc...`, pre-allowlisted via the same
+     `elevenlabs-terraform` PR #9064 as unity-test-runner) with
+     `targetPlatform: WebGL`, uploads `TestProject/Build/WebGL/` as
+     a workflow artifact (~7 MB compressed)
   2. **integration-test** — `needs: build-webgl`, downloads artifact, runs `pnpm --dir IntegrationTests~ install && run setup && run test`
 - Expected wall time: ~15 minutes warm, ~25 minutes cold
 
@@ -398,7 +433,7 @@ lanes.
 
 - [x] **5.3.1 — Lint workflow.** Landed `.github/workflows/lint.yml`. No secrets needed.
 - [x] **5.3.2 — Repo secrets configured.** `UNITY_EMAIL` / `UNITY_PASSWORD` / `UNITY_SERIAL` configured against the maintainer's Unity ID + Industry trial serial; Service Account placeholders (`UNITY_AUTHORIZATION_HEADER`, `UNITY_KEY_ID`, `UNITY_SECRET_KEY`) deleted.
-- [ ] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` using game-ci/unity-test-runner@v4.
-- [ ] **5.3.4 — Integration workflow.** `.github/workflows/integration.yml` chaining unity-builder + Playwright. Depends on 5.3.3 (proves the license activation works).
+- [x] **5.3.3 — Unity Edit Mode workflow.** `.github/workflows/unity-tests.yml` landed on main (uses game-ci/unity-test-runner pinned to v4.3.1 SHA). Unblocked 2026-06-19 by (a) elevenlabs-terraform PR #9064 (org Actions allowlist), (b) elevenlabs/unity PR #3 switching the `uses:` ref from `@v4` to the SHA so the allowlist match is literal, and (c) the inline "Free disk space for Unity image" step that reclaims ~25 GB before the cold image pull (without it, docker exits 125 with `no space left on device` partway through the layer write). First green run: 27815299212 (107/107 Edit Mode tests passing in ~6 min on cold Library cache). The game-ci `checkName: Edit Mode tests` Check Run lands as `NEUTRAL` while the underlying job is `SUCCESS` — cosmetic, the real signal is the job conclusion; revisit if it ever blocks branch protection.
+- [ ] **5.3.4 — Integration workflow.** `.github/workflows/integration.yml` chaining unity-builder + Playwright. Depends on 5.3.3 (proves the license activation works). unity-builder is pre-allowlisted in the same terraform PR. The same `Free disk space for Unity image` step applies — copy it forward when building the unity-builder job.
 
 Each task lands as its own commit and is independently revertable.

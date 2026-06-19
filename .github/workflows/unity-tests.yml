@@ -38,6 +38,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # The Unity editor image (~7 GB compressed, ~20 GB on disk) plus
+      # the cached Library/ plus runner overhead overflows the
+      # ubuntu-latest runner's ~14 GB root partition; the cold pull
+      # fails with `no space left on device` partway through. Drop the
+      # pre-installed toolchains we don't use (Android SDK ~9 GB,
+      # dotnet ~1.7 GB, GHC ~5 GB, CodeQL ~5 GB, boost/powershell ~2 GB).
+      # Inline rather than `jlumbroso/free-disk-space` to avoid another
+      # org Actions allowlist round-trip.
+      - name: Free disk space for Unity image
+        run: |
+          echo "Before:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          echo "After:"
+          df -h /
+
       # Library/ rebuild dominates wall time on cold runs. Key on
       # packages-lock.json + ProjectSettings.asset so dependency or
       # project-setting changes invalidate correctly; otherwise the
@@ -53,7 +75,7 @@ jobs:
 
       - name: Run Edit Mode tests
         id: tests
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-test-runner@0ff419b913a3630032cbe0de48a0099b5a9f0ed9 # v4.3.1
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
