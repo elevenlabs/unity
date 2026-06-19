@@ -351,20 +351,352 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual("pong", pong.Type);
         }
 
-        // Client tool stub: raises ErrorOccurred until Phase 4.4 ------------
+        // Client tool dispatch (Phase 4.4) ---------------------------------
+
+        private static ClientToolCall MakeToolCall(
+            string toolName,
+            string toolCallId = "tc-1",
+            Dictionary<string, dynamic>? parameters = null,
+            int eventId = 1,
+            bool expectsResponse = true
+        )
+        {
+            return new ClientToolCall
+            {
+                ClientToolCallData = new ClientToolCallEvent
+                {
+                    ToolName = toolName,
+                    ToolCallId = toolCallId,
+                    Parameters = parameters ?? new Dictionary<string, dynamic>(),
+                    EventId = eventId,
+                    ExpectsResponse = expectsResponse,
+                },
+            };
+        }
+
+        private sealed record GreetParams(string Name);
+
+        private sealed record WeatherResult(string City, double TempC);
 
         [Test]
-        public void Dispatch_ClientToolCall_RaisesErrorPlaceholder()
+        public void RegisterTool_Sync_StringResult_SendsLiteralResult()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>("greet", p => $"Hello, {p.Name}!");
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "greet",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "Kræn" }
+                )
+            );
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var result = connection.Sent[0] as ClientToolResult;
+            Assert.IsNotNull(result);
+            Assert.AreEqual("tc-1", result!.ToolCallId);
+            Assert.AreEqual("Hello, Kræn!", result.Result);
+            Assert.IsFalse(result.IsError);
+            Assert.IsNull(result.ErrorType);
+        }
+
+        [Test]
+        public void RegisterTool_Sync_ObjectResult_SerialisesViaNewtonsoft()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, WeatherResult>(
+                "weather",
+                _ => new WeatherResult("Copenhagen", 17.5)
+            );
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "weather",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "anywhere" }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            // Newtonsoft default: PascalCase property names, no special config.
+            Assert.AreEqual("{\"City\":\"Copenhagen\",\"TempC\":17.5}", result.Result);
+        }
+
+        [Test]
+        public void RegisterTool_Async_AwaitsHandlerBeforeSendingResult()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            var source = new AwaitableCompletionSource<string>();
+            conversation.RegisterTool<GreetParams, string>("slow", _ => source.Awaitable);
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "slow",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            // Handler hasn't completed yet — nothing sent.
+            Assert.AreEqual(0, connection.Sent.Count);
+
+            source.SetResult("ready");
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.AreEqual("ready", result.Result);
+            Assert.IsFalse(result.IsError);
+        }
+
+        [Test]
+        public void Dispatch_ClientToolCall_UnknownTool_SendsIsErrorAndRaisesError()
         {
             var conversation = NewConversation(out var connection, out _, out _);
             string? errorMessage = null;
             conversation.ErrorOccurred += msg => errorMessage = msg;
 
-            connection.FireMessage(new ClientToolCall());
+            connection.FireMessage(MakeToolCall(toolName: "missing"));
 
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.AreEqual("tool_not_found", result.ErrorType);
+            StringAssert.Contains("missing", result.Result);
+            StringAssert.Contains("missing", errorMessage!);
+        }
+
+        [Test]
+        public void Dispatch_ClientToolCall_HandlerThrows_SendsIsErrorAndRaisesError()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>(
+                "boom",
+                (Func<GreetParams, string>)(_ => throw new InvalidOperationException("kaboom"))
+            );
+            string? errorMessage = null;
+            conversation.ErrorOccurred += msg => errorMessage = msg;
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "boom",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.IsNull(result.ErrorType);
+            Assert.AreEqual("kaboom", result.Result);
+            StringAssert.Contains("kaboom", errorMessage!);
+        }
+
+        [Test]
+        public void Dispatch_ClientToolCall_ClientToolException_PreservesErrorType()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>(
+                "auth",
+                (Func<GreetParams, string>)(
+                    _ => throw new ClientToolException("not allowed", errorType: "unauthorized")
+                )
+            );
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "auth",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.AreEqual("unauthorized", result.ErrorType);
+            Assert.AreEqual("not allowed", result.Result);
+        }
+
+        [Test]
+        public void Dispatch_ClientToolCall_ExpectsResponseFalse_SuppressesResultSend()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            var invoked = false;
+            conversation.RegisterTool<GreetParams, string>(
+                "fire_and_forget",
+                _ =>
+                {
+                    invoked = true;
+                    return "result";
+                }
+            );
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "fire_and_forget",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" },
+                    expectsResponse: false
+                )
+            );
+
+            Assert.IsTrue(invoked);
+            Assert.AreEqual(0, connection.Sent.Count);
+        }
+
+        [Test]
+        public void Dispatch_ClientToolCall_ParamsDeserialisationFailure_RaisesErrorWithIsError()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            // Handler expects { name: string } but the wire delivers no
+            // properties at all — Newtonsoft will throw on the strict path.
+            conversation.RegisterTool<GreetParams, string>("needs_name", p => $"Hi {p.Name}");
+            string? errorMessage = null;
+            conversation.ErrorOccurred += msg => errorMessage = msg;
+
+            // Send a payload with the WRONG shape: "name" missing AND a
+            // numeric value that won't bind to the string property. The
+            // missing property alone is too lenient (Newtonsoft tolerates
+            // missing props and leaves the record's required member null);
+            // a type mismatch reliably trips the converter.
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "needs_name",
+                    parameters: new Dictionary<string, dynamic>
+                    {
+                        ["Name"] = new Dictionary<string, dynamic> { ["nested"] = "x" },
+                    }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
             Assert.IsNotNull(errorMessage);
-            StringAssert.Contains("client_tool_call", errorMessage!);
-            StringAssert.Contains("Phase 4.4", errorMessage);
+            StringAssert.Contains("needs_name", errorMessage!);
+        }
+
+        [Test]
+        public void RegisterTool_Overwrite_LogsWarningAndReplacesHandler()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>("dup", _ => "first");
+
+            LogAssert.Expect(LogType.Warning, "Client tool 'dup' is being overwritten.");
+            conversation.RegisterTool<GreetParams, string>("dup", _ => "second");
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "dup",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.AreEqual("second", result.Result);
+        }
+
+        [Test]
+        public void UnregisterTool_KnownName_ReturnsTrueAndPreventsDispatch()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>("temp", _ => "x");
+
+            Assert.IsTrue(conversation.UnregisterTool("temp"));
+            Assert.IsFalse(conversation.UnregisterTool("temp"));
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "temp",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            // Tool no longer registered → tool_not_found error path.
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.AreEqual("tool_not_found", result.ErrorType);
+        }
+
+        [Test]
+        public void RegisterTool_NullHandler_Throws()
+        {
+            var conversation = NewConversation(out _, out _, out _);
+            Assert.Throws<ArgumentNullException>(() =>
+                conversation.RegisterTool<GreetParams, string>(
+                    "x",
+                    (Func<GreetParams, string>)null!
+                )
+            );
+            Assert.Throws<ArgumentNullException>(() =>
+                conversation.RegisterTool<GreetParams, string>(
+                    "x",
+                    (Func<GreetParams, Awaitable<string>>)null!
+                )
+            );
+        }
+
+        [Test]
+        public void RegisterTool_EmptyName_Throws()
+        {
+            var conversation = NewConversation(out _, out _, out _);
+            Assert.Throws<ArgumentException>(() =>
+                conversation.RegisterTool<GreetParams, string>("", _ => "x")
+            );
+        }
+
+        // end_call shortcut (agent_tool_response_full_payload) -------------
+
+        [Test]
+        public void Dispatch_AgentToolResponseFullPayload_EndCall_TriggersDisconnect()
+        {
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            // Prime status to Connected so EndSessionWithDetails actually fires.
+            conversation.UpdateStatus(Status.Connected);
+            DisconnectionDetails? details = null;
+            conversation.Disconnected += d => details = d;
+
+            connection.FireMessage(
+                new AgentToolResponseFullPayload
+                {
+                    AgentToolResponseFullPayloadData = new AgentToolResponseFullPayloadEvent
+                    {
+                        ToolName = "end_call",
+                        ToolCallId = "tc-end",
+                        ToolType = "system",
+                        EventId = 1,
+                        IsError = false,
+                        IsCalled = true,
+                        FullToolResult = "",
+                    },
+                }
+            );
+
+            Assert.IsNotNull(details);
+            Assert.AreEqual(DisconnectionReason.Agent, details!.Reason);
+            Assert.AreEqual("end_call", details.Context?.Type);
+            Assert.AreEqual(1, connection.CloseCallCount);
+            Assert.AreEqual(1, input.CloseCallCount);
+            Assert.AreEqual(1, output.CloseCallCount);
+        }
+
+        [Test]
+        public void Dispatch_AgentToolResponseFullPayload_NonEndCall_DoesNothing()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.UpdateStatus(Status.Connected);
+            DisconnectionDetails? details = null;
+            conversation.Disconnected += d => details = d;
+
+            connection.FireMessage(
+                new AgentToolResponseFullPayload
+                {
+                    AgentToolResponseFullPayloadData = new AgentToolResponseFullPayloadEvent
+                    {
+                        ToolName = "lookup_user",
+                        ToolCallId = "tc-1",
+                        ToolType = "function",
+                        EventId = 1,
+                        IsError = false,
+                        IsCalled = true,
+                        FullToolResult = "{}",
+                    },
+                }
+            );
+
+            Assert.IsNull(details);
+            Assert.AreEqual(0, connection.CloseCallCount);
         }
 
         // SendFeedback --------------------------------------------------------

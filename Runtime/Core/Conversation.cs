@@ -1,7 +1,10 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using ElevenLabs.Protocol;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 // UnityEngine.Ping collides with the protocol wire type — alias the wire one.
 using Ping = ElevenLabs.Protocol.Ping;
@@ -48,6 +51,11 @@ namespace ElevenLabs.Agents
         private int _currentEventId = 1;
         private int _lastFeedbackEventId;
         private int _lastInterruptTimestamp;
+
+        // Client-tool dispatch table. Plan B owns this in C# (no JS Proxy,
+        // no shared dispatcher key). Late registration / unregistration is
+        // supported at any point in the session lifecycle.
+        private readonly Dictionary<string, ClientToolDispatcher> _toolHandlers = new();
 
         // Lifecycle events ----------------------------------------------------
 
@@ -376,37 +384,201 @@ namespace ElevenLabs.Agents
             _connection.Send(new Pong { EventId = evt.PingEvent.EventId });
         }
 
-        // Phase 4.4 will replace the body with real tool dispatch (look up
-        // a registered handler, await it, send ClientToolResult). For Phase
-        // 4.3 the wire DTO is also broken (self-referential ClientToolCall —
-        // the codegen Data-suffix bug noted under plan-b.md task 3.4), so we
-        // can't pull tool_call_id / tool_name out anyway. Surface as an error
-        // so a stray tool call doesn't silently disappear.
-        private void HandleClientToolCall(ClientToolCall evt)
+        // Dispatch flow mirrors BaseConversation.onMessage's client_tool_call
+        // arm: look up the handler, invoke it with the parameters dict,
+        // catch + surface failures, and send ClientToolResult only when the
+        // server asked for one (expects_response). The async-void fire-and-
+        // forget shape matches the rest of the dispatcher — events can't be
+        // async, and the message router shouldn't block the transport.
+        private async void HandleClientToolCall(ClientToolCall evt)
         {
-            _ = evt;
-            RaiseError(
-                "Received client_tool_call but client-tool dispatch is not yet wired "
-                    + "(Phase 4.4) — see Docs~/plans/plan-b.md."
+            var args = evt.ToArgs();
+            if (!_toolHandlers.TryGetValue(args.ToolName, out var dispatcher))
+            {
+                var message = $"No client tool registered with name '{args.ToolName}'.";
+                RaiseError(message);
+                SendToolErrorIfExpected(args, message, errorType: "tool_not_found");
+                return;
+            }
+
+            string resultJson;
+            try
+            {
+                resultJson = await dispatcher(args.Parameters);
+            }
+            catch (ClientToolException ex)
+            {
+                // Handler chose to surface a specific error_type — preserve it
+                // so the agent's server-side prompt can branch on it.
+                RaiseError($"Client tool '{args.ToolName}' failed: {ex.Message}");
+                SendToolErrorIfExpected(args, ex.Message, errorType: ex.ErrorType);
+                return;
+            }
+            catch (Exception ex)
+            {
+                RaiseError($"Client tool '{args.ToolName}' threw: {ex.Message}");
+                SendToolErrorIfExpected(args, ex.Message, errorType: null);
+                return;
+            }
+
+            if (!args.ExpectsResponse)
+            {
+                return;
+            }
+            _connection.Send(
+                new ClientToolResult
+                {
+                    ToolCallId = args.ToolCallId,
+                    Result = resultJson,
+                    IsError = false,
+                }
+            );
+        }
+
+        private void SendToolErrorIfExpected(
+            ClientToolCallArgs args,
+            string message,
+            string? errorType
+        )
+        {
+            if (!args.ExpectsResponse)
+            {
+                return;
+            }
+            _connection.Send(
+                new ClientToolResult
+                {
+                    ToolCallId = args.ToolCallId,
+                    Result = message,
+                    IsError = true,
+                    ErrorType = errorType,
+                }
             );
         }
 
         // Mirrors BaseConversation.handleAgentToolResponseFullPayload's
         // end_call shortcut: if the agent invoked the end_call tool, drive
-        // teardown with reason=agent. Same wire-codegen bug as
-        // ClientToolCall — AgentToolResponseFullPayloadData self-references —
-        // so tool_name extraction is deferred until the codegen fix lands.
+        // teardown with reason=Agent.
         private void HandleAgentToolResponseFullPayload(AgentToolResponseFullPayload evt)
         {
-            _ = evt;
-            // TODO Phase 4 follow-up: once the wire-codegen bug noted under
-            // plan-b.md task 3.4 is fixed, read tool_name and fire the
-            // end_call shortcut here:
-            //   if (evt.AgentToolResponseFullPayloadData.ToolName == "end_call")
-            //       _ = EndSessionWithDetails(new DisconnectionDetails(
-            //           DisconnectionReason.Agent,
-            //           Context: new DisconnectionContext("end_call",
-            //               "Agent ended the call")));
+            if (evt.AgentToolResponseFullPayloadData.ToolName == "end_call")
+            {
+                _ = EndSessionWithDetails(
+                    new DisconnectionDetails(
+                        DisconnectionReason.Agent,
+                        Context: new DisconnectionContext("end_call", "Agent ended the call")
+                    )
+                );
+            }
+        }
+
+        // Client tool registration -------------------------------------------
+
+        /// <summary>
+        /// Register a synchronous client tool. The agent can invoke
+        /// <paramref name="name"/> over the wire; <paramref name="handler"/>
+        /// receives the deserialised parameter record and returns the result.
+        /// The result is serialised with Newtonsoft.Json before being sent as
+        /// <c>client_tool_result.result</c>; if it's already a <c>string</c>
+        /// it's forwarded verbatim. Re-registering a name overwrites the
+        /// previous handler with a warning. Registration is permitted before,
+        /// during, or after a session.
+        /// </summary>
+        /// <typeparam name="TParams">
+        /// Parameter record / class. Deserialised from the agent's parameters
+        /// JSON object via Newtonsoft.Json — use <c>[JsonProperty]</c> if
+        /// property names need to differ from the wire schema.
+        /// </typeparam>
+        /// <typeparam name="TResult">
+        /// Result type. Anything Newtonsoft can serialise; <c>string</c> is
+        /// passed through. Throw <see cref="ClientToolException"/> for a
+        /// specific <c>error_type</c>, or any other exception for a generic
+        /// failure response.
+        /// </typeparam>
+        public void RegisterTool<TParams, TResult>(string name, Func<TParams, TResult> handler)
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+            RegisterToolInternal(
+                name,
+                p => CompletedAwaitable(handler(DeserialiseParams<TParams>(p)))
+            );
+        }
+
+        /// <summary>
+        /// Register an asynchronous client tool. Same semantics as the sync
+        /// overload, but the handler returns an <see cref="Awaitable{TResult}"/>
+        /// the dispatcher awaits before sending the result.
+        /// </summary>
+        public void RegisterTool<TParams, TResult>(
+            string name,
+            Func<TParams, Awaitable<TResult>> handler
+        )
+        {
+            if (handler == null)
+                throw new ArgumentNullException(nameof(handler));
+            RegisterToolInternal(
+                name,
+                async p => SerialiseResult(await handler(DeserialiseParams<TParams>(p)))
+            );
+        }
+
+        /// <summary>
+        /// Remove the handler for <paramref name="name"/>. Returns <c>true</c>
+        /// when a handler was registered and removed, <c>false</c> when none
+        /// existed.
+        /// </summary>
+        public bool UnregisterTool(string name) => _toolHandlers.Remove(name);
+
+        private void RegisterToolInternal(string name, ClientToolDispatcher dispatcher)
+        {
+            if (string.IsNullOrEmpty(name))
+                throw new ArgumentException("Tool name must be non-empty.", nameof(name));
+            if (_toolHandlers.ContainsKey(name))
+            {
+                Debug.LogWarning($"Client tool '{name}' is being overwritten.");
+            }
+            _toolHandlers[name] = dispatcher;
+        }
+
+        // Bridges the sync RegisterTool overload onto ClientToolDispatcher's
+        // Awaitable<string> signature without forcing every sync handler to
+        // allocate a completion source.
+        private static Awaitable<string> CompletedAwaitable<TResult>(TResult result)
+        {
+            var source = new AwaitableCompletionSource<string>();
+            source.SetResult(SerialiseResult(result));
+            return source.Awaitable;
+        }
+
+        // Deserialise the parameters dict into the handler's TParams. The
+        // wire delivers a Dictionary<string, dynamic>; round-trip via JObject
+        // so Newtonsoft applies the handler type's [JsonProperty] / nullability /
+        // converter rules instead of trying to cast individual values.
+        private static TParams DeserialiseParams<TParams>(Dictionary<string, dynamic>? parameters)
+        {
+            var obj = parameters == null ? new JObject() : JObject.FromObject(parameters);
+            var typed = obj.ToObject<TParams>();
+            if (typed == null)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to deserialise parameters into {typeof(TParams).Name}."
+                );
+            }
+            return typed;
+        }
+
+        // Result rule: a string handler result becomes the literal result
+        // string; everything else is serialised via Newtonsoft. This matches
+        // what game devs expect — "return 'hi'" sends `result: "hi"`, not
+        // `result: "\"hi\""`.
+        private static string SerialiseResult<TResult>(TResult result)
+        {
+            if (result is string s)
+            {
+                return s;
+            }
+            return JsonConvert.SerializeObject(result);
         }
 
         // State transition helpers --------------------------------------------
