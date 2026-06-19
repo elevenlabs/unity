@@ -12,10 +12,24 @@
 
 name: Unity Edit Mode tests
 
+# `paths-ignore` skips the ~6 min Edit Mode run whenever EVERY changed
+# file is docs / Claude config. Mirrors the same patterns used in
+# `integration.yml`. This works for unity-tests because the
+# `Edit Mode tests (Unity 6000.3.6f1)` check is informational only —
+# branch protection on `main` was relaxed to require just lint on
+# 2026-06-19; see decision 3 in `Docs~/plans/ci.md` for the rationale.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "Docs~/**"
+      - "**.md"
+      - ".claude/**"
   pull_request:
+    paths-ignore:
+      - "Docs~/**"
+      - "**.md"
+      - ".claude/**"
 
 # Industry trial allows 2 concurrent activations; scope by ref so a
 # force-push cancels the previous run for that branch rather than

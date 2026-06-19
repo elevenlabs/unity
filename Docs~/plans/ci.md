@@ -434,27 +434,32 @@ lanes.
    `elevenlabs-terraform` for an org-ruleset exception on this repo —
    tracked as a separate follow-up, not a CI-plan task.
 
-3. ~~**Branch protection rules.**~~ **Resolved 2026-06-19:** classic
-   branch protection on `main` configured via `PUT /repos/elevenlabs/unity/branches/main/protection`.
-   Required status checks (strict mode, both pinned to GitHub Actions'
-   `app_id: 15368` so cosmetic NEUTRAL Check Runs from game-ci can't
-   satisfy them): `Lint, typecheck, test (no Unity)` and `Edit Mode
-   tests (Unity 6000.3.6f1)`. Integration WebGL build + Playwright
-   intentionally NOT required — slow (~25 min cold) and the local
-   `bash TestProject/build-webgl.sh && pnpm --dir IntegrationTests~ run test`
-   round-trip already gates the bridge end-to-end. Linear history
-   enforced (matches the squash-only merge setting). Force pushes and
+3. ~~**Branch protection rules.**~~ **Resolved 2026-06-19, revised
+   same-day:** classic branch protection on `main` configured via
+   `PUT /repos/elevenlabs/unity/branches/main/protection`. Required
+   status check (strict mode, pinned to GitHub Actions' `app_id:
+   15368`): just `Lint, typecheck, test (no Unity)`. Edit Mode tests
+   and integration are informational — the lint gate is the only one
+   that blocks a PR merge. **Why demote Edit Mode?** Adding
+   `paths-ignore` to `unity-tests.yml` (so docs-only PRs skip the
+   ~6 min Edit Mode run) would leave the required check stuck in
+   "Pending" forever on docs PRs, per [GitHub's
+   docs](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#handling-skipped-but-required-checks).
+   The placeholder-workflow workaround works but adds a second YAML
+   file for the same logical check. Demoting Edit Mode to
+   informational is the simpler tradeoff for a solo-maintainer cadence
+   where the maintainer self-reviews the status before merging.
+   Linear history enforced (matches squash-only). Force pushes and
    deletions blocked. Admin enforcement OFF (single maintainer keeps
    the emergency bypass). Repo-level `delete_branch_on_merge` flipped
    to `true` at the same time so squash-merged branches don't pile up.
    "Require a pull request before merging" deliberately not enabled —
    direct push to `main` stays available. Note: required status checks
    only gate PR merges, not direct pushes, so a `git push origin main`
-   bypasses the lint + Edit Mode gate (the workflows still run after
-   the push, but the commit is already on `main` by then). If
-   accidental direct-push lands a red commit, fix-forward; if it
-   becomes a recurring problem, enable "require PR before merging"
-   via the same protection endpoint.
+   bypasses the lint gate (the workflow still runs after the push, but
+   the commit is already on `main` by then). If accidental direct-push
+   lands a red commit, fix-forward; if it becomes a recurring problem,
+   enable "require PR before merging" via the same protection endpoint.
 
 4. **What to commit.** Pre-built WebGL artifacts in the repo (via
    git-lfs) would let integration tests run without Unity in CI, but
