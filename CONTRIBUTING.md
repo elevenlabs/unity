@@ -6,20 +6,36 @@ The repository root is the UPM package itself — `package.json` is at the top l
 
 ```
 Runtime/          C# source compiled into the shipped package
-  WebGL/          WebGL bridge primitives (BridgePromise, BridgeObserver, BridgeRequestHandler)
-  Native/         Native implementation (desktop, mobile, XR) — WebSocket transport, audio
+  Core/           Cross-platform asmdef `ElevenLabs.Agents.Core`. Owns the public API
+                  (Conversation, ConversationOptions, ClientToolException, …), the
+                  internal IConnection / IInputController / IOutputController abstractions
+                  the platform impls satisfy, and the generated protocol DTOs under
+                  Protocol/*.g.cs. No platform restrictions.
+  WebGL/          Editor + WebGL asmdef `ElevenLabs.Agents.WebGL`. Carries the bridge
+                  primitives (JsObject, JsFunction, BridgeCallback handle types + their
+                  IJsObject / IJsFunction interface seams) and the Bridged/ folder of
+                  IConnection / IInputController / IOutputController implementations that
+                  wrap @elevenlabs/client.
+  (Native/        Phase 7 — not yet present. Will mirror Runtime/WebGL/ as an
+                  excludePlatforms=WebGL asmdef carrying native IConnection /
+                  IInputController / IOutputController implementations.)
 
-Editor/           Editor-only C# (inspectors, build post-processors, validation)
+Editor/           Editor-only C# (HostBuild entry points for WebGL builds, inspectors,
+                  build post-processors, validation).
 
 Tests/
-  Editor/         Unity Test Runner tests (Edit Mode — run headlessly in CI)
+  Editor/         Unity Test Runner tests (Edit Mode — run headlessly in CI).
 
 Plugins/
-  WebGL/          .jslib files — Unity's required location for WebGL native plugins.
-                  ElevenLabsBridge.jslib is the JS side of the bridge primitives.
-                  ⚠️  These files are build artefacts. Do not edit them by hand once the
-                  codegen pipeline exists — edit the TypeScript source in Bridge~/src/
-                  and run `pnpm run build` to regenerate them.
+  WebGL/          .jslib bundles — Unity's required location for WebGL native plugins.
+                  ElevenLabsBridge.jslib is the bridge primitives layer (bundled from
+                  Bridge~/src/primitives/); ElevenLabsConnection.jslib is the
+                  @elevenlabs/client factory + audio-glue registrations (bundled from
+                  Bridge~/src/connection/).
+                  ⚠️  Both files are build artefacts. Do not edit by hand — edit the
+                  TypeScript source in Bridge~/src/ and run `pnpm --dir Bridge~ run
+                  build:primitives` / `build:connection` to regenerate. The
+                  `verify:primitives` / `verify:connection` scripts catch drift in CI.
 
 Bridge~/          JS dev tooling: Prettier, ESLint, Vitest, TypeScript, and the Rolldown-based
                   bundler that produces the .jslib files. The ~ suffix causes Unity to ignore
@@ -218,7 +234,20 @@ immediately visible.
 
 ## Platform conventions
 
-- WebGL-specific C# lives under `Runtime/WebGL/` in an assembly definition scoped to `WebGL` + `Editor` platforms.
-- Native C# lives under `Runtime/Native/` in an assembly definition with no platform restriction (excluded from WebGL via `excludePlatforms`).
-- The public API (`Runtime/`) has no platform restriction and no platform-specific code — it selects the right implementation at compile time via `#if UNITY_WEBGL`.
-- `.jslib` files must be placed under `Plugins/WebGL/` for Unity's build pipeline to pick them up.
+- The public API lives in the cross-platform `ElevenLabs.Agents.Core` asmdef under
+  `Runtime/Core/` and has no platform-specific code. `Conversation` orchestrates the three
+  internal abstractions (`IConnection` / `IInputController` / `IOutputController`); platform
+  asmdefs ship the implementations.
+- WebGL-specific C# lives under `Runtime/WebGL/` in `ElevenLabs.Agents.WebGL`, scoped to
+  `WebGL` + `Editor` platforms. Native C# (Phase 7) will live under `Runtime/Native/` in an
+  asmdef with no platform restriction and `excludePlatforms=WebGL`.
+- **Platform selection happens at runtime via a static delegate, not at compile time with
+  `#if`.** `Conversation.StartSessionAsync` calls a `internal static Func<ConversationOptions,
+  Awaitable<Conversation>>? SessionFactory` registered by each platform's launcher (see
+  [`Runtime/WebGL/Bridged/BridgedSessionLauncher.cs`](Runtime/WebGL/Bridged/BridgedSessionLauncher.cs)
+  for the WebGL registration via `[RuntimeInitializeOnLoadMethod]` and the Editor mirror via
+  `[InitializeOnLoadMethod]`). This pattern is what lets Core stay platform-free without
+  taking a build-time reference on either platform asmdef; each asmdef's `includePlatforms`
+  guarantees at most one launcher is included per build, so "last write wins" is harmless.
+- `.jslib` files must be placed under `Plugins/WebGL/` for Unity's build pipeline to pick
+  them up.
