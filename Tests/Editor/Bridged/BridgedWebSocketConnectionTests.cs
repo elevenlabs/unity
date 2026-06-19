@@ -5,7 +5,6 @@ using System.Linq;
 using ElevenLabs.Agents;
 using ElevenLabs.Protocol;
 using ElevenLabs.WebGL.Internal;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
@@ -29,15 +28,6 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             CallbackRegistry.ResetForTests();
             PromiseRegistry.ResetForTests();
         }
-
-        // The C# side reads payloads through BridgeCallback.Wrap<string>, which
-        // applies one JsonConvert.DeserializeObject<string> hop before handing
-        // the inner JSON to the handler. The production contract — captured in
-        // HandleJsMessage's comment — is that the JS bridge stringifies the
-        // event object so the wire payload is a JSON-encoded string. The tests
-        // replicate that by double-encoding here.
-        private static string DoubleEncode(string innerJson) =>
-            JsonConvert.SerializeObject(innerJson);
 
         private static BridgeCallback ExtractCallback(FakeJsObject fake, string method)
         {
@@ -124,7 +114,7 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             BridgeCallback cb = ExtractCallback(fake, "onMessage");
             string inner =
                 "{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"hello\"}}";
-            CallbackRegistry.TryDispatch(cb.Handle, DoubleEncode(inner));
+            CallbackRegistry.TryDispatch(cb.Handle, inner);
 
             Assert.IsInstanceOf<AgentResponse>(received);
             Assert.AreEqual("hello", ((AgentResponse)received!).AgentResponseEvent.AgentResponse);
@@ -143,7 +133,7 @@ namespace ElevenLabs.WebGL.Bridged.Tests
 
             BridgeCallback cb = ExtractCallback(fake, "onMessage");
             string inner = "{\"type\":\"future_event_v3\",\"value\":42}";
-            CallbackRegistry.TryDispatch(cb.Handle, DoubleEncode(inner));
+            CallbackRegistry.TryDispatch(cb.Handle, inner);
 
             Assert.IsInstanceOf<UnknownIncomingEvent>(received);
             Assert.AreEqual("future_event_v3", ((UnknownIncomingEvent)received!).Type);
@@ -162,7 +152,7 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             BridgeCallback cb = ExtractCallback(fake, "onDisconnect");
             string inner =
                 "{\"reason\":\"error\",\"message\":\"abnormal close\",\"closeCode\":1006,\"closeReason\":\"network\"}";
-            CallbackRegistry.TryDispatch(cb.Handle, DoubleEncode(inner));
+            CallbackRegistry.TryDispatch(cb.Handle, inner);
 
             Assert.IsNotNull(received);
             Assert.AreEqual(DisconnectionReason.Error, received!.Reason);

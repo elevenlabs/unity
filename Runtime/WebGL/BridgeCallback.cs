@@ -24,7 +24,9 @@ namespace ElevenLabs.WebGL
 
         /// <summary>
         /// Wraps a C# delegate in a <see cref="BridgeCallback"/> that JS can invoke.
-        /// The delegate receives the raw JSON payload string from the JS call.
+        /// The delegate receives the raw JSON payload string the JS bridge produced via
+        /// <c>JSON.stringify(arg)</c>. Choose this overload when the handler wants to parse
+        /// the payload itself (e.g. a JSON object that deserialises to a typed event).
         /// </summary>
         /// <param name="handler">The delegate to invoke when JS calls the callback.</param>
         /// <returns>A new <see cref="BridgeCallback"/> holding the registered handle.</returns>
@@ -39,7 +41,11 @@ namespace ElevenLabs.WebGL
 
         /// <summary>
         /// Typed convenience overload. The JSON payload from JS is deserialised to
-        /// <typeparamref name="T"/> before the delegate is invoked.
+        /// <typeparamref name="T"/> before the delegate is invoked. Pick this when the JS side
+        /// genuinely passes a value of type <typeparamref name="T"/> (e.g. a primitive number
+        /// or a primitive string); for callbacks that fire with a structured object, prefer
+        /// the untyped <see cref="Wrap(Action{string})"/> overload and parse with the right
+        /// typed target inside the handler.
         /// </summary>
         /// <typeparam name="T">The type the JSON payload is deserialised to before invoking the delegate.</typeparam>
         /// <param name="handler">The delegate to invoke when JS calls the callback.</param>

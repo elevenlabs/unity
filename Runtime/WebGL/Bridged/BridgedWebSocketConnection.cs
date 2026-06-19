@@ -70,10 +70,10 @@ namespace ElevenLabs.WebGL.Bridged
             // Wire one BridgeCallback per JS-side event; the C# multicast
             // events fan out to all subscribers without round-tripping through
             // additional JS subscriptions.
-            _onMessageCallback = BridgeCallback.Wrap<string>(HandleJsMessage);
+            _onMessageCallback = BridgeCallback.Wrap(HandleJsMessage);
             _connection.Call("onMessage", _onMessageCallback);
 
-            _onDisconnectCallback = BridgeCallback.Wrap<string>(HandleJsDisconnect);
+            _onDisconnectCallback = BridgeCallback.Wrap(HandleJsDisconnect);
             _connection.Call("onDisconnect", _onDisconnectCallback);
 
             _onModeChangeCallback = BridgeCallback.Wrap<string>(HandleJsModeChange);

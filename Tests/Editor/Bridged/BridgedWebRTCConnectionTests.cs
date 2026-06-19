@@ -5,7 +5,6 @@ using System.Linq;
 using ElevenLabs.Agents;
 using ElevenLabs.Protocol;
 using ElevenLabs.WebGL.Internal;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
@@ -25,9 +24,6 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             CallbackRegistry.ResetForTests();
             PromiseRegistry.ResetForTests();
         }
-
-        private static string DoubleEncode(string innerJson) =>
-            JsonConvert.SerializeObject(innerJson);
 
         private static BridgeCallback ExtractCallback(FakeJsObject fake, string method)
         {
@@ -87,7 +83,7 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             BridgeCallback cb = ExtractCallback(fake, "onMessage");
             string inner =
                 "{\"type\":\"agent_response\",\"agent_response_event\":{\"agent_response\":\"hi\"}}";
-            CallbackRegistry.TryDispatch(cb.Handle, DoubleEncode(inner));
+            CallbackRegistry.TryDispatch(cb.Handle, inner);
 
             Assert.IsInstanceOf<AgentResponse>(received);
         }
@@ -101,7 +97,7 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             conn.OnDisconnect += d => received = d;
 
             BridgeCallback cb = ExtractCallback(fake, "onDisconnect");
-            CallbackRegistry.TryDispatch(cb.Handle, DoubleEncode("{\"reason\":\"user\"}"));
+            CallbackRegistry.TryDispatch(cb.Handle, "{\"reason\":\"user\"}");
 
             Assert.AreEqual(DisconnectionReason.User, received!.Reason);
         }

@@ -58,10 +58,10 @@ namespace ElevenLabs.WebGL.Bridged
         {
             _connection = connection ?? throw new ArgumentNullException(nameof(connection));
 
-            _onMessageCallback = BridgeCallback.Wrap<string>(HandleJsMessage);
+            _onMessageCallback = BridgeCallback.Wrap(HandleJsMessage);
             _connection.Call("onMessage", _onMessageCallback);
 
-            _onDisconnectCallback = BridgeCallback.Wrap<string>(HandleJsDisconnect);
+            _onDisconnectCallback = BridgeCallback.Wrap(HandleJsDisconnect);
             _connection.Call("onDisconnect", _onDisconnectCallback);
 
             _onModeChangeCallback = BridgeCallback.Wrap<string>(HandleJsModeChange);
