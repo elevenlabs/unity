@@ -131,6 +131,33 @@ function breakCycles(node: unknown, ancestors: Set<object>): unknown {
   return out;
 }
 
+// Modelina names a nested inline-object property after its property name
+// (PascalCased). When that derived name equals the wrapper schema's own name —
+// e.g. wire schema `ClientToolCall` with inner property `client_tool_call` —
+// Modelina's name-keyed deduplication collapses the inner type onto the
+// wrapper itself, producing a self-referential property
+// (`public ClientToolCall ClientToolCallData { get; set; }`) with no way to
+// read the actual tool_name / tool_call_id / parameters.
+//
+// Inject an explicit `$id` on the inner schema to disambiguate. The `Event`
+// suffix matches the convention the AsyncAPI spec already uses for inner
+// payload objects (`AgentResponseEvent`, `PingEvent`, `AudioEvent`, …).
+function disambiguateNestedTypeNames(
+  schema: Record<string, unknown>,
+  wrapperName: string,
+): void {
+  const properties = schema.properties;
+  if (!isObject(properties)) return;
+  for (const [propName, propSchema] of Object.entries(properties)) {
+    if (!isObject(propSchema)) continue;
+    if (propSchema.type !== "object") continue;
+    if (typeof propSchema.$id === "string") continue; // already named
+    if (toPascalCase(propName) === wrapperName) {
+      propSchema.$id = `${wrapperName}Event`;
+    }
+  }
+}
+
 // ---- Collect payloads per direction ----
 
 type Direction = "incoming" | "outgoing";
@@ -183,6 +210,7 @@ function collectPayloads(direction: Direction): Payload[] {
     // the root model. Nested types are named from their containing property by
     // Modelina's default constraint.
     const safe = breakCycles(payload, new Set()) as Record<string, unknown>;
+    disambiguateNestedTypeNames(safe, name);
     results.push({ name, schema: { ...safe, $id: name } });
   }
   return results;
@@ -380,16 +408,6 @@ console.log(`Wrote ${dispatcherPath}`);
 // transformed schema, no hand-rolled JSON-Schema → C# mapping — that keeps
 // the args output zero-drift from the DTO output by construction.
 
-// Two wire types currently hit the same wrapper/envelope name-clash bug as
-// the DTO output (3.4 in plan-b.md): the generated wrapper class collides
-// with the inner type and renames the property to `…Data`. Until that bug is
-// fixed at the wire layer, the args generator skips these and Conversation
-// hand-writes their mapping.
-const SKIPPED_ARGS = new Set([
-  "ClientToolCall",
-  "AgentToolResponseFullPayload",
-]);
-
 interface ArgsField {
   name: string;
   csType: string;
@@ -425,7 +443,6 @@ function buildArgsRecord(wireModel: OutputModel): ArgsRecord | null {
   const obj = wireModel.model;
   if (!(obj instanceof ConstrainedObjectModel)) return null;
   const wireType = obj.name;
-  if (SKIPPED_ARGS.has(wireType)) return null;
 
   const nonType = Object.values(obj.properties).filter(
     (p) => p.unconstrainedPropertyName !== "type",
@@ -507,6 +524,8 @@ function emitIncomingArgs(
     "// Generator: pnpm --dir Codegen~ run generate",
     "",
     "#nullable enable",
+    "",
+    "using System.Collections.Generic;",
     "",
     "namespace ElevenLabs.Protocol",
     "{",

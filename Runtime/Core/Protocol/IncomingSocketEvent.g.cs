@@ -174,19 +174,68 @@ namespace ElevenLabs.Protocol
     public class ClientToolCall : IncomingSocketEvent
     {
         [JsonProperty("client_tool_call")]
-        public ClientToolCall ClientToolCallData { get; set; } = null!;
+        public ClientToolCallEvent ClientToolCallData { get; set; } = null!;
 
         [JsonProperty("type")]
         public string Type { get; init; } = "client_tool_call";
     }
 
+    public class ClientToolCallEvent
+    {
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("parameters")]
+        public Dictionary<string, dynamic> Parameters { get; set; } = new();
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+
+        [JsonProperty("expects_response")]
+        public bool ExpectsResponse { get; set; } = false;
+    }
+
     public class AgentToolResponseFullPayload : IncomingSocketEvent
     {
         [JsonProperty("agent_tool_response_full_payload")]
-        public AgentToolResponseFullPayload AgentToolResponseFullPayloadData { get; set; } = null!;
+        public AgentToolResponseFullPayloadEvent AgentToolResponseFullPayloadData { get; set; } =
+            null!;
 
         [JsonProperty("type")]
         public string Type { get; init; } = "agent_tool_response_full_payload";
+    }
+
+    public class AgentToolResponseFullPayloadEvent
+    {
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_type")]
+        public string ToolType { get; set; } = "";
+
+        [JsonProperty("is_error")]
+        public bool IsError { get; set; } = false;
+
+        [JsonProperty("is_blocked")]
+        public bool? IsBlocked { get; set; }
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+
+        [JsonProperty("is_called")]
+        public bool IsCalled { get; set; } = false;
+
+        [JsonProperty("full_tool_result")]
+        public string FullToolResult { get; set; } = "";
+
+        [JsonProperty("truncated")]
+        public bool? Truncated { get; set; }
     }
 
     public class Ping : IncomingSocketEvent

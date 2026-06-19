@@ -4,6 +4,8 @@
 
 #nullable enable
 
+using System.Collections.Generic;
+
 namespace ElevenLabs.Protocol
 {
     public record ConversationInitiationMetadataArgs(
@@ -34,6 +36,26 @@ namespace ElevenLabs.Protocol
     public record InterruptionArgs(int EventId);
 
     public record VadScoreArgs(double VadScore);
+
+    public record ClientToolCallArgs(
+        string ToolName,
+        string ToolCallId,
+        Dictionary<string, dynamic> Parameters,
+        int EventId,
+        bool ExpectsResponse
+    );
+
+    public record AgentToolResponseFullPayloadArgs(
+        string ToolName,
+        string ToolCallId,
+        string ToolType,
+        bool IsError,
+        bool? IsBlocked,
+        int EventId,
+        bool IsCalled,
+        string FullToolResult,
+        bool? Truncated
+    );
 
     public record PingArgs(int EventId, int? PingMs);
 
@@ -83,6 +105,30 @@ namespace ElevenLabs.Protocol
 
         public static VadScoreArgs ToArgs(this VadScore e) =>
             new(VadScore: e.VadScoreEvent.VadScore);
+
+        public static ClientToolCallArgs ToArgs(this ClientToolCall e) =>
+            new(
+                ToolName: e.ClientToolCallData.ToolName,
+                ToolCallId: e.ClientToolCallData.ToolCallId,
+                Parameters: e.ClientToolCallData.Parameters,
+                EventId: e.ClientToolCallData.EventId,
+                ExpectsResponse: e.ClientToolCallData.ExpectsResponse
+            );
+
+        public static AgentToolResponseFullPayloadArgs ToArgs(
+            this AgentToolResponseFullPayload e
+        ) =>
+            new(
+                ToolName: e.AgentToolResponseFullPayloadData.ToolName,
+                ToolCallId: e.AgentToolResponseFullPayloadData.ToolCallId,
+                ToolType: e.AgentToolResponseFullPayloadData.ToolType,
+                IsError: e.AgentToolResponseFullPayloadData.IsError,
+                IsBlocked: e.AgentToolResponseFullPayloadData.IsBlocked,
+                EventId: e.AgentToolResponseFullPayloadData.EventId,
+                IsCalled: e.AgentToolResponseFullPayloadData.IsCalled,
+                FullToolResult: e.AgentToolResponseFullPayloadData.FullToolResult,
+                Truncated: e.AgentToolResponseFullPayloadData.Truncated
+            );
 
         public static PingArgs ToArgs(this Ping e) =>
             new(EventId: e.PingEvent.EventId, PingMs: e.PingEvent.PingMs);
