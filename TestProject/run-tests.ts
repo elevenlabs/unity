@@ -23,7 +23,7 @@
 // Docs~/plans/generic-bridge-primitives.md).
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -85,6 +85,17 @@ const unityArgs = [
 const verbose = values.verbose;
 console.log(`> ${unity} ${unityArgs.join(" ")}${verbose ? "" : "  (silent — pass --verbose to stream)"}`);
 
+// Wipe any stale XML before Unity starts so the post-run existence check is
+// unambiguous: file present = Unity wrote results, file absent = Unity bailed
+// before writing. Without this guard, Unity sometimes "starts" the test runner
+// ("Running tests for ExecutionSettings"), then exits silently before writing
+// — the script would then happily parse the OLD XML and report a misleading
+// "Tests: N/N passed". Common causes of the silent bail: stale Unity license
+// (Access-token-unavailable in the log), open Editor holding a project lock,
+// or a NUnit fixture-level setup exception. None surface as compile errors,
+// so this delete-before-run guard is the cheapest line of defence.
+rmSync(xmlPath, { force: true });
+
 const child = spawn(unity, unityArgs, {
   stdio: verbose ? "inherit" : ["ignore", "pipe", "pipe"],
 });
@@ -101,20 +112,33 @@ child.on("error", (err) => {
 });
 
 child.on("exit", (code) => {
-  const exitCode = code ?? 1;
-  if (!verbose && exitCode !== 0) {
+  const unityExit = code ?? 1;
+  if (!verbose && unityExit !== 0) {
     process.stdout.write(buffer.join(""));
   }
-  reportFailures(xmlPath);
-  process.exit(exitCode);
+  const resultsExit = reportFailures(xmlPath);
+  // Prefer the resultsExit signal when it's non-zero — a missing XML is always
+  // a script-level failure even if Unity reported exit 0, and a genuine NUnit
+  // failure count surfaces through resultsExit too.
+  process.exit(resultsExit !== 0 ? resultsExit : unityExit);
 });
 
-function reportFailures(xmlPath: string): void {
+/**
+ * Parses the post-run NUnit XML and emits a Tests-summary line plus a
+ * problem-matcher-friendly entry for each failure. Returns the exit code the
+ * script should use (`0` clean, `1` NUnit reported failures, `2` Unity bailed
+ * before writing the XML). The delete-before-run guard above guarantees that
+ * a present file means Unity wrote results this run — no mtime arithmetic
+ * needed.
+ */
+function reportFailures(xmlPath: string): number {
   if (!existsSync(xmlPath)) {
     console.error(
-      `\nNo test-results.xml at ${xmlPath} — Unity may have crashed before writing it.`,
+      `\n✗ No test-results.xml at ${xmlPath}\n  Unity exited without writing results — likely a Unity license issue ` +
+        `(check the log for "[Licensing::Module] Error"), an open Editor holding the project lock, or a NUnit ` +
+        `fixture-level setup exception. The test runner never reported its outcome.`,
     );
-    return;
+    return 2;
   }
   const xml = readFileSync(xmlPath, "utf8");
 
@@ -148,13 +172,23 @@ function reportFailures(xmlPath: string): void {
 
   const runMatch = xml.match(runRe);
   console.log("");
+  let failedCount = 0;
   if (runMatch) {
     const [, total, passed, failed] = runMatch;
+    failedCount = Number.parseInt(failed, 10);
     console.log(`Tests: ${passed}/${total} passed, ${failed} failed`);
+  } else {
+    // XML exists, was rewritten this run, but doesn't carry a <test-run> root —
+    // shouldn't normally happen, but flag it so the failure mode is obvious.
+    console.error(
+      `\n✗ test-results.xml has no <test-run total=…> — NUnit didn't complete a run.`,
+    );
+    return 2;
   }
   for (const { file, line, fullname, message } of failures) {
     console.log(
       `${file}:${line}: error ${fullname}: ${message || "(no message)"}`,
     );
   }
+  return failedCount > 0 ? 1 : 0;
 }
