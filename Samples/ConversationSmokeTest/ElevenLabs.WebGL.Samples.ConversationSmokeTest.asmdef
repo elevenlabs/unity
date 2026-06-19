@@ -1,0 +1,20 @@
+{
+    "name": "ElevenLabs.WebGL.Samples.ConversationSmokeTest",
+    "rootNamespace": "ElevenLabs.WebGL.Samples.ConversationSmokeTest",
+    "references": [
+        "ElevenLabs.Agents.Core",
+        "ElevenLabs.Agents.WebGL"
+    ],
+    "includePlatforms": [
+        "Editor",
+        "WebGL"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
