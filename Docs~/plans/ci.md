@@ -339,9 +339,22 @@ specific commit" convention, each `game-ci/*` action used by the Unity
 lanes must be added pinned to its release commit SHA, and the
 workflow's `uses:` must reference the same SHA so the allowlist match
 is literal. `game-ci/unity-test-runner`, `game-ci/unity-builder`, and
-`game-ci/unity-return-license` are queued for the allowlist via
-elevenlabs-terraform PR #9064; until that's applied, the Unity Edit
-Mode workflow fails at startup even though the file itself is correct.
+`game-ci/unity-return-license` were queued for the allowlist via
+elevenlabs-terraform PR #9064 and applied 2026-06-19; the first
+post-allowlist Unity run now reaches the Docker pull step.
+
+**Disk-space constraint on `ubuntu-latest`.** The Unity editor image
+(`unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2`) is ~7 GB compressed
+and ~20 GB extracted. GitHub-hosted `ubuntu-latest` runners ship with
+only ~14 GB free on the root partition; the cold pull aborts partway
+with `failed to register layer: write …: no space left on device` and
+docker exits 125. The Unity workflow reclaims ~25 GB before the pull
+by `sudo rm -rf`-ing pre-installed toolchains we don't use (Android
+SDK ~9 GB, dotnet ~1.7 GB, GHC ~5 GB, CodeQL ~5 GB, boost +
+powershell ~2 GB, plus the wider hostedtoolcache). Inlined as a shell
+step rather than adopting `jlumbroso/free-disk-space` so we don't
+need another org Actions allowlist round-trip. The same step belongs
+in the integration workflow (5.3.4) since it pulls the same image.
 
 ### `.github/workflows/lint.yml` (no secrets)
 
@@ -361,6 +374,8 @@ Mode workflow fails at startup even though the file itself is correct.
 - Concurrency: `group: unity-tests-${{ github.ref }}`, `cancel-in-progress: true`
   (so a force-push doesn't queue two activations)
 - Runner: `ubuntu-latest` (game-ci needs Linux for the Docker images)
+- Pre-step: inline `Free disk space for Unity image` (~25 GB reclaim)
+  before the Unity image pull — see "Disk-space constraint" above
 - Action: `game-ci/unity-test-runner` pinned to the v4.3.1 commit SHA
   (`0ff419b...`) — matches the org allowlist entry
 - Inputs:
