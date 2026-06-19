@@ -46,6 +46,9 @@ namespace ElevenLabs.WebGL.Tests
             public bool IsMuted { get; private set; }
             public int CloseCallCount { get; private set; }
             public bool? LastMuteRequest { get; private set; }
+            public float VolumeReturnValue { get; set; } = 0f;
+            public int GetVolumeCallCount { get; private set; }
+            public byte[]? LastByteFrequencyBuffer { get; private set; }
 
             public Awaitable Close()
             {
@@ -65,16 +68,25 @@ namespace ElevenLabs.WebGL.Tests
                 return CompletedAwaitable();
             }
 
-            public float GetVolume() => 0f;
+            public float GetVolume()
+            {
+                GetVolumeCallCount++;
+                return VolumeReturnValue;
+            }
 
-            public void GetByteFrequencyData(byte[] buffer) { }
+            public void GetByteFrequencyData(byte[] buffer) => LastByteFrequencyBuffer = buffer;
         }
 
         private sealed class MockOutputController : IOutputController
         {
             public int CloseCallCount { get; private set; }
             public int InterruptCallCount { get; private set; }
+            public int? LastInterruptResetDurationMs { get; private set; }
             public float LastVolume { get; private set; } = 1f;
+            public int SetVolumeCallCount { get; private set; }
+            public float VolumeReturnValue { get; set; } = 0f;
+            public int GetVolumeCallCount { get; private set; }
+            public byte[]? LastByteFrequencyBuffer { get; private set; }
 
             public Awaitable Close()
             {
@@ -87,13 +99,25 @@ namespace ElevenLabs.WebGL.Tests
                 FormatConfig? format = null
             ) => CompletedAwaitable();
 
-            public void SetVolume(float volume) => LastVolume = volume;
+            public void SetVolume(float volume)
+            {
+                SetVolumeCallCount++;
+                LastVolume = volume;
+            }
 
-            public void Interrupt(int? resetDurationMs = null) => InterruptCallCount++;
+            public void Interrupt(int? resetDurationMs = null)
+            {
+                InterruptCallCount++;
+                LastInterruptResetDurationMs = resetDurationMs;
+            }
 
-            public float GetVolume() => 0f;
+            public float GetVolume()
+            {
+                GetVolumeCallCount++;
+                return VolumeReturnValue;
+            }
 
-            public void GetByteFrequencyData(byte[] buffer) { }
+            public void GetByteFrequencyData(byte[] buffer) => LastByteFrequencyBuffer = buffer;
         }
 
         private static Awaitable CompletedAwaitable()
@@ -766,6 +790,351 @@ namespace ElevenLabs.WebGL.Tests
 
             Assert.AreEqual(Mode.Listening, conversation.Mode);
             CollectionAssert.AreEqual(new[] { Mode.Speaking, Mode.Listening }, changes);
+        }
+
+        // Outgoing messages (public Conversation API) ------------------------
+
+        [Test]
+        public void SendUserMessage_SendsUserMessageWithText()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendUserMessage("hello world");
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as UserMessage;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("hello world", msg!.Text);
+            Assert.AreEqual("user_message", msg.Type);
+        }
+
+        [Test]
+        public void SendContextualUpdate_SendsContextualUpdateWithText()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendContextualUpdate("player just opened the inventory");
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as ContextualUpdate;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("player just opened the inventory", msg!.Text);
+            Assert.AreEqual("contextual_update", msg.Type);
+        }
+
+        [Test]
+        public void SendUserActivity_SendsUserActivityEvent()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendUserActivity();
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as UserActivity;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("user_activity", msg!.Type);
+        }
+
+        // Audio control passthroughs (public Conversation API) --------------
+
+        [Test]
+        public void SetVolume_ForwardsValueToOutputController()
+        {
+            var conversation = NewConversation(out _, out _, out var output);
+
+            conversation.SetVolume(0.42f);
+
+            Assert.AreEqual(1, output.SetVolumeCallCount);
+            Assert.AreEqual(0.42f, output.LastVolume);
+        }
+
+        [Test]
+        public void SetMicMuted_True_ForwardsToInputControllerAndReflectsInState()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+
+            _ = conversation.SetMicMuted(true);
+
+            Assert.AreEqual(true, input.LastMuteRequest);
+            Assert.IsTrue(input.IsMuted);
+        }
+
+        [Test]
+        public void SetMicMuted_False_ForwardsToInputController()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+            _ = conversation.SetMicMuted(true);
+
+            _ = conversation.SetMicMuted(false);
+
+            Assert.AreEqual(false, input.LastMuteRequest);
+            Assert.IsFalse(input.IsMuted);
+        }
+
+        [Test]
+        public void GetInputVolume_DelegatesToInputController()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+            input.VolumeReturnValue = 0.73f;
+
+            var v = conversation.GetInputVolume();
+
+            Assert.AreEqual(0.73f, v);
+            Assert.AreEqual(1, input.GetVolumeCallCount);
+        }
+
+        [Test]
+        public void GetOutputVolume_DelegatesToOutputController()
+        {
+            var conversation = NewConversation(out _, out _, out var output);
+            output.VolumeReturnValue = 0.55f;
+
+            var v = conversation.GetOutputVolume();
+
+            Assert.AreEqual(0.55f, v);
+            Assert.AreEqual(1, output.GetVolumeCallCount);
+        }
+
+        [Test]
+        public void GetInputByteFrequencyData_DelegatesToInputControllerWithSameBuffer()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+            var buffer = new byte[32];
+
+            conversation.GetInputByteFrequencyData(buffer);
+
+            Assert.AreSame(buffer, input.LastByteFrequencyBuffer);
+        }
+
+        [Test]
+        public void GetOutputByteFrequencyData_DelegatesToOutputControllerWithSameBuffer()
+        {
+            var conversation = NewConversation(out _, out _, out var output);
+            var buffer = new byte[64];
+
+            conversation.GetOutputByteFrequencyData(buffer);
+
+            Assert.AreSame(buffer, output.LastByteFrequencyBuffer);
+        }
+
+        // Identity passthrough ----------------------------------------------
+
+        [Test]
+        public void ConversationId_DelegatesToConnection()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            connection.ConversationId = "conv-xyz";
+
+            Assert.AreEqual("conv-xyz", conversation.ConversationId);
+        }
+
+        // Lifecycle ---------------------------------------------------------
+
+        [Test]
+        public void StartSessionAsync_Throws_NotImplementedException()
+        {
+            Assert.Throws<NotImplementedException>(() =>
+                Conversation.StartSessionAsync(new ConversationOptions())
+            );
+        }
+
+        [Test]
+        public void EndSession_WhenConnected_ClosesAllAndTransitionsStatusAndFiresDisconnected()
+        {
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            conversation.UpdateStatus(Status.Connected);
+            var statusTransitions = new List<Status>();
+            conversation.StatusChanged += statusTransitions.Add;
+            DisconnectionDetails? received = null;
+            conversation.Disconnected += d => received = d;
+
+            _ = conversation.EndSession();
+
+            Assert.AreEqual(1, connection.CloseCallCount);
+            Assert.AreEqual(1, input.CloseCallCount);
+            Assert.AreEqual(1, output.CloseCallCount);
+            CollectionAssert.AreEqual(
+                new[] { Status.Disconnecting, Status.Disconnected },
+                statusTransitions
+            );
+            Assert.AreEqual(Status.Disconnected, conversation.Status);
+            Assert.IsNotNull(received);
+            Assert.AreEqual(DisconnectionReason.User, received!.Reason);
+        }
+
+        [Test]
+        public void EndSession_WhenAlreadyDisconnected_IsNoOp()
+        {
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            // Status starts at Disconnected.
+            DisconnectionDetails? received = null;
+            conversation.Disconnected += d => received = d;
+
+            _ = conversation.EndSession();
+
+            Assert.AreEqual(0, connection.CloseCallCount);
+            Assert.AreEqual(0, input.CloseCallCount);
+            Assert.AreEqual(0, output.CloseCallCount);
+            Assert.IsNull(received);
+        }
+
+        [Test]
+        public void EndSession_WhenConnecting_StillRunsTeardown()
+        {
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            conversation.UpdateStatus(Status.Connecting);
+
+            _ = conversation.EndSession();
+
+            Assert.AreEqual(1, connection.CloseCallCount);
+            Assert.AreEqual(1, input.CloseCallCount);
+            Assert.AreEqual(1, output.CloseCallCount);
+            Assert.AreEqual(Status.Disconnected, conversation.Status);
+        }
+
+        [Test]
+        public void Connection_OnDisconnect_TriggersTeardownWithTransportDetails()
+        {
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            conversation.UpdateStatus(Status.Connected);
+            DisconnectionDetails? received = null;
+            conversation.Disconnected += d => received = d;
+
+            connection.FireDisconnect(
+                new DisconnectionDetails(
+                    DisconnectionReason.Error,
+                    Message: "socket closed",
+                    Context: new DisconnectionContext("close", "abnormal", Code: 1006)
+                )
+            );
+
+            Assert.AreEqual(1, connection.CloseCallCount);
+            Assert.AreEqual(1, input.CloseCallCount);
+            Assert.AreEqual(1, output.CloseCallCount);
+            Assert.IsNotNull(received);
+            Assert.AreEqual(DisconnectionReason.Error, received!.Reason);
+            Assert.AreEqual("socket closed", received.Message);
+            Assert.AreEqual(1006, received.Context?.Code);
+        }
+
+        [Test]
+        public void Connection_OnDisconnect_AfterEndSession_IsNoOp()
+        {
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            conversation.UpdateStatus(Status.Connected);
+            var disconnectCount = 0;
+            conversation.Disconnected += _ => disconnectCount++;
+
+            _ = conversation.EndSession();
+            // Transport observes the close and fires its own OnDisconnect; the
+            // status guard inside EndSessionWithDetails should swallow it.
+            connection.FireDisconnect(new DisconnectionDetails(DisconnectionReason.Error));
+
+            Assert.AreEqual(1, connection.CloseCallCount);
+            Assert.AreEqual(1, input.CloseCallCount);
+            Assert.AreEqual(1, output.CloseCallCount);
+            Assert.AreEqual(1, disconnectCount);
+        }
+
+        // Status dedupe -----------------------------------------------------
+
+        [Test]
+        public void UpdateStatus_DedupesRepeatedTransitions()
+        {
+            var conversation = NewConversation(out _, out _, out _);
+            var transitions = new List<Status>();
+            conversation.StatusChanged += transitions.Add;
+
+            conversation.UpdateStatus(Status.Connecting);
+            conversation.UpdateStatus(Status.Connecting); // dedupe
+            conversation.UpdateStatus(Status.Connected);
+
+            CollectionAssert.AreEqual(new[] { Status.Connecting, Status.Connected }, transitions);
+        }
+
+        // Async client-tool dispatch (Phase 4.4 extra coverage) -------------
+
+        [Test]
+        public void RegisterTool_Async_HandlerThrows_SendsIsErrorAndRaisesError()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>(
+                "boom_async",
+                async _ =>
+                {
+                    await CompletedAwaitable();
+                    throw new InvalidOperationException("kaboom-async");
+                }
+            );
+            string? errorMessage = null;
+            conversation.ErrorOccurred += msg => errorMessage = msg;
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "boom_async",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.IsNull(result.ErrorType);
+            Assert.AreEqual("kaboom-async", result.Result);
+            StringAssert.Contains("kaboom-async", errorMessage!);
+        }
+
+        [Test]
+        public void RegisterTool_Async_ClientToolException_PreservesErrorType()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            conversation.RegisterTool<GreetParams, string>(
+                "auth_async",
+                async _ =>
+                {
+                    await CompletedAwaitable();
+                    throw new ClientToolException("nope", errorType: "rate_limited");
+                }
+            );
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "auth_async",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" }
+                )
+            );
+
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.AreEqual("rate_limited", result.ErrorType);
+            Assert.AreEqual("nope", result.Result);
+        }
+
+        [Test]
+        public void RegisterTool_Async_ExpectsResponseFalse_SuppressesResultSend()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            var invoked = false;
+            var source = new AwaitableCompletionSource<string>();
+            conversation.RegisterTool<GreetParams, string>(
+                "fire_and_forget_async",
+                _ =>
+                {
+                    invoked = true;
+                    return source.Awaitable;
+                }
+            );
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "fire_and_forget_async",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "x" },
+                    expectsResponse: false
+                )
+            );
+            source.SetResult("ignored");
+
+            Assert.IsTrue(invoked);
+            Assert.AreEqual(0, connection.Sent.Count);
         }
     }
 }
