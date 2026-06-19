@@ -41,6 +41,22 @@ The trade is "write the message router in C# once" vs "write the bridge
 façade once" — and on net the C# router is the smaller surface, since the JS
 SDK exposes 4 narrow classes vs. 1 sprawling `Conversation`.
 
+## v0.1 ship checklist
+
+Phases 1–6 landed (WebGL stack end-to-end green; 218/218 Edit Mode tests + Playwright
+smokes passing). Remaining work to tag v0.1 across all Unity targets is tracked as GitHub
+issues; each line below is the gate, not the implementation plan — see the linked issue
+for that.
+
+- [ ] **Native implementations** for all non-WebGL Unity targets — [#9](https://github.com/elevenlabs/unity/issues/9).
+- [ ] **`ConversationOptions` parity** with the JS SDK's `Options` (overrides, dynamic variables, custom LLM body, user/source info) via the already-generated DTOs — [#10](https://github.com/elevenlabs/unity/issues/10).
+- [ ] **Method + event parity** with `@elevenlabs/client` (changeInput/OutputDevice, multimodal, file upload, MCP approval; the JS SDK's wider callback surface) — [#11](https://github.com/elevenlabs/unity/issues/11). Includes an upfront investigation pass classifying each missing callback as wire-event-driven vs. derived-state, since not every JS callback maps to a wire type the AsyncAPI spec declares.
+- [ ] **Spec re-vendor** (or wait on the automated workflow at [#7](https://github.com/elevenlabs/unity/issues/7)) so the wire-event-driven half of #11 has codegen output to lean on.
+
+Nothing else from this plan blocks the tag — Phases 1–6 are receipts for verified work,
+and the remaining `## Pending Human Approval` items below are either resolved or tracked
+externally as issues.
+
 ## What stays the same
 
 - **The Bridge~/build/bundle-jslib.ts toolchain.** Reused for the new `ElevenLabsConnection.jslib` artifact.
@@ -233,18 +249,23 @@ points carry everything.
 - [x] **6.2 — Validation assertions.** Extended `ConversationSmokeTest.cs` with the Conversation-level adaptation of the primitives V-series: **V2** — sync `SendContextualUpdate` is called immediately after the awaited `StartSessionAsync` returns, asserting the Awaitable continuation didn't corrupt the Emscripten call context; **V3** — every audio chunk's `EventId` is recorded across the agent's whole turn (`AgentResponseCompleted` signals the list is complete), then asserted strictly monotonically increasing; **V4** — two `SendContextualUpdate` calls plus the user message exercise the same connection handle multiple times in one session. V1 (same-frame async) dropped — that's a primitives-layer invariant already locked in the 5.5 router-level tests + the primitives smoke. **Audio default-mode evidence:** `HostBuild.BuildConversation` builds an empty scene with only the smoke MonoBehaviour, so by construction no Unity `AudioSource` exists; audio events nevertheless arriving over the lifecycle proves the JS-side `attachInputToConnection` / `attachConnectionToOutput` + `withoutAudioPayload` pipeline carried the turn end-to-end with zero Unity audio component involvement. The runtime `FindObjectsByType<AudioSource>` call was dropped because the asmdef doesn't transitively reference `UnityEngine.AudioModule` (and the check would have been asserting something true by construction anyway). **No-leak:** captures `PromiseRegistry.Count` / `CallbackRegistry.Count` at baseline (before `StartSessionAsync`), active (after `Connected` fires), and teardown (after `Disconnected` + one `Awaitable.NextFrameAsync()` yield so pending `EL_*Release` DllImports settle); asserts teardown equals baseline (not 0 — preserves robustness against ambient bridge state at page load). New `[assembly: InternalsVisibleTo("ElevenLabs.WebGL.Samples.ConversationSmokeTest")]` on `Runtime/AssemblyInfo.cs` lets the sample reach the internal registry counters without adding any public surface. **Verified:** CSharpier clean, 218/218 Edit Mode tests pass, `bash TestProject/build-webgl-conversation.sh` succeeds with the new assertions in.
 - [x] **6.3 — Vitest browser-mode harness.** New shared `IntegrationTests~/src/playwright-harness.ts` exports `runWebGLSmoke(opts)` — one-shot Chromium session, registers `console` / `pageerror` / `crash` listeners BEFORE navigation, resolves a typed `{ status: "pass" | "fail" | "skip", message }` outcome from caller-supplied matcher substrings. Existing `webgl-smoke.test.ts` refactored onto the helper (5-line test body now). New `IntegrationTests~/src/conversation-smoke.test.ts`: 120s test timeout, points at `TestProject/Build/WebGLConversationSmoke/`, matchers `pass: ["[ConvSmoke] All conversation smoke tests passed!"]` / `fail: ["ASSERTION FAILED"]` / `skip: ["[ConvSmoke] CONFIG MISSING"]`. Wire-frame observation uses the harness's `onBeforeNavigate` hook (anything later misses the SDK handshake) to register `page.on('websocket')`, then per-WS `ws.on('framesent'|'framereceived', …)` records JSON-parsed payloads into per-direction arrays. After a `pass` outcome the test asserts: the first sent frame's `type` is `conversation_initiation_client_data` (the SDK handshake); a sent `user_message` frame exists with `text` matching what the smoke MonoBehaviour passed to `SendUserMessage`; received frames include `conversation_initiation_metadata` (before `agent_response`) and at least one `audio` frame. On `skip` the test returns clean — Vitest has no in-test skip API but `CONFIG MISSING` is the documented expected state on a clean clone. **Verified:** `pnpm --dir IntegrationTests~ run typecheck` clean, `pnpm --dir IntegrationTests~ run test` runs both tests (primitives ✓ in ~4.4s, conversation correctly hits `[ConvSmoke] CONFIG MISSING` and returns clean in ~2.7s); both report as passing. **Real-agent path** documented in `Samples/ConversationSmokeTest/README.md` and `.claude/CLAUDE.md`: developer creates `Assets/Resources/ConversationSmokeConfig.asset` via the Unity menu, fills in `agentId`, reruns the harness; the asset is gitignored. CI provisioning is a single pre-build step that materialises the same `.asset` YAML from a secret.
 
-### Phase 7 — Native implementations (deferred — post-Unity-license)
+### Phase 7 — Native implementations
 
-Out of scope for this plan's v0.1 critical path. Listed for completeness so
-the abstractions in Phase 4 don't accidentally over-fit WebGL.
+**Tracked at [elevenlabs/unity#9](https://github.com/elevenlabs/unity/issues/9).** Required
+for v0.1 release across all Unity targets per the ship decision below — the original
+"WebGL-only, native as v0.2" framing is superseded.
 
 - `NativeWebSocketConnection` using `System.Net.WebSockets.ClientWebSocket`. Reuses the same protocol DTOs from Phase 3.
 - `UnityMicrophoneInput` using `UnityEngine.Microphone` + a chunking loop.
 - `UnityAudioSourceOutput` using `AudioClip` + `PCMReaderCallback` fed by a ring buffer.
-- Edit-mode tests targeting the native impls behind the same `IConnection` contract used in Phase 4.
+- `NativeSessionLauncher` mirroring `BridgedSessionLauncher` (registers `Conversation.SessionFactory` from `[RuntimeInitializeOnLoadMethod]`; requests mobile mic permissions before constructing the input controller).
+- Edit-mode tests targeting the native impls behind the same `IConnection` / `IInputController` / `IOutputController` contracts used in Phase 4.
 
-A v0.1 release tag may ship WebGL-only and call out native as v0.2, or wait
-for native — that decision is at the milestone review, not in this plan.
+**No per-platform integration test matrix.** Each native component is a Unity-mediated
+wrapper over a single platform-stable primitive (`Microphone`, `AudioSource` +
+`PCMReaderCallback`, `ClientWebSocket`); per-target CI would mostly re-test Unity's own
+guarantees. Manual smoke verification on at least one desktop target is sufficient for
+the v0.1 tag; per-platform real-hardware validation can lag and inform a v0.1.x patch.
 
 ## Verification (Unity-free phases)
 
