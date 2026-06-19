@@ -116,4 +116,14 @@ jobs:
 
       - name: Run browser-mode integration tests
         working-directory: "IntegrationTests~"
-        run: pnpm run test
+        run: pnpm run test:ci
+
+      - name: Publish integration test results
+        if: always()
+        uses: mikepenz/action-junit-report@db71d41eb79864e25ab0337e395c352e84523afe # v4.3.1
+        with:
+          report_paths: "IntegrationTests~/test-results.junit.xml"
+          check_name: Integration test details
+          require_tests: true
+          detailed_summary: true
+          include_passed: true
