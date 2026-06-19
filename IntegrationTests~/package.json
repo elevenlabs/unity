@@ -5,6 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=./test-results.junit.xml",
     "typecheck": "tsc --noEmit",
     "setup": "playwright install chromium"
   },
