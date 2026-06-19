@@ -88,10 +88,32 @@ pnpm --dir IntegrationTests~ run typecheck     # TypeScript
 pnpm --dir IntegrationTests~ run test          # Vitest + Playwright
 ```
 
-Drives the WebGL build at `TestProject/Build/WebGL/` through Playwright-managed
-Chromium, asserts on the smoke test's console log trail. Runs headless,
-completes in ~4 seconds end-to-end. Requires that `bash TestProject/build-webgl.sh`
-has been run at least once so the build exists.
+Drives two independent WebGL builds through Playwright-managed Chromium and
+asserts on their console log trails:
+
+- **Primitives smoke** (`TestProject/Build/WebGL/`, produced by
+  `bash TestProject/build-webgl.sh`) — exercises the JS↔C# primitives layer
+  via `Samples/BridgeSmokeTest/`. Runs in ~4 seconds end-to-end.
+- **Conversation smoke** (`TestProject/Build/WebGLConversationSmoke/`, produced
+  by `bash TestProject/build-webgl-conversation.sh`) — drives a full
+  `Conversation.StartSessionAsync` round-trip against a real ElevenLabs
+  agent via `Samples/ConversationSmokeTest/`. Additionally observes the
+  WebSocket frames the SDK emits via `page.on('websocket')` and asserts on
+  the on-wire protocol shape (handshake, `user_message`, `conversation_initiation_metadata`,
+  `agent_response`, `audio` frames).
+
+Both builds must exist for `pnpm --dir IntegrationTests~ run test` to complete;
+either one missing surfaces an explicit error from
+[`IntegrationTests~/src/playwright-harness.ts`](../IntegrationTests~/src/playwright-harness.ts).
+
+**Agent configuration for the conversation smoke.** Create
+`ConversationSmokeConfig` via **Assets → Create → ElevenLabs → Conversation Smoke Config**
+in the Unity Editor and move it into any `Resources/` folder under `Assets/`.
+Fill in your `agentId`. The asset is gitignored — it stays per-developer.
+Without it, the conversation smoke logs `[ConvSmoke] CONFIG MISSING` and the
+harness treats that as a green-but-no-op outcome so a clean clone keeps CI
+green; see [`Samples/ConversationSmokeTest/README.md`](../Samples/ConversationSmokeTest/README.md)
+for the full setup and CI provisioning notes.
 
 ## Unity-side verification
 
