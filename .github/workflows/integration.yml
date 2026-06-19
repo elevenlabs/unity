@@ -25,8 +25,24 @@ permissions:
 
 jobs:
   build-webgl:
-    name: Build WebGL (Unity 6000.3.6f1)
+    name: Build WebGL — ${{ matrix.scene.name }} (Unity 6000.3.6f1)
     runs-on: ubuntu-latest
+    strategy:
+      # Run both scenes in parallel on separate runners — each gets its own
+      # TestProject/ checkout so they don't conflict on the Unity project lock.
+      # fail-fast: false so a failure in one scene doesn't cancel the other,
+      # making CI logs more useful when only one is broken.
+      fail-fast: false
+      matrix:
+        scene:
+          - name: primitives
+            buildMethod: ElevenLabs.WebGL.Editor.HostBuild.Build
+            outputPath: TestProject/Build/WebGL
+            artifactName: webgl-smoke-build
+          - name: conversation
+            buildMethod: ElevenLabs.WebGL.Editor.HostBuild.BuildConversation
+            outputPath: TestProject/Build/WebGLConversationSmoke
+            artifactName: webgl-conversation-smoke-build
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -51,13 +67,17 @@ jobs:
         uses: actions/cache@v5
         with:
           path: TestProject/Library
+          # Both matrix entries share the same Library cache (asset import +
+          # IL2CPP state is scene-independent); whichever job finishes first
+          # writes the cache, the second sees the key exists and no-ops the
+          # save. Safe under parallel writes.
           key: Library-TestProject-WebGL-${{ hashFiles('TestProject/Packages/packages-lock.json', 'TestProject/ProjectSettings/ProjectSettings.asset') }}
           restore-keys: |
             Library-TestProject-WebGL-
             Library-TestProject-
 
-      # `buildMethod` runs the same entry point as
-      # `bash TestProject/build-webgl.sh`.
+      # `buildMethod` runs the same entry point as the corresponding
+      # TestProject/build-webgl*.sh script (Build → primitives, BuildConversation → conversation).
       - name: Build WebGL
         uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42 # v5.0.0
         env:
@@ -69,30 +89,38 @@ jobs:
           unityVersion: 6000.3.6f1
           targetPlatform: WebGL
           customImage: unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2
-          buildMethod: ElevenLabs.WebGL.Editor.HostBuild.Build
+          buildMethod: ${{ matrix.scene.buildMethod }}
           allowDirtyBuild: true
 
       - name: Upload WebGL build
         uses: actions/upload-artifact@v7
         with:
-          name: webgl-smoke-build
-          path: TestProject/Build/WebGL
+          name: ${{ matrix.scene.artifactName }}
+          path: ${{ matrix.scene.outputPath }}
           if-no-files-found: error
           retention-days: 7
 
   integration-test:
     name: Integration tests (Playwright + Chromium)
     runs-on: ubuntu-latest
+    # Depends on the full matrix — GitHub waits for both scenes to finish
+    # before running the tests, which need both build artifacts on disk.
     needs: build-webgl
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Download WebGL build
+      - name: Download primitives WebGL build
         uses: actions/download-artifact@v7
         with:
           name: webgl-smoke-build
           path: TestProject/Build/WebGL
+
+      - name: Download conversation WebGL build
+        uses: actions/download-artifact@v7
+        with:
+          name: webgl-conversation-smoke-build
+          path: TestProject/Build/WebGLConversationSmoke
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
