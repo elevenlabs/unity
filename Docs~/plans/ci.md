@@ -413,16 +413,38 @@ lanes.
    to strict NUL-only, fall back to Option B (provision a CI-only
    Unity ID, generate a Personal ULF, swap the secrets).
 
-2. ~~**Repo visibility.**~~ **Resolved 2026-06-17:** repo is going
-   public. GitHub Actions minutes are unlimited on public repos, so
-   the Unity Docker image cost is purely wall-clock latency, not
-   billed minutes. Standard `ubuntu-latest` runners are fine.
+2. **Repo visibility — BLOCKED at org level (revised 2026-06-19).** The
+   2026-06-17 decision was to go public, but the `elevenlabs` org has
+   an active ruleset **"No public repos, no delete/transfers"** (id
+   `4126218`) that prevents flipping `visibility: private → public`
+   without platform-team intervention. Repo stays private for now; CI
+   continues to work fine on private (GitHub Actions minutes consumed
+   from the org pool, not unlimited as they would be on public). To
+   actually go public, someone has to file a request against
+   `elevenlabs-terraform` for an org-ruleset exception on this repo —
+   tracked as a separate follow-up, not a CI-plan task.
 
-3. **Branch protection rules.** Once workflows land, which checks
-   should be required to merge a PR? Suggestion: lint required, Unity
-   Edit Mode tests required, integration test optional (it's slow and
-   the manual `bash TestProject/build-webgl.sh && pnpm --dir IntegrationTests~ run test`
-   round-trip already gates the bridge end-to-end).
+3. ~~**Branch protection rules.**~~ **Resolved 2026-06-19:** classic
+   branch protection on `main` configured via `PUT /repos/elevenlabs/unity/branches/main/protection`.
+   Required status checks (strict mode, both pinned to GitHub Actions'
+   `app_id: 15368` so cosmetic NEUTRAL Check Runs from game-ci can't
+   satisfy them): `Lint, typecheck, test (no Unity)` and `Edit Mode
+   tests (Unity 6000.3.6f1)`. Integration WebGL build + Playwright
+   intentionally NOT required — slow (~25 min cold) and the local
+   `bash TestProject/build-webgl.sh && pnpm --dir IntegrationTests~ run test`
+   round-trip already gates the bridge end-to-end. Linear history
+   enforced (matches the squash-only merge setting). Force pushes and
+   deletions blocked. Admin enforcement OFF (single maintainer keeps
+   the emergency bypass). Repo-level `delete_branch_on_merge` flipped
+   to `true` at the same time so squash-merged branches don't pile up.
+   "Require a pull request before merging" deliberately not enabled —
+   direct push to `main` stays available. Note: required status checks
+   only gate PR merges, not direct pushes, so a `git push origin main`
+   bypasses the lint + Edit Mode gate (the workflows still run after
+   the push, but the commit is already on `main` by then). If
+   accidental direct-push lands a red commit, fix-forward; if it
+   becomes a recurring problem, enable "require PR before merging"
+   via the same protection endpoint.
 
 4. **What to commit.** Pre-built WebGL artifacts in the repo (via
    git-lfs) would let integration tests run without Unity in CI, but
