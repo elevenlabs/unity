@@ -50,18 +50,20 @@ export function toPascalCase(s: string): string {
 
 // ---- C# literal helpers ----
 
-// Escape a string for embedding inside a regular (non-verbatim) C# string
-// literal. Backslash MUST be escaped first; reversing the order would
-// double-escape the backslash added by the quote substitution.
+/**
+ * Escapes backslashes and double-quotes so `s` is safe to embed inside a
+ * regular (non-verbatim) C# string literal.
+ */
 export function escapeCSharpString(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-// Modelina stores `const` values as JSON-encoded tokens (e.g. `'"foo"'` for the
-// string "foo"). Our spec only emits string consts (via Fern's
-// `x-fern-type: literal<"...">` rewrite); a non-string const reaching this
-// point means the spec or the codegen grew a case we never designed for, so
-// fail loudly rather than silently emit `public string Name = "true";`.
+/**
+ * Decodes Modelina's JSON-encoded `const` token (e.g. `'"foo"'`) back into
+ * the underlying string. Throws when `raw` isn't a quoted string — only
+ * string consts are supported (any other shape is a spec/codegen surprise we
+ * want to surface, not silently emit as a bogus `public string Name = "true";`).
+ */
 export function unwrapStringConst(raw: unknown): string {
   if (typeof raw !== "string" || !raw.startsWith('"') || !raw.endsWith('"')) {
     throw new Error(
@@ -77,9 +79,12 @@ export function unwrapStringConst(raw: unknown): string {
   return parsed;
 }
 
-// Modelina (with `handleNullable: true`) already appends `?` to optional
-// primitives before this preset sees the property, so we only suffix
-// reference types and collections here.
+/**
+ * Returns the nullability suffix to render on a property: `?` for optional
+ * reference types and collections, empty string otherwise. Optional primitives
+ * return empty because Modelina (with `handleNullable: true`) has already
+ * appended `?` to their `csType`.
+ */
 export function pickNullabilitySuffix({
   csType,
   isRequired,
@@ -93,9 +98,12 @@ export function pickNullabilitySuffix({
   return "?";
 }
 
-// Required reference types get `= null!` to silence CS8618; required primitives
-// get their natural zero value. Anything we don't recognize returns "" and the
-// caller emits a bare auto-property — safer than guessing.
+/**
+ * Returns the property initializer to emit for a required property of `csType`:
+ * `= null!` for reference types (silences CS8618), the natural zero literal for
+ * known primitives, `= new()` for collections, empty string for anything
+ * unrecognised (caller emits a bare auto-property — safer than guessing).
+ */
 export function pickRequiredInitializer(csType: string): string {
   if (csType === "string") return ' = ""';
   if (csType === "int" || csType === "long") return " = 0";
@@ -108,6 +116,12 @@ export function pickRequiredInitializer(csType: string): string {
 
 // ---- Renderers ----
 
+/**
+ * Renders a single C# property declaration: `[JsonProperty("...")]` attribute
+ * + auto-property with the appropriate nullability suffix and required-property
+ * initializer. `const` properties emit as `{ get; init; } = "literal";`.
+ * Collides with `enclosingName`? Suffix the property name with `Data` (C# CS0542).
+ */
 export function renderProtocolProperty({
   property,
   enclosingName,
@@ -136,6 +150,12 @@ export function renderProtocolProperty({
   return `${attr}\npublic ${renderedType} ${propName} { get; set; }${initializer}${semicolon}`;
 }
 
+/**
+ * Strips Modelina's default `partial` from the emitted class header and,
+ * for top-level event types, appends `: baseClass`. Throws if Modelina's
+ * output no longer matches the expected `public partial class {modelName}`
+ * shape (which would mean its template changed).
+ */
 export function renderProtocolClassHeader({
   content,
   modelName,
@@ -161,11 +181,17 @@ export function renderProtocolClassHeader({
 
 // Modelina's default class renderer emits `public T name { get; set; }`
 // without JSON attributes; the bundled JsonSerializerPreset emits per-class
-// JsonConverter<T> classes, which is more invasive than we want.
-// The property hook emits [JsonProperty] + a standard auto-property,
-// with init-only literal defaults for `const` properties. The class hook
-// strips Modelina's default `partial` and, for top-level event types,
-// injects the discriminated-union base class.
+// JsonConverter<T> classes, which is more invasive than we want — so this
+// preset wires its own property + class hooks instead.
+
+/**
+ * Builds the CSharp preset that customises Modelina's output for our protocol
+ * DTOs: properties get `[JsonProperty]` + a standard auto-property (with
+ * init-only literal defaults for `const` schemas); class headers drop
+ * Modelina's default `partial` and, when the model name is in
+ * `topLevelNames`, append `: baseClass` to inject the discriminated-union
+ * base.
+ */
 export function makeProtocolPreset(
   baseClass: string,
   topLevelNames: Set<string>,

@@ -51,8 +51,12 @@ function isObject(v: unknown): v is Record<string, unknown> {
 // either loops forever or rewrites the same node multiple times. Each
 // preprocessing pass guards itself with a WeakSet of already-visited objects.
 
-// Rewrite Fern's `x-fern-type: literal<"foo">` to vanilla JSON Schema
-// { type: "string", const: "foo" } and mark the property required.
+/**
+ * In-place rewrites every Fern `x-fern-type: literal<"foo">` discriminator into
+ * vanilla JSON Schema (`{ type: "string", const: "foo" }`) and marks the
+ * property required. `visited` is a cycle guard — pass a fresh `WeakSet` at
+ * each top-level call.
+ */
 function substituteFernLiterals(node: unknown, visited: WeakSet<object>): void {
   if (Array.isArray(node)) {
     if (visited.has(node)) return;
@@ -88,11 +92,11 @@ function substituteFernLiterals(node: unknown, visited: WeakSet<object>): void {
 
 substituteFernLiterals(spec, new WeakSet());
 
-// Modelina generates a C# `enum` (with extension methods) for any string field
-// that has an `enum:` constraint. That changes the public API and requires a
-// JsonStringEnumConverter to round-trip correctly. Strip the constraint so
-// these fields stay plain `string` — server-side validation is the source of
-// truth for allowed values anyway.
+/**
+ * In-place strips `enum:` from every string field in the schema tree so
+ * Modelina emits plain `string` properties instead of generating C# enums.
+ * `visited` is a cycle guard — pass a fresh `WeakSet` at each top-level call.
+ */
 function stripStringEnums(node: unknown, visited: WeakSet<object>): void {
   if (Array.isArray(node)) {
     if (visited.has(node)) return;
@@ -109,11 +113,12 @@ function stripStringEnums(node: unknown, visited: WeakSet<object>): void {
 
 stripStringEnums(spec, new WeakSet());
 
-// The parser inlines $refs via shared object references, which produces true
-// cycles for recursive schemas (e.g. DynamicVariableNestedValueType). Modelina
-// stringifies the input internally, so any cycle in the payload kills it.
-// Deep-clone each payload, replacing cyclic back-references with `{}` so
-// Modelina sees a free-form object at the cycle boundary.
+/**
+ * Returns a deep clone of `node` with cyclic back-references replaced by `{}`,
+ * so the result is safe to pass to Modelina (which `JSON.stringify`s its input
+ * and chokes on cycles). `ancestors` is a cycle guard — pass a fresh `Set` at
+ * each top-level call.
+ */
 function breakCycles(node: unknown, ancestors: Set<object>): unknown {
   if (Array.isArray(node)) {
     if (ancestors.has(node)) return [];
@@ -131,17 +136,13 @@ function breakCycles(node: unknown, ancestors: Set<object>): unknown {
   return out;
 }
 
-// Modelina names a nested inline-object property after its property name
-// (PascalCased). When that derived name equals the wrapper schema's own name —
-// e.g. wire schema `ClientToolCall` with inner property `client_tool_call` —
-// Modelina's name-keyed deduplication collapses the inner type onto the
-// wrapper itself, producing a self-referential property
-// (`public ClientToolCall ClientToolCallData { get; set; }`) with no way to
-// read the actual tool_name / tool_call_id / parameters.
-//
-// Inject an explicit `$id` on the inner schema to disambiguate. The `Event`
-// suffix matches the convention the AsyncAPI spec already uses for inner
-// payload objects (`AgentResponseEvent`, `PingEvent`, `AudioEvent`, …).
+/**
+ * In-place renames inline nested-object properties whose PascalCased name
+ * would collide with `wrapperName` (e.g. `ClientToolCall` with inner
+ * `client_tool_call`), by injecting `$id: '{wrapperName}Event'`. Without this,
+ * Modelina's name-keyed deduplication collapses the inner type onto the
+ * wrapper and produces a self-referential property.
+ */
 function disambiguateNestedTypeNames(
   schema: Record<string, unknown>,
   wrapperName: string,
@@ -165,10 +166,17 @@ type Direction = "incoming" | "outgoing";
 interface Payload {
   name: string;
   schema: Record<string, unknown>;
+  /**
+   * AsyncAPI message-level `description:` (verbatim), used by emitters to
+   * attach `<summary>` XML doc comments. Undefined when the spec leaves the
+   * message bare — emitters fall back to no summary in that case.
+   */
+  description?: string;
 }
 
 interface RawMessage {
   name?: string;
+  description?: string;
   payload?: Record<string, unknown>;
 }
 
@@ -211,7 +219,11 @@ function collectPayloads(direction: Direction): Payload[] {
     // Modelina's default constraint.
     const safe = breakCycles(payload, new Set()) as Record<string, unknown>;
     disambiguateNestedTypeNames(safe, name);
-    results.push({ name, schema: { ...safe, $id: name } });
+    const description =
+      typeof message.description === "string" && message.description.trim()
+        ? message.description.trim()
+        : undefined;
+    results.push({ name, schema: { ...safe, $id: name }, description });
   }
   return results;
 }
@@ -286,6 +298,29 @@ function indent(s: string, n = 1): string {
     .join("\n");
 }
 
+/**
+ * Escapes `<`, `>`, and `&` for safe inclusion inside a C# `///` XML doc
+ * comment.
+ */
+function escapeXmlDocText(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Renders `description` as a single-line C# `/// <summary>...</summary>`,
+ * indented `indentLevel` levels of 4 spaces. Returns `null` when `description`
+ * is undefined so callers can omit the doc block entirely instead of emitting
+ * an empty summary.
+ */
+function renderSummaryDoc(
+  description: string | undefined,
+  indentLevel: number,
+): string | null {
+  if (!description) return null;
+  const prefix = "    ".repeat(indentLevel);
+  return `${prefix}/// <summary>${escapeXmlDocText(description)}</summary>`;
+}
+
 function emitFile(baseClass: string, results: GenerateResult[]): string {
   const allModels = dedupeModels(results);
 
@@ -329,20 +364,22 @@ console.log(`Wrote ${outgoingPath}`);
 
 // ---- Per-event dispatcher (sibling of the DTO classes) ----
 
-// Emits an abstract base class that fans an IncomingSocketEvent out to one
-// strongly-typed event per wire payload (plus an OnUnhandled fallback for
-// types the server adds ahead of an SDK refresh). Conversation inherits and
-// calls Dispatch(...) from its message router; combining related events
-// (e.g. agent_tool_response{,_full_payload}) and side effects (auto-pong,
-// end_call shortcuts) stay in Conversation, so this stays a strict 1:1 fan-out.
+/**
+ * Returns the source for `IncomingEventDispatcher.g.cs` — an abstract base
+ * class with one `event System.Action<T>` per incoming wire payload plus an
+ * `OnUnhandled` fallback, and a `protected void Dispatch(IncomingSocketEvent)`
+ * switch that fans an instance into the matching event. `Conversation`
+ * inherits this and turns the wire events into its args-typed surface.
+ */
 function emitIncomingDispatcher(payloads: Payload[]): string {
-  const names = payloads.map((p) => p.name);
-  const eventDecls = names.map(
-    (n) => `        public event System.Action<${n}>? On${n};`,
-  );
-  const cases = names.map(
-    (n) =>
-      `                case ${n} e:\n                    On${n}?.Invoke(e);\n                    break;`,
+  const eventDecls = payloads.map((p) => {
+    const summary = renderSummaryDoc(p.description, 2);
+    const decl = `        public event System.Action<${p.name}>? On${p.name};`;
+    return summary ? `${summary}\n${decl}` : decl;
+  });
+  const cases = payloads.map(
+    ({ name }) =>
+      `                case ${name} e:\n                    On${name}?.Invoke(e);\n                    break;`,
   );
   return [
     "// <auto-generated />",
@@ -353,12 +390,21 @@ function emitIncomingDispatcher(payloads: Payload[]): string {
     "",
     "namespace ElevenLabs.Protocol",
     "{",
+    "    /// <summary>",
+    '    /// Internal fan-out from a parsed <see cref="IncomingSocketEvent"/> to one',
+    '    /// strongly-typed event per wire payload. <see cref="ElevenLabs.Agents.Conversation"/>',
+    "    /// inherits and subscribes to these so its message router can translate",
+    "    /// wire events into the args-typed user-facing event surface.",
+    "    /// </summary>",
     "    public abstract class IncomingEventDispatcher",
     "    {",
     eventDecls.join("\n\n"),
     "",
-    "        // Wire types the server may add ahead of an SDK refresh land here",
-    "        // (mirrors @elevenlabs/client BaseConversation's onDebug arm).",
+    "        /// <summary>",
+    "        /// Wire types the server may add ahead of an SDK refresh land here",
+    "        /// (mirrors <c>@elevenlabs/client</c> <c>BaseConversation</c>'s",
+    "        /// <c>onDebug</c> arm).",
+    "        /// </summary>",
     "        public event System.Action<IncomingSocketEvent>? OnUnhandled;",
     "",
     "        protected void Dispatch(IncomingSocketEvent evt)",
@@ -383,31 +429,6 @@ console.log(`Wrote ${dispatcherPath}`);
 
 // ---- Per-event args records (sibling of the DTO + dispatcher files) ----
 
-// Emits one flat `record {WireType}Args` per incoming wire payload plus a
-// `IncomingEventArgsExtensions.ToArgs(this WireType e)` extension. Conversation
-// subscribes to the dispatcher's wire-typed events and re-raises idiomatic
-// user-facing events whose payloads are these args records — the codegen
-// provides building blocks; combining, suppression, side effects, and event
-// naming stay hand-written in Conversation.
-//
-// Transformation rule (per the Phase 3 spec in plan-b.md):
-//  - Strip the redundant `type` property.
-//  - If exactly one property remains and it's a reference to a nested object,
-//    flatten that inner object's fields onto the args record. Otherwise copy
-//    the non-`type` properties as-is.
-//  - Field names verbatim from the inner type (no renaming heuristic) —
-//    Conversation can rename at its own surface.
-//  - Nested complex types (e.g. AudioEventAlignment) are reused from the wire
-//    DTO file by name, not re-emitted.
-//  - `ToArgs()` uses named arguments so spec-driven field reordering doesn't
-//    silently miswire constructor positions.
-//
-// Implementation: introspects each top-level wire payload's already-emitted
-// Modelina ConstrainedObjectModel; reuses its property names, C# types,
-// nullability rules, and reference targets. No re-running Modelina against a
-// transformed schema, no hand-rolled JSON-Schema → C# mapping — that keeps
-// the args output zero-drift from the DTO output by construction.
-
 interface ArgsField {
   name: string;
   csType: string;
@@ -417,8 +438,15 @@ interface ArgsRecord {
   wireType: string;
   recordName: string;
   fields: ArgsField[];
-  // C# property name of the inner wrapper on the wire DTO, e.g.
-  // "AgentResponseEvent" for AgentResponse. Undefined when not flattened.
+  /**
+   * AsyncAPI message description, used as the record's <summary>. Undefined
+   * when the spec leaves it bare.
+   */
+  description?: string;
+  /**
+   * C# property name of the inner wrapper on the wire DTO, e.g.
+   * "AgentResponseEvent" for AgentResponse. Undefined when not flattened.
+   */
   innerProperty?: string;
 }
 
@@ -439,7 +467,10 @@ function csPropType(p: ConstrainedObjectPropertyModel): string {
   return baseType;
 }
 
-function buildArgsRecord(wireModel: OutputModel): ArgsRecord | null {
+function buildArgsRecord(
+  wireModel: OutputModel,
+  description: string | undefined,
+): ArgsRecord | null {
   const obj = wireModel.model;
   if (!(obj instanceof ConstrainedObjectModel)) return null;
   const wireType = obj.name;
@@ -466,6 +497,7 @@ function buildArgsRecord(wireModel: OutputModel): ArgsRecord | null {
           wireType,
           recordName: `${wireType}Args`,
           fields,
+          description,
           innerProperty: innerCsName,
         };
       }
@@ -477,9 +509,39 @@ function buildArgsRecord(wireModel: OutputModel): ArgsRecord | null {
     name: csPropName(wireType, p),
     csType: csPropType(p),
   }));
-  return { wireType, recordName: `${wireType}Args`, fields };
+  return {
+    wireType,
+    recordName: `${wireType}Args`,
+    fields,
+    description,
+  };
 }
 
+// Transformation rule (per the Phase 3 spec in plan-b.md):
+//  - Strip the redundant `type` property.
+//  - If exactly one property remains and it's a reference to a nested object,
+//    flatten that inner object's fields onto the args record. Otherwise copy
+//    the non-`type` properties as-is.
+//  - Field names verbatim from the inner type (no renaming heuristic) —
+//    Conversation can rename at its own surface.
+//  - Nested complex types (e.g. AudioEventAlignment) are reused from the wire
+//    DTO file by name, not re-emitted.
+//  - `ToArgs()` uses named arguments so spec-driven field reordering doesn't
+//    silently miswire constructor positions.
+//
+// Implementation: introspects each top-level wire payload's already-emitted
+// Modelina ConstrainedObjectModel; reuses its property names, C# types,
+// nullability rules, and reference targets. No re-running Modelina against a
+// transformed schema, no hand-rolled JSON-Schema → C# mapping — that keeps
+// the args output zero-drift from the DTO output by construction.
+
+/**
+ * Returns the source for `IncomingEventArgs.g.cs` — one flat
+ * `record {WireType}Args` per incoming wire payload, plus an
+ * `IncomingEventArgsExtensions.ToArgs(this WireType e)` extension per record.
+ * `results` is the Modelina output from `generateForPayloads(incoming, …)`,
+ * read so the args records reuse the wire DTOs' property names and types.
+ */
 function emitIncomingArgs(
   payloads: Payload[],
   results: GenerateResult[],
@@ -491,16 +553,18 @@ function emitIncomingArgs(
   }
 
   const records: ArgsRecord[] = [];
-  for (const { name } of payloads) {
+  for (const { name, description } of payloads) {
     const wireModel = modelByName.get(name);
     if (!wireModel) continue;
-    const rec = buildArgsRecord(wireModel);
+    const rec = buildArgsRecord(wireModel, description);
     if (rec) records.push(rec);
   }
 
   const recordDecls = records.map((rec) => {
     const params = rec.fields.map((f) => `${f.csType} ${f.name}`).join(", ");
-    return `    public record ${rec.recordName}(${params});`;
+    const summary = renderSummaryDoc(rec.description, 1);
+    const decl = `    public record ${rec.recordName}(${params});`;
+    return summary ? `${summary}\n${decl}` : decl;
   });
 
   const extensionMethods = records.map((rec) => {
@@ -531,6 +595,11 @@ function emitIncomingArgs(
     "{",
     recordDecls.join("\n\n"),
     "",
+    "    /// <summary>",
+    "    /// <c>ToArgs</c> extensions that translate each wire-typed",
+    '    /// <see cref="IncomingSocketEvent"/> into the flat args record exposed on',
+    '    /// the <see cref="ElevenLabs.Agents.Conversation"/> user-facing event surface.',
+    "    /// </summary>",
     "    public static class IncomingEventArgsExtensions",
     "    {",
     extensionMethods.join("\n\n"),
