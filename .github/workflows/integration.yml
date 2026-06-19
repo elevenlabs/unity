@@ -1,0 +1,138 @@
+# Integration lane — builds the TestProject WebGL smoke target via
+# game-ci/unity-builder@v5.0.0 (same Industry trial serial as the
+# Edit Mode lane), uploads the artifact, then drives it through
+# Playwright-managed Chromium in a follow-up job. Tracked as task
+# 5.3.4 in `Docs~/plans/ci.md`.
+#
+# Secrets required (same trio as unity-tests.yml):
+#   UNITY_SERIAL   — Industry trial serial from the Unity ID dashboard
+#   UNITY_EMAIL    — maintainer's Unity ID email
+#   UNITY_PASSWORD — maintainer's Unity ID password (alphanumeric only)
+#
+# The trial expires 2026-07-19; see `Docs~/plans/ci.md` (Option A
+# operational caveats) for the re-activation decision tree.
+
+name: Integration tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Same scoping as unity-tests.yml: a force-push cancels the previous
+# run on the branch rather than fighting itself for a seat. Distinct
+# group from unity-tests so the Edit Mode lane and the WebGL build can
+# run side-by-side (within the 2-seat ceiling).
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  build-webgl:
+    name: Build WebGL (Unity 6000.3.6f1)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Same reclaim as unity-tests.yml — the WebGL editor image
+      # (unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2) plus Library/
+      # plus the build output overflows the ~14 GB root partition on
+      # ubuntu-latest and docker exits 125 mid-pull with `no space
+      # left on device`. Keep this block in sync with the Edit Mode
+      # workflow (same image, same reclaim).
+      - name: Free disk space for Unity image
+        run: |
+          echo "Before:"
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          echo "After:"
+          df -h /
+
+      # Distinct Library/ cache from the Edit Mode lane — WebGL
+      # imports IL2CPP-specific artifacts that aren't present after an
+      # Edit Mode run, so sharing the cache would force a full reimport
+      # on the first build of every PR.
+      - name: Cache Unity Library
+        uses: actions/cache@v5
+        with:
+          path: TestProject/Library
+          key: Library-TestProject-WebGL-${{ hashFiles('TestProject/Packages/packages-lock.json', 'TestProject/ProjectSettings/ProjectSettings.asset') }}
+          restore-keys: |
+            Library-TestProject-WebGL-
+            Library-TestProject-
+
+      # buildMethod points at the same Editor entry point that the
+      # local `bash TestProject/build-webgl.sh` script invokes —
+      # ElevenLabs.WebGL.Editor.HostBuild.Build creates the smoke
+      # scene on the fly, runs BuildPipeline.BuildPlayer for WebGL,
+      # and writes to TestProject/Build/WebGL/.
+      - name: Build WebGL
+        uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42 # v5.0.0
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          projectPath: TestProject
+          unityVersion: 6000.3.6f1
+          targetPlatform: WebGL
+          customImage: unityci/editor:ubuntu-6000.3.6f1-webgl-3.2.2
+          buildMethod: ElevenLabs.WebGL.Editor.HostBuild.Build
+          allowDirtyBuild: true
+
+      - name: Upload WebGL build
+        uses: actions/upload-artifact@v7
+        with:
+          name: webgl-smoke-build
+          path: TestProject/Build/WebGL
+          if-no-files-found: error
+          retention-days: 7
+
+  integration-test:
+    name: Integration tests (Playwright + Chromium)
+    runs-on: ubuntu-latest
+    needs: build-webgl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download WebGL build
+        uses: actions/download-artifact@v7
+        with:
+          name: webgl-smoke-build
+          path: TestProject/Build/WebGL
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/krypton
+          cache: pnpm
+          cache-dependency-path: IntegrationTests~/pnpm-lock.yaml
+
+      - name: Install IntegrationTests~ dependencies
+        working-directory: "IntegrationTests~"
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: "IntegrationTests~"
+        run: pnpm run setup
+
+      - name: Run browser-mode integration tests
+        working-directory: "IntegrationTests~"
+        run: pnpm run test
