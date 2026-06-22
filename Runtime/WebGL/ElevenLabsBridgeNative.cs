@@ -79,11 +79,15 @@ namespace ElevenLabs.WebGL
         public static extern void EL_FunctionRelease(int handle);
 
         // No-op DllImport whose only purpose is to keep the connection-side
-        // .jslib's `$EL_ConnectionFactories` and `$EL_AudioGlueFactories`
-        // library entries alive across Emscripten's dead-code pass. Without a
-        // reference here, those library variables (and their __postset
-        // registrations) get stripped and the first StartSessionAsync fails
-        // with "Unknown factory: createWebSocketConnection".
+        // .jslib's `$EL_ConnectionInit` library entry alive across Emscripten's
+        // dead-code pass. `$EL_ConnectionInit` is the single library variable
+        // that carries the bundled @elevenlabs/client SDK and the
+        // EL_RegisterFactory calls that wire the factories into the
+        // primitives dispatcher (see Bridge~/build/bundle-jslib.ts postset
+        // mode, and Docs~/plans/jslib-bundler-iife-scope.md). Without a
+        // DllImport reference here, the entry — and its bundled payload —
+        // gets stripped and the first StartSessionAsync fails with
+        // "Unknown factory: createWebSocketConnection".
         [DllImport("__Internal")]
         public static extern void EL_EnsureConnectionFactoriesLoaded();
 #else

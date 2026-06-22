@@ -41,8 +41,8 @@ import {
 import { $EL_EncodeReturn, $EL_Rehydrate } from "../primitives/marshalling.js";
 import { $EL_Settle } from "../primitives/promise-settle.js";
 import { $EL_InvokeCallback } from "../primitives/callbacks.js";
-import { $EL_ConnectionFactories } from "./factories.js";
-import { $EL_AudioGlueFactories } from "./audio-glue.js";
+import { connectionFactories } from "./factories.js";
+import { audioGlueFactories } from "./audio-glue.js";
 import type { IncomingSocketEvent } from "@elevenlabs/client/internal/unity";
 
 // ---------------------------------------------------------------------------
@@ -170,10 +170,10 @@ beforeEach(() => {
     heap.set(ptr, s);
   });
 
-  for (const [name, fn] of Object.entries($EL_ConnectionFactories)) {
+  for (const [name, fn] of Object.entries(connectionFactories)) {
     $EL_RegisterFactory(name, fn as (...args: unknown[]) => unknown);
   }
-  for (const [name, fn] of Object.entries($EL_AudioGlueFactories)) {
+  for (const [name, fn] of Object.entries(audioGlueFactories)) {
     $EL_RegisterFactory(name, fn as (...args: unknown[]) => unknown);
   }
 });

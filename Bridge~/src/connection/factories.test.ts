@@ -34,7 +34,7 @@ import {
 import { $EL_EncodeReturn, $EL_Rehydrate } from "../primitives/marshalling.js";
 import { $EL_Settle } from "../primitives/promise-settle.js";
 import { $EL_InvokeCallback } from "../primitives/callbacks.js";
-import { $EL_ConnectionFactories } from "./factories.js";
+import { connectionFactories } from "./factories.js";
 
 // ---------------------------------------------------------------------------
 // SDK mocks — hoisted by Vitest's transformer so they are in effect before the
@@ -146,9 +146,10 @@ beforeEach(() => {
     heap.set(ptr, s);
   });
 
-  // Register all connection factories the same way the jslib __postset would —
-  // bypasses the timing concern that task 2.4 resolves.
-  for (const [name, fn] of Object.entries($EL_ConnectionFactories)) {
+  // Register all connection factories the same way the bundled .jslib does at
+  // runtime (see Bridge~/src/connection/index.ts) — bypasses the bundler's
+  // postset injection, which is an Emscripten build-time concern.
+  for (const [name, fn] of Object.entries(connectionFactories)) {
     $EL_RegisterFactory(name, fn as (...args: unknown[]) => unknown);
   }
 });

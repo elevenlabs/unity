@@ -44,7 +44,7 @@ import {
   attachInputToConnection,
   attachConnectionToOutput,
 } from "@elevenlabs/client/internal/unity";
-import { $EL_AudioGlueFactories, withoutAudioPayload } from "./audio-glue.js";
+import { audioGlueFactories, withoutAudioPayload } from "./audio-glue.js";
 
 // ---------------------------------------------------------------------------
 // Suite 1 — withoutAudioPayload (pure function, no globals).
@@ -190,7 +190,7 @@ beforeEach(() => {
     heap.set(ptr, s);
   });
 
-  for (const [name, fn] of Object.entries($EL_AudioGlueFactories)) {
+  for (const [name, fn] of Object.entries(audioGlueFactories)) {
     $EL_RegisterFactory(name, fn);
   }
 });

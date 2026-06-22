@@ -12,7 +12,7 @@
     "test:watch": "vitest --passWithNoTests",
     "build:primitives": "node build/bundle-jslib.ts src/primitives/index.ts ../Plugins/WebGL/ElevenLabsBridge.jslib",
     "verify:primitives": "pnpm run build:primitives && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsBridge.jslib",
-    "build:connection": "node build/bundle-jslib.ts src/connection/index.ts ../Plugins/WebGL/ElevenLabsConnection.jslib",
+    "build:connection": "node build/bundle-jslib.ts src/connection/index.ts ../Plugins/WebGL/ElevenLabsConnection.jslib --mode postset",
     "verify:connection": "pnpm run build:connection && git diff --exit-code -- ../Plugins/WebGL/ElevenLabsConnection.jslib"
   },
   "pnpm": {
