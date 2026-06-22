@@ -1,13 +1,21 @@
 <!--
-  Preserves the function-pointer-only static methods on BridgeStaticCallbacks
-  from IL2CPP's stripping pass on release builds. Without this, the stripper
-  may delete the [MonoPInvokeCallback]-decorated methods because no managed
-  code calls them — they are only reachable from JS via wasm function
-  pointers. The bug only surfaces in stripped release builds; debug-build
-  testing will not catch it. See Docs~/plans/dyncall-migration.md.
+  Preserves stripping-fragile entry points in ElevenLabs.Agents.WebGL.
+
+  BridgeStaticCallbacks: function-pointer-only static methods reachable from
+  JS via wasm function pointers; IL2CPP's stripper deletes them otherwise
+  because no managed code calls them. See Docs~/plans/dyncall-migration.md.
+
+  BridgedSessionLauncher: registers Conversation.SessionFactory via a
+  [RuntimeInitializeOnLoadMethod] hook. In consumer projects that don't
+  reference ElevenLabs.Agents.WebGL directly from their own asmdef, IL2CPP
+  strips the launcher entirely (along with the attribute) and Conversation.
+  StartSessionAsync throws "No session factory is registered". The in-tree
+  smoke test misses this because its asmdef explicitly references the
+  WebGL assembly — discovered while wiring the Getting Started demo.
 -->
 <linker>
   <assembly fullname="ElevenLabs.Agents.WebGL">
     <type fullname="ElevenLabs.WebGL.BridgeStaticCallbacks" preserve="all" />
+    <type fullname="ElevenLabs.WebGL.Bridged.BridgedSessionLauncher" preserve="all" />
   </assembly>
 </linker>
