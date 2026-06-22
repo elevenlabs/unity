@@ -77,6 +77,15 @@ namespace ElevenLabs.WebGL
 
         [DllImport("__Internal")]
         public static extern void EL_FunctionRelease(int handle);
+
+        // No-op DllImport whose only purpose is to keep the connection-side
+        // .jslib's `$EL_ConnectionFactories` and `$EL_AudioGlueFactories`
+        // library entries alive across Emscripten's dead-code pass. Without a
+        // reference here, those library variables (and their __postset
+        // registrations) get stripped and the first StartSessionAsync fails
+        // with "Unknown factory: createWebSocketConnection".
+        [DllImport("__Internal")]
+        public static extern void EL_EnsureConnectionFactoriesLoaded();
 #else
         public static void EL_Free(IntPtr ptr) { }
 
@@ -161,6 +170,11 @@ namespace ElevenLabs.WebGL
             );
 
         public static void EL_FunctionRelease(int handle) =>
+            throw new PlatformNotSupportedException(
+                "WebGL bridge is not available outside WebGL builds."
+            );
+
+        public static void EL_EnsureConnectionFactoriesLoaded() =>
             throw new PlatformNotSupportedException(
                 "WebGL bridge is not available outside WebGL builds."
             );

@@ -42,6 +42,13 @@ namespace ElevenLabs.WebGL.Bridged
 
         private static void Register()
         {
+            // Pull the .jslib's connection / audio-glue factory bundles into
+            // the build. They self-register via Emscripten __postset, but the
+            // linker only includes them if a real DllImport pins them — see
+            // EL_EnsureConnectionFactoriesLoaded.
+#if UNITY_WEBGL && !UNITY_EDITOR
+            ElevenLabsBridgeNative.EL_EnsureConnectionFactoriesLoaded();
+#endif
             Conversation.SessionFactory = StartAsync;
         }
 

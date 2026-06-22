@@ -59,3 +59,17 @@ export const $EL_ConnectionFactories__deps = ["$EL_RegisterFactory"];
 // the C# JsBridge can invoke them by name via EL_InvokeFactoryAsync.
 export const $EL_ConnectionFactories__postset =
   "Object.keys(EL_ConnectionFactories).forEach(function(k){EL_RegisterFactory(k,EL_ConnectionFactories[k]);});";
+
+// Empty no-op function whose only purpose is its __deps list. Emscripten only
+// includes library variables (`$EL_*`) when something with `__deps` reaches
+// them — `$EL_ConnectionFactories` and `$EL_AudioGlueFactories` have no
+// reachable depender otherwise, so their `__postset` registrations are
+// stripped and EL_InvokeFactoryAsync sees an empty factory registry
+// ("Unknown factory: createWebSocketConnection"). This function gives the
+// C# side a single DllImport entry point to pin both bundles into the build.
+// The body intentionally does nothing — the linker side-effect is the value.
+export const EL_EnsureConnectionFactoriesLoaded__deps = [
+  "$EL_ConnectionFactories",
+  "$EL_AudioGlueFactories",
+];
+export function EL_EnsureConnectionFactoriesLoaded(): void {}

@@ -23457,7 +23457,9 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	var factories_exports = /* @__PURE__ */ __exportAll({
 		$EL_ConnectionFactories: () => $EL_ConnectionFactories,
 		$EL_ConnectionFactories__deps: () => $EL_ConnectionFactories__deps,
-		$EL_ConnectionFactories__postset: () => $EL_ConnectionFactories__postset
+		$EL_ConnectionFactories__postset: () => $EL_ConnectionFactories__postset,
+		EL_EnsureConnectionFactoriesLoaded: () => EL_EnsureConnectionFactoriesLoaded,
+		EL_EnsureConnectionFactoriesLoaded__deps: () => EL_EnsureConnectionFactoriesLoaded__deps
 	});
 	const $EL_ConnectionFactories = {
 		createWebSocketConnection: (config) => WebSocketConnection.create(config),
@@ -23468,6 +23470,8 @@ registerProcessor("audioConcatProcessor", AudioConcatProcessor);
 	};
 	const $EL_ConnectionFactories__deps = ["$EL_RegisterFactory"];
 	const $EL_ConnectionFactories__postset = "Object.keys(EL_ConnectionFactories).forEach(function(k){EL_RegisterFactory(k,EL_ConnectionFactories[k]);});";
+	const EL_EnsureConnectionFactoriesLoaded__deps = ["$EL_ConnectionFactories", "$EL_AudioGlueFactories"];
+	function EL_EnsureConnectionFactoriesLoaded() {}
 
 //#endregion
 //#region src/connection/audio-glue.ts
