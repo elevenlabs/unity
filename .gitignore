@@ -159,3 +159,4 @@ IntegrationTests~/test-results.junit.xml
 
 # Memtrace
 /.memdb/
+.playwright-mcp/
