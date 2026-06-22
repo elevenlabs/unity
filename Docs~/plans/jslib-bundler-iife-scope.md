@@ -176,11 +176,37 @@ For destructuring, `node.id` is an `ObjectPattern` / `ArrayPattern` (no `.name`)
 
 Affected sites in the current connection bundle: `WebSocketConnection.create`, `WebRTCConnection.create` (both block session start today), plus two livekit-client `sortPresets` declarations (dormant until called).
 
-**Fix that shipped** (TBD commit): a `lowerDestructuring()` Rolldown plugin in `Bridge~/build/lower-destructuring.ts`, wired into postset mode only. Walks the bundle AST after Rolldown finishes; rewrites every `const`/`let`/`var` whose declarator is an `ObjectPattern`/`ArrayPattern` with an `Identifier` RHS and only-Identifier bindings into plain `const x = obj.x, y = obj.y;` form. Anything fancier (defaults, rest, computed keys, nested patterns, non-Identifier RHS, multi-declarator) is left alone — the bundle ships verbatim and may still hit Emscripten's bug, but none of those shapes appear in the SDK or our own sources today. The plugin mirrors the existing `substitute-make-dyncall` Rolldown plugin and adds no new dependencies (acorn is already in Rolldown's tree).
+**Fix that shipped** (commit 5241c66): a `lowerDestructuring()` Rolldown plugin in `Bridge~/build/lower-destructuring.ts`, wired into postset mode only. Walks the bundle AST after Rolldown finishes; rewrites every `const`/`let`/`var` whose declarator is an `ObjectPattern`/`ArrayPattern` with an `Identifier` RHS and only-Identifier bindings into plain `const x = obj.x, y = obj.y;` form. Anything fancier (defaults, rest, computed keys, nested patterns, non-Identifier RHS, multi-declarator) is left alone — the bundle ships verbatim and may still hit Emscripten's bug, but none of those shapes appear in the SDK or our own sources today. The plugin mirrors the existing `substitute-make-dyncall` Rolldown plugin and adds no new dependencies (acorn is already in Rolldown's tree).
 
 **Why not just lower Rolldown's `transform.target`.** Tested: Rolldown's target floor is `es2015`, which is the same level destructuring became native syntax. There's no Rolldown-internal way to lower it out. Adding `oxc-transform` or `@babel/*` for one transform was disproportionate.
 
 **Why this fix may not be sufficient long-term.** Emscripten's `acorn-optimizer.js` walker is wrong for *any* AST shape it parses but doesn't recurse into — destructuring is the one we caught because the SDK uses it heavily, but the same bug class could fire on patterns we haven't hit yet (rest parameters in arrow functions, exotic class field initializers, etc.). If a future SDK bump introduces a new pattern that JSDCE strips, the fix belongs in the same plugin. The static-shape regression test (T1) is the right tripwire: extend it with declaration-presence checks for whatever new SDK API we depend on, so the failure mode is "this exact symbol disappeared from framework.js" rather than a runtime `ReferenceError` no one expects.
+
+### Upstream status — the bug is already fixed in Emscripten
+
+After landing the workaround, we checked whether the underlying Emscripten bug had been reported and addressed upstream. It has been:
+
+- **Issue:** [emscripten-core/emscripten#20393](https://github.com/emscripten-core/emscripten/issues/20393), "Invalid Acorn optimization", filed Sept 2023 against Emscripten 3.1.45 by @hoodmane (Pyodide). Same root cause: JSDCE lacks `ObjectPattern`/`ArrayPattern` support in `VariableDeclarator`.
+- **Fix:** [PR #20402](https://github.com/emscripten-core/emscripten/pull/20402), "JSDCE: Add support for ObjectPattern declarations", merged Oct 5, 2023 as commit `db199c4`. The buggy `node.id.name` read was replaced with a `walkPattern(node.id, c, callback)` helper that handles `ObjectPattern`, `ArrayPattern`, and `AssignmentPattern`. (PR initially covered only ObjectPattern; ArrayPattern was added during review when a test caught it — exactly the breadth of our workaround.)
+- **First Emscripten release with the fix:** **3.1.47** (Oct 9, 2023).
+
+Unity's bundled Emscripten versions, for reference:
+
+| Unity version           | Emscripten          | Workaround needed? |
+| ----------------------- | ------------------- | ------------------ |
+| 6.0 (6000.0)            | 3.1.38              | yes                |
+| 6.3 (6000.3) — current  | 3.1.39-git          | **yes** (us)       |
+| 6.4 (6000.4)            | (undocumented 3.1.x)| likely yes         |
+| 6.5 (6000.5) — released | **4.0.19-unity**    | **no**             |
+| 6.6 (6000.6) alpha      | 4.0.19+             | no                 |
+
+Unity 6.5 bumped from Emscripten 3.x to 4.x in [the documented 6.5 release notes](https://docs.unity3d.com/6000.5/Documentation/Manual/WhatsNewUnity65.html) — "*Unity 6.5 and later uses the Emscripten compiler version `4.0.19-unity` to compile Unity Web Player builds*". Consumers on Unity 6.5+ get the fix automatically and don't need our workaround.
+
+**Drop-when condition for this plugin:** when the SDK's minimum supported Unity moves to ≥6.5 (i.e. Emscripten ≥4.0.19, comfortably past the 3.1.47 fix), `lower-destructuring.ts` and its test can be deleted, the postset-mode plugin list in `bundle-jslib.ts` can drop back to `[substituteMakeDyncall()]`, the `Plugins/WebGL/ElevenLabsConnection.jslib` regenerates without the rewrites, and `conversation-shape.test.ts` accepts the original destructuring form (the test already does — `hasDestructuring || hasLowered`). Track this against whatever drives the Unity-minimum decision (Plan B sequencing, samples policy, customer commitments).
+
+**Outstanding ask of Unity** (for the 6.3 LTS gap): backporting Emscripten 3.1.47+ into a `6000.3.x` patch would fix every consumer stuck on the current LTS without forcing them to a major Unity bump. The ask is unusually small because (a) Unity already validated a much larger Emscripten jump for 6.5, so cherry-picking PR #20402 alone is a tiny delta against the 3.1.39 baseline, and (b) it's a strict bug-fix patch — no behavioural surface change for existing consumers.
+
+Self-contained writeup intended for a Unity-contact email (standalone repro, before/after stripping table, walker source, version matrix, suggested resolution) — does not reference this repo or our consumer-side pain so it can be forwarded freely: https://gist.github.com/kraenhansen/917d822cbbda818d27095ea80a470bf7.
 
 ## Open questions
 
