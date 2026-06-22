@@ -32,6 +32,7 @@
 import { rolldown, type OutputChunk } from "rolldown";
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve } from "node:path";
+import { lowerDestructuring } from "./lower-destructuring.ts";
 import { substituteMakeDyncall } from "./substitute-make-dyncall.ts";
 
 type Mode = "iife" | "postset";
@@ -144,9 +145,20 @@ function pascalInitName(entry: string): string {
 
 const { entry, output, mode } = parseArgs(process.argv.slice(2));
 
+// `lowerDestructuring` only matters in postset mode: Emscripten's JSDCE pass
+// runs over the postset string verbatim and incorrectly strips destructuring
+// declarations whose RHS is side-effect-free (see lower-destructuring.ts).
+// The primitives bundle keeps its hand-authored library entries and never
+// produces destructuring patterns through that path, so skipping the plugin
+// there preserves the existing byte-stable primitives `.jslib`.
+const plugins =
+  mode === "postset"
+    ? [substituteMakeDyncall(), lowerDestructuring()]
+    : [substituteMakeDyncall()];
+
 const bundle = await rolldown({
   input: entry,
-  plugins: [substituteMakeDyncall()],
+  plugins,
   // Postset mode emits the bundle verbatim at framework.js top scope. Two
   // separate Emscripten limitations apply there:
   //

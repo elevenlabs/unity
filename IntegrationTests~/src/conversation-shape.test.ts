@@ -86,3 +86,58 @@ test("conversation-smoke framework.js retains SDK symbols the connection .jslib 
     "connectionFactories map missing — bundle didn't reach framework.js",
   ).toContain("connectionFactories");
 });
+
+// Stripping-regression for the Emscripten JSDCE destructuring bug
+// (Docs~/plans/jslib-bundler-iife-scope.md, "Post-fix symptom" section).
+// `WebSocketConnection.create` in the bundled SDK does
+//   const { name: source, version } = sourceInfo;
+// then uses `${source}` and `${version}` in a template literal. Emscripten's
+// own `tools/acorn-optimizer.js` JSDCE pass strips that declaration while
+// leaving the template references intact, producing a runtime
+// `ReferenceError: source is not defined` from the first WebSocket session
+// open. The `lowerDestructuring` Rolldown plugin rewrites the destructuring
+// to plain `source = sourceInfo.name, version = sourceInfo.version` form
+// before Emscripten sees it, which JSDCE leaves alone.
+//
+// The shape we check for: every `${source}` template reference inside the
+// `WebSocketConnection.create` body must be matched by a `source =`
+// declaration in the same function scope. Same for `${version}`. The pre-fix
+// build fails this assertion at runtime; the post-fix build must keep both
+// halves in sync — if Rolldown ever stops emitting the lowered form, or the
+// SDK refactors the URL construction, this test fires before a user does.
+test("framework.js retains `source` and `version` declarations inside WebSocketConnection.create", () => {
+  const idx = frameworkJs.indexOf("WebSocketConnection");
+  expect(idx, "WebSocketConnection symbol missing from framework.js").toBeGreaterThanOrEqual(0);
+
+  // Conservatively isolate the create() body. We don't try to parse — just
+  // take a fixed window forward from the WebSocketConnection occurrence. The
+  // bundled create() body is ~2.5KB; 8KB gives plenty of margin without
+  // crossing into unrelated classes.
+  const region = frameworkJs.slice(idx, idx + 8000);
+
+  // The URL construction uses `source=${source}` AND `version=${version}` —
+  // both halves are signed-URL parameters the SDK has shipped for releases.
+  // If the SDK ever drops them, the test below would over-fire; revisit then.
+  expect(
+    region,
+    "source=${source} template reference missing — the SDK might have changed; check WebSocketConnection.create",
+  ).toContain("source=${source}");
+  expect(
+    region,
+    "version=${version} template reference missing — the SDK might have changed; check WebSocketConnection.create",
+  ).toContain("version=${version}");
+
+  // The declaration. Accept either of:
+  //   * the destructuring form `{name:source,version}` (if Rolldown ever
+  //     learns to leave it alone AND Emscripten JSDCE gets fixed upstream)
+  //   * the lowered form `source = sourceInfo.name` / `source=sourceInfo.name`
+  // Either keeps `source` and `version` bound in scope.
+  const hasDestructuring = /\{\s*name\s*:\s*source\s*,\s*version\s*\}/.test(region);
+  const hasLowered = /\bsource\s*=\s*sourceInfo\.name\b/.test(region);
+  expect(
+    hasDestructuring || hasLowered,
+    "WebSocketConnection.create has `${source}` template references but no `source` binding — " +
+      "Emscripten's acorn-optimizer JSDCE pass likely stripped the declaration. " +
+      "See Docs~/plans/jslib-bundler-iife-scope.md.",
+  ).toBe(true);
+});

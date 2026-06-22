@@ -127,21 +127,63 @@ After `14d7601 fix(webgl): emit connection jslib as a postset to escape IIFE sco
 [TalkingBox:01_Box_Yellow] StartSessionAsync failed: source is not defined
 ```
 
-The `source` symbol is from the upstream SDK's mic-input pipeline (`@elevenlabs/client/internal/unity` → `MediaDeviceInput.create` path). The surrounding code is:
+**Initial hypothesis (wrong).** The surrounding code in the bundled SDK includes a `const source = context.createMediaStreamSource(inputStream);` inside `MediaDeviceInput.create`, and the literal "source" appears in several nested closures, so the obvious guess was that postset emission had broken closure capture in the mic-input pipeline.
 
-```js
-const source = context.createMediaStreamSource(inputStream);
-source.connect(analyser); analyser.connect(worklet);
-// …
-(context, analyser, worklet, inputStream, source, permissions, onError) => { … }
+**Actual root cause** (captured 2026-06-22 by hooking `Promise.prototype.then` in a Playwright session against the Getting Started build):
+
+```
+ReferenceError: source is not defined
+  at WebSocketConnection.create (Web.framework.js:9:47885)
+  at createWebSocketConnection
+  at _EL_InvokeFactoryAsync
 ```
 
-`source` is both a local `const` in one function and a parameter passed into a downstream callback. Whichever site the runtime tripped on, the variable wasn't bound at lookup time. Same flavour of bug as the original IIFE leak — postset-emission rewrote the closure structure around upstream SDK code that assumes a particular lexical environment.
+The bundle source for `WebSocketConnection.create` is:
 
-Suggests Option A's library-variable promotion needs to extend deeper than the top-level connection factories: nested helpers / callbacks from `MediaDeviceInput.create` and friends also need to survive Emscripten's serialization. A spike that decompresses the framework.js after a fresh build and locates the exact stripped closure site would be the right first step (likely T1 from this plan — a static-shape regression test that asserts on the mic-input setup chain in addition to the top-level classes).
+```js
+let url;
+const { name: source, version } = sourceInfo;
+if (config.signedUrl) {
+  const separator = config.signedUrl.includes("?") ? "&" : "?";
+  url = `${config.signedUrl}${separator}source=${source}&version=${version}`;
+} else url = `${origin}${WSS_API_PATHNAME}${config.agentId}&source=${source}&version=${version}`;
+```
+
+In the built `Web.framework.js` the destructuring declaration is **gone**, but the `${source}` / `${version}` template-literal references remain. Dangling references → `ReferenceError`.
+
+Reproduced in isolation against Unity's bundled `tools/acorn-optimizer.js` (Emscripten ships acorn 8.7.1, terser 5.16.6). The JSDCE pass deletes:
+
+- `const { x, y } = obj;` (shorthand)
+- `const { a: x, b: y } = obj;` (renamed)
+- `const [x, y] = arr;` (array)
+
+…and keeps:
+
+- `const x = obj.a;` (plain identifier id)
+- `const { x } = sideEffect();` (RHS visibly side-effectful)
+
+**The bug** is in [`runJSDCE`'s `VariableDeclarator` walker](https://github.com/emscripten-core/emscripten/blob/main/tools/acorn-optimizer.js#L392):
+
+```js
+VariableDeclarator(node, c) {
+  const name = node.id.name;                     // undefined for ObjectPattern/ArrayPattern
+  ensureData(scopes[scopes.length - 1], name).def = 1;
+  if (node.init) c(node.init);
+},
+```
+
+For destructuring, `node.id` is an `ObjectPattern` / `ArrayPattern` (no `.name`). The destructured identifiers are never visited (the walker doesn't recurse into `node.id`) and never recorded as `def`. In cleanup, the declaration ends up filed under the literal string key `"undefined"`, gets marked eliminateable, and is dropped — but the references in the function body remain because they DID get recorded as `use`.
+
+Affected sites in the current connection bundle: `WebSocketConnection.create`, `WebRTCConnection.create` (both block session start today), plus two livekit-client `sortPresets` declarations (dormant until called).
+
+**Fix that shipped** (TBD commit): a `lowerDestructuring()` Rolldown plugin in `Bridge~/build/lower-destructuring.ts`, wired into postset mode only. Walks the bundle AST after Rolldown finishes; rewrites every `const`/`let`/`var` whose declarator is an `ObjectPattern`/`ArrayPattern` with an `Identifier` RHS and only-Identifier bindings into plain `const x = obj.x, y = obj.y;` form. Anything fancier (defaults, rest, computed keys, nested patterns, non-Identifier RHS, multi-declarator) is left alone — the bundle ships verbatim and may still hit Emscripten's bug, but none of those shapes appear in the SDK or our own sources today. The plugin mirrors the existing `substitute-make-dyncall` Rolldown plugin and adds no new dependencies (acorn is already in Rolldown's tree).
+
+**Why not just lower Rolldown's `transform.target`.** Tested: Rolldown's target floor is `es2015`, which is the same level destructuring became native syntax. There's no Rolldown-internal way to lower it out. Adding `oxc-transform` or `@babel/*` for one transform was disproportionate.
+
+**Why this fix may not be sufficient long-term.** Emscripten's `acorn-optimizer.js` walker is wrong for *any* AST shape it parses but doesn't recurse into — destructuring is the one we caught because the SDK uses it heavily, but the same bug class could fire on patterns we haven't hit yet (rest parameters in arrow functions, exotic class field initializers, etc.). If a future SDK bump introduces a new pattern that JSDCE strips, the fix belongs in the same plugin. The static-shape regression test (T1) is the right tripwire: extend it with declaration-presence checks for whatever new SDK API we depend on, so the failure mode is "this exact symbol disappeared from framework.js" rather than a runtime `ReferenceError` no one expects.
 
 ## Open questions
 
-- Does Option A's library-variable approach work with classes that have static methods (`WebSocketConnection.create(...)`)? Emscripten serializes objects via inline emission; class statics should survive, but it's worth a spike before committing.
-- Is there a Rolldown plugin we can author that emits a `mergeInto`-friendly shape directly, so we don't have to hand-roll the connection-side `.jslib` entry file? The primitives `.jslib` is small enough that hand-rolling is fine; the connection one isn't.
-- The cost of Option A vs B should also weigh against eventual native (Plan B: non-WebGL) parity — if the native path uses a totally different transport, the Emscripten complexity here only matters for the WebGL phase.
+- Should `lowerDestructuring` also handle `MemberExpression` RHS (with a temp binding to avoid duplicating the chain traversal)? No production site needs it today; revisit if a SDK bump introduces one.
+- Is there a way to disable JSDCE on Unity's WebGL build without paying the framework.js size cost? `--no-js-opts` is one possible escape hatch — would let us delete this plugin entirely but the bundle would grow. Not worth chasing until the next quirk forces it.
+- The cost of Option A vs B (above) should also weigh against eventual native (Plan B: non-WebGL) parity — if the native path uses a totally different transport, the Emscripten complexity here only matters for the WebGL phase.
