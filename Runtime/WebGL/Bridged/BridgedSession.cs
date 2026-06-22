@@ -181,7 +181,7 @@ namespace ElevenLabs.WebGL.Bridged
         // (PublicSessionConfig / PrivateWebSocketSessionConfig /
         // PrivateWebRTCSessionConfig) reject mutually-exclusive fields when
         // both are present, so omission is required, not just preferred.
-        private static JObject BuildSessionConfig(ConversationOptions options)
+        internal static JObject BuildSessionConfig(ConversationOptions options)
         {
             var obj = new JObject
             {
@@ -194,6 +194,11 @@ namespace ElevenLabs.WebGL.Bridged
                 obj["signedUrl"] = options.SignedUrl;
             if (!string.IsNullOrEmpty(options.ConversationToken))
                 obj["conversationToken"] = options.ConversationToken;
+            // Omit on null/empty: upstream's session-config union types tolerate
+            // missing fields cleanly, and an empty `dynamic_variables` object
+            // adds wire noise without changing behaviour.
+            if (options.DynamicVariables != null && options.DynamicVariables.Count > 0)
+                obj["dynamicVariables"] = JObject.FromObject(options.DynamicVariables);
             return obj;
         }
 

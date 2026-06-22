@@ -96,6 +96,17 @@ test(
       `first outbound frame should be conversation_initiation_client_data, was '${sentTypes[0]}'`,
     ).toBe("conversation_initiation_client_data");
 
+    // Outbound: the initiation frame carries the dynamic variables hard-coded
+    // in ConversationSmokeTest.cs verbatim. The SDK lowercases the camelCase
+    // C# field to snake_case (`dynamic_variables`) and forwards the values
+    // unchanged — string, number, and bool must survive round-tripping
+    // through C# → JObject → JS → wire JSON without coercion.
+    const initFrame = sentFrames[0].json;
+    expect(
+      extractField(initFrame, "dynamic_variables"),
+      "first initiation frame missing dynamic_variables",
+    ).toEqual({ color: "blue", count: 42, isReady: true });
+
     // Outbound: at some point we send the user message; payload `.text` must
     // match exactly what the smoke MonoBehaviour passed to SendUserMessage.
     const userMessageFrame = sentFrames.find((f) => extractType(f.json) === "user_message");

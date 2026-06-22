@@ -51,6 +51,20 @@ namespace ElevenLabs.WebGL.Samples.ConversationSmokeTest
         private const string Prompt = "Hello, please reply with the word READY and stop.";
         private const string ContextOne = "Game state: player is in a tutorial.";
         private const string ContextTwo = "Locale: en-US.";
+
+        // Hard-coded so the wire shape is deterministic across developers and
+        // CI — the IntegrationTests~ harness asserts the exact same keys,
+        // values, and runtime types on the first conversation_initiation_client_data
+        // frame. Covers all three upstream-allowed value types (string,
+        // integer, bool) so any regression in IReadOnlyDictionary<string, object>
+        // serialization surfaces here instead of in a vague handshake failure.
+        private static readonly IReadOnlyDictionary<string, object> DynamicVariables =
+            new Dictionary<string, object>
+            {
+                ["color"] = "blue",
+                ["count"] = 42,
+                ["isReady"] = true,
+            };
 #endif
 
         private void Start()
@@ -96,6 +110,7 @@ namespace ElevenLabs.WebGL.Samples.ConversationSmokeTest
                     AgentId = config.AgentId,
                     ConnectionType = config.ConnectionType,
                     SignedUrl = config.SignedUrl,
+                    DynamicVariables = DynamicVariables,
                 };
 
                 Conversation conversation = await Conversation.StartSessionAsync(options);

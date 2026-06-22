@@ -197,6 +197,26 @@ describe("createWebSocketConnection factory", () => {
     expect(WebSocketConnection.create).toHaveBeenCalledWith(wsConfig);
   });
 
+  it("forwards dynamicVariables through to WebSocketConnection.create with string/number/bool values preserved", async () => {
+    // The C# BuildSessionConfig serializes IReadOnlyDictionary<string, object>
+    // values through Newtonsoft.Json's JObject.FromObject; the bridge layer is
+    // a pure passthrough, so the SDK should see the same primitive runtime
+    // types it would if a JS caller had constructed the config directly.
+    const configWithDynVars = {
+      ...wsConfig,
+      dynamicVariables: { color: "red", count: 3, isReady: true },
+    };
+    EL_InvokeFactoryAsync(
+      makePtr("createWebSocketConnection"),
+      makePtr(JSON.stringify([configWithDynVars])),
+      SHAPE_OBJECT,
+      2,
+    );
+    await Promise.resolve();
+
+    expect(WebSocketConnection.create).toHaveBeenCalledWith(configWithDynVars);
+  });
+
   it("settles with a JsObject handle wrapping the connection", async () => {
     EL_InvokeFactoryAsync(
       makePtr("createWebSocketConnection"),

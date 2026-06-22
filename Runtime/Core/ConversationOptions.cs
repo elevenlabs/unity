@@ -1,14 +1,15 @@
 #nullable enable
 
+using System.Collections.Generic;
+
 namespace ElevenLabs.Agents
 {
     /// <summary>Inputs to <see cref="Conversation.StartSessionAsync"/>.</summary>
     /// <remarks>
     /// Mirrors a curated subset of <c>Options</c> from
     /// <c>@elevenlabs/client</c>. Additional fields (conversation config
-    /// overrides, dynamic variables, client tools, callbacks-as-init) land in
-    /// follow-up Phase 4 sub-tasks alongside the message router and client-tool
-    /// dispatch work.
+    /// overrides, client tools, callbacks-as-init) land in follow-up Phase 4
+    /// sub-tasks alongside the message router and client-tool dispatch work.
     /// </remarks>
     public sealed record ConversationOptions
     {
@@ -29,5 +30,19 @@ namespace ElevenLabs.Agents
 
         /// <summary>Initial speaker / sink device selection. <c>null</c> picks the platform default.</summary>
         public OutputDeviceConfig? Output { get; init; }
+
+        /// <summary>
+        /// Per-session variables substituted into the agent's templated system
+        /// prompt and first message. Values must be <c>string</c>, a numeric
+        /// type, or <c>bool</c> — the server's allow-list mirrors upstream
+        /// <c>@elevenlabs/client</c>'s <c>Record&lt;string, string | number | boolean&gt;</c>.
+        /// Other runtime types serialize through Newtonsoft.Json but are
+        /// rejected server-side.
+        /// </summary>
+        /// <remarks>
+        /// Forwarded only at session start (no mid-session update path); a
+        /// <c>null</c> or empty dictionary is omitted from the handshake.
+        /// </remarks>
+        public IReadOnlyDictionary<string, object>? DynamicVariables { get; init; }
     }
 }
