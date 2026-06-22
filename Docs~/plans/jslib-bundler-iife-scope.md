@@ -119,6 +119,27 @@ For provenance, the two fixes that shipped today and are required as preconditio
 - [ ] **T4.** Once T1–T3 land, drop `EL_EnsureConnectionFactoriesLoaded` if the bundler change makes it redundant. (May still be needed depending on how library-variable reachability shakes out.)
 - [ ] **T5.** Provision a CI secret-backed real-agent smoke run (documented in `Samples/ConversationSmokeTest/README.md`). Optional but valuable as defence-in-depth.
 
+## Post-fix symptom: `source is not defined` (2026-06-22, after 14d7601)
+
+After `14d7601 fix(webgl): emit connection jslib as a postset to escape IIFE scope leak` landed, the Getting Started demo gets further but hits a new error on every box-trigger entry:
+
+```
+[TalkingBox:01_Box_Yellow] StartSessionAsync failed: source is not defined
+```
+
+The `source` symbol is from the upstream SDK's mic-input pipeline (`@elevenlabs/client/internal/unity` → `MediaDeviceInput.create` path). The surrounding code is:
+
+```js
+const source = context.createMediaStreamSource(inputStream);
+source.connect(analyser); analyser.connect(worklet);
+// …
+(context, analyser, worklet, inputStream, source, permissions, onError) => { … }
+```
+
+`source` is both a local `const` in one function and a parameter passed into a downstream callback. Whichever site the runtime tripped on, the variable wasn't bound at lookup time. Same flavour of bug as the original IIFE leak — postset-emission rewrote the closure structure around upstream SDK code that assumes a particular lexical environment.
+
+Suggests Option A's library-variable promotion needs to extend deeper than the top-level connection factories: nested helpers / callbacks from `MediaDeviceInput.create` and friends also need to survive Emscripten's serialization. A spike that decompresses the framework.js after a fresh build and locates the exact stripped closure site would be the right first step (likely T1 from this plan — a static-shape regression test that asserts on the mic-input setup chain in addition to the top-level classes).
+
 ## Open questions
 
 - Does Option A's library-variable approach work with classes that have static methods (`WebSocketConnection.create(...)`)? Emscripten serializes objects via inline emission; class statics should survive, but it's worth a spike before committing.
