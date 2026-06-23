@@ -60,14 +60,45 @@ namespace ElevenLabs.Native.Samples.StandaloneSmokeTest
         }
 
 #if !UNITY_EDITOR
+        private const string AgentIdEnvVar = "ELEVENLABS_AGENT_ID";
+        private const string SignedUrlEnvVar = "ELEVENLABS_SIGNED_URL";
+        private const string PromptEnvVar = "ELEVENLABS_SMOKE_PROMPT";
+
         private async Awaitable RunSmokeTestAsync()
         {
+            // Env vars win over the Resources asset because the embedded
+            // TestProject is also the package root (manifest.json:
+            // "file:../.."), so Unity sees Assets/Resources/ assets twice
+            // and the build's Resources scanner sometimes skips them. The
+            // env var path is also the natural shape for CI runners.
+            string? envAgentId = Environment.GetEnvironmentVariable(AgentIdEnvVar);
+            string? envSignedUrl = Environment.GetEnvironmentVariable(SignedUrlEnvVar);
+            string? envPrompt = Environment.GetEnvironmentVariable(PromptEnvVar);
+
             StandaloneSmokeConfig? config = Resources.Load<StandaloneSmokeConfig>(
                 "StandaloneSmokeConfig"
             );
-            if (config == null || string.IsNullOrWhiteSpace(config.AgentId))
+
+            string agentId = !string.IsNullOrWhiteSpace(envAgentId)
+                ? envAgentId!
+                : (config != null ? config.AgentId : "");
+            string? signedUrl = !string.IsNullOrWhiteSpace(envSignedUrl)
+                ? envSignedUrl
+                : config?.SignedUrl;
+            string prompt = !string.IsNullOrWhiteSpace(envPrompt)
+                ? envPrompt!
+                : (
+                    config != null
+                        ? config.Prompt
+                        : "Hello, please reply with the word READY and stop."
+                );
+
+            if (string.IsNullOrWhiteSpace(agentId))
             {
-                Debug.Log("[StandaloneSmoke] CONFIG MISSING");
+                Debug.Log(
+                    "[StandaloneSmoke] CONFIG MISSING "
+                        + $"(set {AgentIdEnvVar} env var or fill in Resources/StandaloneSmokeConfig.asset)"
+                );
                 Quit(0);
                 return;
             }
@@ -79,9 +110,9 @@ namespace ElevenLabs.Native.Samples.StandaloneSmokeTest
             {
                 var options = new ConversationOptions
                 {
-                    AgentId = config.AgentId,
+                    AgentId = agentId,
                     ConnectionType = ConnectionType.WebSocket,
-                    SignedUrl = config.SignedUrl,
+                    SignedUrl = signedUrl,
                 };
 
                 Conversation conversation = await Conversation.StartSessionAsync(options);
@@ -97,8 +128,8 @@ namespace ElevenLabs.Native.Samples.StandaloneSmokeTest
                     "AgentResponded"
                 );
 
-                Debug.Log($"[StandaloneSmoke] sending user message: \"{config.Prompt}\"");
-                conversation.SendUserMessage(config.Prompt);
+                Debug.Log($"[StandaloneSmoke] sending user message: \"{prompt}\"");
+                conversation.SendUserMessage(prompt);
 
                 AgentResponseArgs response = await responseTask;
                 if (string.IsNullOrWhiteSpace(response.AgentResponse))

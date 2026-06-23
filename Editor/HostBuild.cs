@@ -1,9 +1,9 @@
 using System;
 using UnityEditor;
-using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using NamedBuildTarget = UnityEditor.Build.NamedBuildTarget;
 
 namespace ElevenLabs.WebGL.Editor
 {
@@ -15,7 +15,7 @@ namespace ElevenLabs.WebGL.Editor
         /// </summary>
         public static void Build()
         {
-            BuildSceneWithBehaviour(
+            BuildSceneAndExit(
                 "ElevenLabs.WebGL.Samples.BridgePrimitiveSmokeTest, ElevenLabs.WebGL.Samples.BridgeSmokeTest",
                 "WebGL",
                 BuildTarget.WebGL
@@ -30,7 +30,7 @@ namespace ElevenLabs.WebGL.Editor
         /// </summary>
         public static void BuildConversation()
         {
-            BuildSceneWithBehaviour(
+            BuildSceneAndExit(
                 "ElevenLabs.WebGL.Samples.ConversationSmokeTest.ConversationSmokeTest, ElevenLabs.WebGL.Samples.ConversationSmokeTest",
                 "WebGLConversationSmoke",
                 BuildTarget.WebGL
@@ -64,12 +64,22 @@ namespace ElevenLabs.WebGL.Editor
             ManagedStrippingLevel previousStripping = PlayerSettings.GetManagedStrippingLevel(
                 hostGroup
             );
+            // Unity's FeatureExtractor refuses to build when a referenced
+            // assembly uses the Microphone class without a usage description
+            // string — UnityMicrophoneInput is pulled in via NativeSessionLauncher,
+            // so the smoke must declare one even though the binary may not
+            // actually open a mic before sending its first text message.
+            string previousMacMicUsage = PlayerSettings.macOS.microphoneUsageDescription;
+
+            BuildResult result;
             try
             {
                 PlayerSettings.SetScriptingBackend(hostGroup, ScriptingImplementation.IL2CPP);
                 PlayerSettings.SetManagedStrippingLevel(hostGroup, ManagedStrippingLevel.High);
+                PlayerSettings.macOS.microphoneUsageDescription =
+                    "ElevenLabs standalone smoke test exercises the native session transport.";
 
-                BuildSceneWithBehaviour(
+                result = BuildSceneWithBehaviour(
                     "ElevenLabs.Native.Samples.StandaloneSmokeTest.StandaloneSmokeTest, ElevenLabs.Native.Samples.StandaloneSmokeTest",
                     System.IO.Path.Combine("Standalone", "StandaloneSmoke" + StandaloneExtension()),
                     hostTarget
@@ -77,9 +87,18 @@ namespace ElevenLabs.WebGL.Editor
             }
             finally
             {
+                // Restore before Exit so the developer's ProjectSettings.asset
+                // isn't dirtied with our build-time IL2CPP / stripping / mic
+                // description overrides. SaveAssets persists the restored
+                // values; otherwise Unity flushes the dirty in-memory values
+                // during shutdown and the file ends up modified anyway.
                 PlayerSettings.SetScriptingBackend(hostGroup, previousBackend);
                 PlayerSettings.SetManagedStrippingLevel(hostGroup, previousStripping);
+                PlayerSettings.macOS.microphoneUsageDescription = previousMacMicUsage;
+                AssetDatabase.SaveAssets();
             }
+
+            EditorApplication.Exit(result == BuildResult.Succeeded ? 0 : 1);
         }
 
         private static BuildTarget HostStandaloneTarget()
@@ -109,7 +128,8 @@ namespace ElevenLabs.WebGL.Editor
         // Shared scene-build pipeline: assemble an empty scene with the named
         // MonoBehaviour as its only object, run BuildPipeline.BuildPlayer
         // targeting the requested platform, exit 0 on success / 1 on failure.
-        private static void BuildSceneWithBehaviour(
+        // Returns the BuildResult so callers can run cleanup before exiting.
+        private static BuildResult BuildSceneWithBehaviour(
             string assemblyQualifiedTypeName,
             string outputSubdir,
             BuildTarget target
@@ -160,13 +180,28 @@ namespace ElevenLabs.WebGL.Editor
                 Debug.Log(
                     $"Smoke build succeeded ({outputSubdir}) — errors: {report.summary.totalErrors}, warnings: {report.summary.totalWarnings}"
                 );
-                EditorApplication.Exit(0);
             }
             else
             {
                 Debug.LogError($"Smoke build failed ({outputSubdir}): {report.summary.result}");
-                EditorApplication.Exit(1);
             }
+            return report.summary.result;
+        }
+
+        // Wrap BuildSceneWithBehaviour for the two WebGL entry points: they
+        // don't need post-build cleanup, so we exit immediately afterward.
+        private static void BuildSceneAndExit(
+            string assemblyQualifiedTypeName,
+            string outputSubdir,
+            BuildTarget target
+        )
+        {
+            BuildResult result = BuildSceneWithBehaviour(
+                assemblyQualifiedTypeName,
+                outputSubdir,
+                target
+            );
+            EditorApplication.Exit(result == BuildResult.Succeeded ? 0 : 1);
         }
     }
 }

@@ -10,25 +10,92 @@
   StartSessionAsync throws "No session factory is registered". Mirrors
   the BridgedSessionLauncher preserve in Runtime/WebGL/link.xml.
 
-  ElevenLabs.Protocol.*: the wire-event DTOs (IncomingSocketEvent /
-  OutgoingSocketEvent subclasses + their nested event payload classes)
-  are deserialised from JSON via IncomingSocketEventConverter and
-  serialised via JsonConvert.SerializeObject. Newtonsoft.Json relies on
-  reflection over [JsonProperty]-attributed property setters/getters,
-  which IL2CPP's managed stripping can prune because no statically
-  reachable C# code calls them directly. preserve="all" keeps each
-  type and its members alive so the round-trip survives AOT. The Core
-  assembly hosts the Protocol namespace; this preserve lives next to
-  the Native launcher because the WebGL path serialises through the
-  JS-side SDK and doesn't exercise the same C# reflection path at
-  scale — moving the preserve here keeps the WebGL link.xml focused on
-  WebGL-only concerns.
+  ElevenLabs.Protocol.* wire DTOs: every IncomingSocketEvent /
+  OutgoingSocketEvent subclass and its nested event payload classes are
+  deserialised from JSON via IncomingSocketEventConverter and serialised
+  via JsonConvert.SerializeObject. Newtonsoft.Json relies on reflection
+  over the parameterless constructor + [JsonProperty]-attributed
+  property setters/getters, which IL2CPP's managed stripping prunes
+  because no statically reachable C# code calls them directly.
+
+  Wildcards (e.g. <type fullname="ElevenLabs.Protocol.*"/>) are NOT
+  honoured by Unity's UnityLinker — confirmed by the
+  com.unity.nuget.newtonsoft-json package's link.xml (which lists each
+  type explicitly) and by the runtime symptom of a stripped
+  ConversationInitiationMetadata default constructor on the first
+  standalone smoke run. Every type is therefore listed explicitly
+  below; the Codegen pipeline emits a deterministic set so drift here
+  is caught by the smoke test.
+
+  This file is fed to UnityLinker explicitly via the
+  `LinkXmlInjector` IUnityLinkerProcessor in Editor/. Unity's
+  auto-discovery of package-internal link.xml files is unreliable when
+  the package is referenced as a local file-path package whose root
+  is the repo root (manifest.json: "file:../..") — the file shows up
+  in the import log but never reaches UnityLinker's include-link-xml
+  argument list, so it's silently ignored. The explicit callback
+  sidesteps the discovery path entirely.
 -->
 <linker>
   <assembly fullname="ElevenLabs.Agents.Native">
     <type fullname="ElevenLabs.Native.NativeSessionLauncher" preserve="all" />
   </assembly>
   <assembly fullname="ElevenLabs.Agents.Core">
-    <type fullname="ElevenLabs.Protocol.*" preserve="all" />
+    <!-- IncomingSocketEvent hierarchy -->
+    <type fullname="ElevenLabs.Protocol.IncomingSocketEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.IncomingSocketEventConverter" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.IncomingEventDispatcher" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.UnknownIncomingEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationInitiationMetadata" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationInitiationMetadataEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentResponse" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentResponseEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentResponseComplete" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentResponseCompleteEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentResponseCorrection" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentResponseCorrectionEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.UserTranscript" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.UserTranscriptionEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AudioResponse" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AudioEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AudioEventAlignment" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.Interruption" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.InterruptionEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.VadScore" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.VadScoreEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ClientToolCall" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ClientToolCallEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentToolResponseFullPayload" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.AgentToolResponseFullPayloadEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.Ping" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.PingEvent" preserve="all" />
+    <!-- OutgoingSocketEvent hierarchy -->
+    <type fullname="ElevenLabs.Protocol.OutgoingSocketEvent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.UserAudioChunk" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.UserMessage" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.UserActivity" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.MultimodalMessage" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.Text" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.File" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.Pong" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ClientToolResult" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ContextualUpdate" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.Feedback" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationInitiationClientData" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationConfigOverride" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationConfigOverrideTurn" preserve="all" />
+    <type
+      fullname="ElevenLabs.Protocol.ConversationConfigOverrideTurnSoftTimeoutConfig"
+      preserve="all"
+    />
+    <type fullname="ElevenLabs.Protocol.ConversationConfigOverrideTts" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationConfigOverrideConversation" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationConfigOverrideAgent" preserve="all" />
+    <type fullname="ElevenLabs.Protocol.ConversationConfigOverrideAgentPrompt" preserve="all" />
+    <type
+      fullname="ElevenLabs.Protocol.ConversationConfigOverrideAgentPromptKnowledgeBaseItem"
+      preserve="all"
+    />
+    <type fullname="ElevenLabs.Protocol.SourceInfo" preserve="all" />
   </assembly>
 </linker>

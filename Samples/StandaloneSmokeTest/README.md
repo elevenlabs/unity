@@ -43,20 +43,43 @@ is verified end-to-end before shipping.
    `.app` bundle; on Windows / Linux it's a flat directory with the
    executable + Player data.
 
-3. Run the binary. On macOS:
+   > **After the smoke, before running `pnpm --dir TestProject run test`
+   > again, remove `TestProject/Build/Standalone/`.** The IL2CPP build
+   > leaves stripped `UnityEngine.*.dll` files under
+   > `<name>_BackUpThisFolder_ButDontShipItWithYourGame/Managed/` that
+   > Unity then re-imports as part of the package on the next batchmode
+   > invocation (the package is referenced as `file:../..`, so the
+   > embedded TestProject is also part of the package tree). Symptoms:
+   > stale CS0117 errors or a hung AssemblyUpdater.
+
+3. Run the binary. On macOS, an `ELEVENLABS_AGENT_ID` env var overrides the
+   asset's `agentId`:
 
    ```bash
-   open -W TestProject/Build/Standalone/StandaloneSmoke.app
+   ELEVENLABS_AGENT_ID=agent_xxx \
+     open -W TestProject/Build/Standalone/StandaloneSmoke.app
    ```
 
-   `-W` blocks the shell on the binary's exit so the script's exit code
+   `-W` blocks the shell on the binary's exit so the shell exit code
    reflects the smoke result. Player.log paths vary per OS:
 
-   - macOS: `~/Library/Logs/Unity/Player.log`
+   - macOS: `~/Library/Logs/<Company>/<Product>/Player.log`
+     (`~/Library/Logs/DefaultCompany/unity-minimal-test/Player.log` for
+     the in-repo TestProject)
    - Windows: `%USERPROFILE%\AppData\LocalLow\<Company>\<Product>\Player.log`
    - Linux: `~/.config/unity3d/<Company>/<Product>/Player.log`
 
    Grep the log for `[StandaloneSmoke]` lines to see the run trail.
+
+   > **macOS first-run microphone prompt.** The native launcher always
+   > opens the microphone (`UnityMicrophoneInput` is the default I/O
+   > controller — see [`Runtime/Native/NativeSessionLauncher.cs`](../../Runtime/Native/NativeSessionLauncher.cs)),
+   > so the first run on a fresh macOS user requires interactively
+   > accepting the microphone permission popup. CI needs either:
+   > a self-hosted runner with TCC pre-granted, an environment flag to
+   > route the smoke through `NullInputController` (TODO), or a manual
+   > first-run on the runner before the automated job. Hosted GitHub
+   > runners cannot accept TCC prompts and will hang.
 
 ## CI
 
