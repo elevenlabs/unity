@@ -263,6 +263,24 @@ namespace ElevenLabs.Agents
         }
 
         /// <summary>
+        /// Send a multimodal user message — text, a previously-uploaded file
+        /// (referenced by id), or both. Mirrors the JS SDK's
+        /// <c>sendMultimodalMessage</c>: a null or empty argument means the
+        /// corresponding wire field is omitted. <paramref name="fileId"/> comes
+        /// from <c>UploadFileAsync</c> (when implemented).
+        /// </summary>
+        public void SendMultimodalMessage(string? text = null, string? fileId = null)
+        {
+            _connection.Send(
+                new MultimodalMessage
+                {
+                    Text = string.IsNullOrEmpty(text) ? null : new Text { TextData = text },
+                    File = string.IsNullOrEmpty(fileId) ? null : new File { FileId = fileId },
+                }
+            );
+        }
+
+        /// <summary>
         /// Send feedback on the most recent agent turn. Only honoured when
         /// <see cref="CanSendFeedback"/> is <c>true</c>.
         /// </summary>

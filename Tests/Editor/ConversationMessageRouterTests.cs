@@ -893,6 +893,85 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual("user_activity", msg!.Type);
         }
 
+        [Test]
+        public void SendMultimodalMessage_TextOnly_OmitsFileField()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMultimodalMessage(text: "hi there");
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as MultimodalMessage;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("multimodal_message", msg!.Type);
+            Assert.IsNotNull(msg.Text);
+            Assert.AreEqual("user_message", msg.Text!.Type);
+            Assert.AreEqual("hi there", msg.Text.TextData);
+            Assert.IsNull(msg.File);
+        }
+
+        [Test]
+        public void SendMultimodalMessage_FileOnly_OmitsTextField()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMultimodalMessage(fileId: "file_abc123");
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as MultimodalMessage;
+            Assert.IsNotNull(msg);
+            Assert.IsNull(msg!.Text);
+            Assert.IsNotNull(msg.File);
+            Assert.AreEqual("file_input", msg.File!.Type);
+            Assert.AreEqual("file_abc123", msg.File.FileId);
+        }
+
+        [Test]
+        public void SendMultimodalMessage_BothFields_PopulatesBoth()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMultimodalMessage(text: "describe this", fileId: "file_xyz");
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as MultimodalMessage;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("describe this", msg!.Text!.TextData);
+            Assert.AreEqual("file_xyz", msg.File!.FileId);
+        }
+
+        [Test]
+        public void SendMultimodalMessage_EmptyStrings_OmitsBothFields()
+        {
+            // Matches the JS SDK's truthy-check semantics: empty strings are
+            // treated the same as null and the corresponding wire field is
+            // omitted. The server is then free to reject the resulting
+            // payload — same contract as JS.
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMultimodalMessage(text: "", fileId: "");
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as MultimodalMessage;
+            Assert.IsNotNull(msg);
+            Assert.IsNull(msg!.Text);
+            Assert.IsNull(msg.File);
+        }
+
+        [Test]
+        public void SendMultimodalMessage_NoArgs_OmitsBothFields()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMultimodalMessage();
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as MultimodalMessage;
+            Assert.IsNotNull(msg);
+            Assert.IsNull(msg!.Text);
+            Assert.IsNull(msg.File);
+        }
+
         // Input controller → connection routing ------------------------------
 
         [Test]
