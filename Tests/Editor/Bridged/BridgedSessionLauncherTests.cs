@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using ElevenLabs.Agents;
 using ElevenLabs.WebGL.Internal;
 using NUnit.Framework;
@@ -67,6 +68,64 @@ namespace ElevenLabs.WebGL.Bridged.Tests
                 }
             );
             Assert.Throws<BridgeException>(() => task.GetAwaiter().GetResult());
+        }
+
+        [Test]
+        public void StartSessionAsync_RejectsZeroCredentials()
+        {
+            // No AgentId / SignedUrl / ConversationToken set — JS SDK's union
+            // types would reject this anyway, but surfacing it at the C#
+            // boundary keeps the error close to the call site.
+            var task = Conversation.StartSessionAsync(
+                new ConversationOptions { ConnectionType = ConnectionType.WebSocket }
+            );
+            var ex = Assert.Throws<ArgumentException>(() => task.GetAwaiter().GetResult());
+            StringAssert.Contains("Exactly one of", ex!.Message);
+        }
+
+        [Test]
+        public void StartSessionAsync_RejectsConflictingCredentials()
+        {
+            var task = Conversation.StartSessionAsync(
+                new ConversationOptions
+                {
+                    AgentId = "agent-test",
+                    SignedUrl = "wss://example/signed",
+                }
+            );
+            var ex = Assert.Throws<ArgumentException>(() => task.GetAwaiter().GetResult());
+            StringAssert.Contains("Exactly one of", ex!.Message);
+        }
+
+        [Test]
+        public void StartSessionAsync_RejectsConversationToken_OnWebSocketTransport()
+        {
+            // ConversationToken is the WebRTC credential; passing it on a
+            // WebSocket session is the JS SDK's PrivateWebRTCSessionConfig
+            // mismatch, but caught here before reaching the bridge.
+            var task = Conversation.StartSessionAsync(
+                new ConversationOptions
+                {
+                    ConversationToken = "token-test",
+                    ConnectionType = ConnectionType.WebSocket,
+                }
+            );
+            var ex = Assert.Throws<ArgumentException>(() => task.GetAwaiter().GetResult());
+            StringAssert.Contains("WebRTC", ex!.Message);
+        }
+
+        [Test]
+        public void StartSessionAsync_RejectsWebRtc_WithoutConversationToken()
+        {
+            var task = Conversation.StartSessionAsync(
+                new ConversationOptions
+                {
+                    AgentId = "agent-test",
+                    ConnectionType = ConnectionType.WebRTC,
+                }
+            );
+            var ex = Assert.Throws<ArgumentException>(() => task.GetAwaiter().GetResult());
+            StringAssert.Contains("WebRTC transport requires ConversationToken", ex!.Message);
         }
     }
 }

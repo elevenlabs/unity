@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using ElevenLabs.Agents;
 using UnityEngine;
 
@@ -60,6 +61,7 @@ namespace ElevenLabs.WebGL.Bridged
         // state on a Conversation reference they don't yet hold.
         internal static async Awaitable<Conversation> StartAsync(ConversationOptions options)
         {
+            ValidateOptions(options);
             BridgedSession session = await BridgedSession.StartAsync(options);
             var conversation = new Conversation(
                 session.Connection,
@@ -70,6 +72,44 @@ namespace ElevenLabs.WebGL.Bridged
             conversation.UpdateStatus(Status.Connected);
             conversation.RaiseConnected(conversation.ConversationId);
             return conversation;
+        }
+
+        // Lives on the launcher rather than on ConversationOptions itself so
+        // each transport can layer its own constraints (NativeSessionLauncher
+        // in #9 will additionally reject WebRTC entirely). Mirrors the JS
+        // SDK's PublicSessionConfig / PrivateWebSocketSessionConfig /
+        // PrivateWebRTCSessionConfig union: exactly one credential field is
+        // set, and ConversationToken is only valid on the WebRTC transport.
+        private static void ValidateOptions(ConversationOptions options)
+        {
+            int credentials =
+                (string.IsNullOrEmpty(options.AgentId) ? 0 : 1)
+                + (string.IsNullOrEmpty(options.SignedUrl) ? 0 : 1)
+                + (string.IsNullOrEmpty(options.ConversationToken) ? 0 : 1);
+            if (credentials != 1)
+            {
+                throw new ArgumentException(
+                    "Exactly one of AgentId, SignedUrl, or ConversationToken must be set "
+                        + $"on ConversationOptions (got {credentials}).",
+                    nameof(options)
+                );
+            }
+            if (options.ConnectionType == ConnectionType.WebRTC)
+            {
+                if (string.IsNullOrEmpty(options.ConversationToken))
+                    throw new ArgumentException(
+                        "WebRTC transport requires ConversationToken.",
+                        nameof(options)
+                    );
+            }
+            else if (!string.IsNullOrEmpty(options.ConversationToken))
+            {
+                throw new ArgumentException(
+                    "ConversationToken is only valid with the WebRTC transport; "
+                        + "use AgentId or SignedUrl for WebSocket sessions.",
+                    nameof(options)
+                );
+            }
         }
     }
 }

@@ -218,6 +218,46 @@ describe("createWebSocketConnection factory", () => {
     expect(WebSocketConnection.create).toHaveBeenCalledWith(configWithDynVars);
   });
 
+  it("forwards overrides / userId / customLlmExtraBody through to WebSocketConnection.create unchanged", async () => {
+    // C# ConversationOptions.Overrides / UserId / CustomLlmExtraBody flow
+    // straight through the bridge into the SDK's SessionConfig contract: the
+    // JS SDK's constructOverrides() is what re-keys them onto the wire. This
+    // test pins the bridge boundary — if the SDK adds a sanitiser or rename
+    // step, it'll show up as a diff here before users hit it at runtime.
+    const configWithOverrides = {
+      ...wsConfig,
+      userId: "user-42",
+      customLlmExtraBody: { temperature: 0.7, max_tokens: 256 },
+      overrides: {
+        agent: {
+          firstMessage: "Hello!",
+          language: "en",
+          // Inner prompt object stays in snake_case wire-shape — JS SDK
+          // forwards this nested object directly to the server.
+          prompt: { prompt: "Be terse.", llm: "gpt-4o-mini" },
+        },
+        tts: {
+          voiceId: "voice-42",
+          stability: 0.0,
+          speed: 1.0,
+          similarityBoost: 0.8,
+        },
+        conversation: { textOnly: true },
+      },
+    };
+    EL_InvokeFactoryAsync(
+      makePtr("createWebSocketConnection"),
+      makePtr(JSON.stringify([configWithOverrides])),
+      SHAPE_OBJECT,
+      3,
+    );
+    await Promise.resolve();
+
+    expect(WebSocketConnection.create).toHaveBeenCalledWith(
+      configWithOverrides,
+    );
+  });
+
   it("settles with a JsObject handle wrapping the connection", async () => {
     EL_InvokeFactoryAsync(
       makePtr("createWebSocketConnection"),

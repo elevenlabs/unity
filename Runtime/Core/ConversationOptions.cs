@@ -1,15 +1,17 @@
 #nullable enable
 
 using System.Collections.Generic;
+using ElevenLabs.Protocol;
 
 namespace ElevenLabs.Agents
 {
     /// <summary>Inputs to <see cref="Conversation.StartSessionAsync"/>.</summary>
     /// <remarks>
     /// Mirrors a curated subset of <c>Options</c> from
-    /// <c>@elevenlabs/client</c>. Additional fields (conversation config
-    /// overrides, client tools, callbacks-as-init) land in follow-up Phase 4
-    /// sub-tasks alongside the message router and client-tool dispatch work.
+    /// <c>@elevenlabs/client</c>. Additional fields (client tools,
+    /// callbacks-as-init, <c>SourceInfo</c> / <c>ToolMockConfig</c>) land in
+    /// follow-up sub-tasks; see
+    /// <c>Docs~/plans/v0.1-parity.md#10</c> for the deferral rationale.
     /// </remarks>
     public sealed record ConversationOptions
     {
@@ -44,5 +46,49 @@ namespace ElevenLabs.Agents
         /// <c>null</c> or empty dictionary is omitted from the handshake.
         /// </remarks>
         public IReadOnlyDictionary<string, object>? DynamicVariables { get; init; }
+
+        /// <summary>
+        /// Per-session overrides for the agent's configuration — first message,
+        /// language, TTS voice / stability / speed, prompt, etc. The
+        /// <see cref="ConversationConfigOverride"/> type is generated from the
+        /// AsyncAPI wire contract; future spec re-vendors widen this surface
+        /// without a hand-rolled mirror.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Each leaf field on the override tree is omitted from the handshake
+        /// when <c>null</c> / empty, so partial overrides (e.g., a TTS voice
+        /// swap without touching the prompt) cleanly survive the bridge.
+        /// </para>
+        /// <para>
+        /// WebGL caveat — the upstream JS SDK only exposes the <c>agent</c>,
+        /// <c>tts</c>, and <c>conversation</c> subtrees on its
+        /// <c>SessionConfig.overrides</c>; <see cref="ConversationConfigOverride.Turn"/>
+        /// is dropped on the bridged path and only takes effect once the
+        /// native WebSocket transport lands (#9). Native + WebGL semantics
+        /// otherwise match.
+        /// </para>
+        /// </remarks>
+        public ConversationConfigOverride? Overrides { get; init; }
+
+        /// <summary>
+        /// Stable identifier for the end user on whose behalf the conversation
+        /// is being held. Forwarded verbatim as <c>user_id</c> on the
+        /// initiation event; the agent owner can join it against their own
+        /// user records for analytics / per-user state.
+        /// </summary>
+        public string? UserId { get; init; }
+
+        /// <summary>
+        /// Free-form JSON merged into the <c>custom_llm_extra_body</c> field
+        /// of the initiation event, forwarded to the configured LLM provider
+        /// as request-body extras (e.g., provider-specific decoding controls).
+        /// </summary>
+        /// <remarks>
+        /// Values are serialized via Newtonsoft.Json; any JSON-representable
+        /// runtime type is accepted client-side. A <c>null</c> or empty
+        /// dictionary is omitted from the handshake.
+        /// </remarks>
+        public IReadOnlyDictionary<string, object>? CustomLlmExtraBody { get; init; }
     }
 }

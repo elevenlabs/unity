@@ -1,7 +1,9 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using ElevenLabs.Agents;
+using ElevenLabs.Protocol;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -181,6 +183,13 @@ namespace ElevenLabs.WebGL.Bridged
         // (PublicSessionConfig / PrivateWebSocketSessionConfig /
         // PrivateWebRTCSessionConfig) reject mutually-exclusive fields when
         // both are present, so omission is required, not just preferred.
+        //
+        // Key casing note: JS SDK's SessionConfig is camelCase at the top
+        // levels (`firstMessage`, `voiceId`, `textOnly`, …) and the SDK
+        // re-emits it as snake_case on the wire inside constructOverrides().
+        // The nested `agent.prompt` object is a pass-through to the wire and
+        // stays in its generated snake_case shape. The hand-built JObject
+        // below mirrors that contract exactly.
         internal static JObject BuildSessionConfig(ConversationOptions options)
         {
             var obj = new JObject
@@ -188,18 +197,110 @@ namespace ElevenLabs.WebGL.Bridged
                 ["connectionType"] =
                     options.ConnectionType == ConnectionType.WebRTC ? "webrtc" : "websocket",
             };
-            if (!string.IsNullOrEmpty(options.AgentId))
-                obj["agentId"] = options.AgentId;
-            if (!string.IsNullOrEmpty(options.SignedUrl))
-                obj["signedUrl"] = options.SignedUrl;
-            if (!string.IsNullOrEmpty(options.ConversationToken))
-                obj["conversationToken"] = options.ConversationToken;
-            // Omit on null/empty: upstream's session-config union types tolerate
-            // missing fields cleanly, and an empty `dynamic_variables` object
-            // adds wire noise without changing behaviour.
-            if (options.DynamicVariables != null && options.DynamicVariables.Count > 0)
-                obj["dynamicVariables"] = JObject.FromObject(options.DynamicVariables);
+            SetIfPresent(obj, "agentId", options.AgentId);
+            SetIfPresent(obj, "signedUrl", options.SignedUrl);
+            SetIfPresent(obj, "conversationToken", options.ConversationToken);
+            SetIfPresent(obj, "userId", options.UserId);
+            SetIfPresent(obj, "dynamicVariables", FromDictionary(options.DynamicVariables));
+            SetIfPresent(obj, "customLlmExtraBody", FromDictionary(options.CustomLlmExtraBody));
+            SetIfPresent(obj, "overrides", BuildOverrides(options.Overrides));
             return obj;
+        }
+
+        // JS SDK's SessionConfig.overrides shape: top-level keys are
+        // camelCase, `agent.prompt` is the wire-shape pass-through object.
+        // Fields the JS SDK does not surface (e.g. `turn.soft_timeout_config`)
+        // are silently dropped here — the typed property still appears on the
+        // Unity SDK's public surface so call sites compile against the eventual
+        // native transport, but the bridged handshake will not carry them
+        // until #9 lands a non-JS-SDK code path. See ConversationOptions.Overrides
+        // docs for the user-facing description.
+        private static JObject? BuildOverrides(ConversationConfigOverride? overrides)
+        {
+            if (overrides == null)
+                return null;
+            var obj = new JObject();
+            JObject? agent = BuildAgentOverride(overrides.Agent);
+            JObject? tts = BuildTtsOverride(overrides.Tts);
+            JObject? conv = BuildConversationOverride(overrides.Conversation);
+            SetIfPresent(obj, "agent", agent);
+            SetIfPresent(obj, "tts", tts);
+            SetIfPresent(obj, "conversation", conv);
+            return obj.Count == 0 ? null : obj;
+        }
+
+        private static JObject? BuildAgentOverride(ConversationConfigOverrideAgent? agent)
+        {
+            if (agent == null)
+                return null;
+            var obj = new JObject();
+            SetIfPresent(obj, "firstMessage", agent.FirstMessage);
+            SetIfPresent(obj, "language", agent.Language);
+            // agent.prompt rides the wire shape straight through — JS SDK
+            // doesn't rename its inner fields, so JObject.FromObject's
+            // snake_case [JsonProperty] output is what the server expects.
+            SetIfPresent(
+                obj,
+                "prompt",
+                agent.Prompt == null ? null : JObject.FromObject(agent.Prompt)
+            );
+            return obj.Count == 0 ? null : obj;
+        }
+
+        private static JObject? BuildTtsOverride(ConversationConfigOverrideTts? tts)
+        {
+            if (tts == null)
+                return null;
+            var obj = new JObject();
+            SetIfPresent(obj, "voiceId", tts.VoiceId);
+            if (tts.Stability.HasValue)
+                obj["stability"] = tts.Stability.Value;
+            if (tts.Speed.HasValue)
+                obj["speed"] = tts.Speed.Value;
+            if (tts.SimilarityBoost.HasValue)
+                obj["similarityBoost"] = tts.SimilarityBoost.Value;
+            return obj.Count == 0 ? null : obj;
+        }
+
+        private static JObject? BuildConversationOverride(
+            ConversationConfigOverrideConversation? conversation
+        )
+        {
+            if (conversation == null)
+                return null;
+            var obj = new JObject();
+            if (conversation.TextOnly.HasValue)
+                obj["textOnly"] = conversation.TextOnly.Value;
+            return obj.Count == 0 ? null : obj;
+        }
+
+        private static JObject? FromDictionary(IReadOnlyDictionary<string, object>? dict)
+        {
+            return dict == null || dict.Count == 0 ? null : JObject.FromObject(dict);
+        }
+
+        // Centralises the "omit on null / empty" rule used by every field
+        // forwarded into the SessionConfig: upstream's union types tolerate
+        // missing fields cleanly, and an empty container adds wire noise
+        // without changing behaviour. Treats a null JToken (or one wrapping a
+        // JSON null) as absent, plus empty strings / objects / arrays.
+        private static void SetIfPresent(JObject obj, string key, JToken? value)
+        {
+            if (value == null || value.Type == JTokenType.Null)
+                return;
+            if (value.Type == JTokenType.String && string.IsNullOrEmpty(value.Value<string>()))
+                return;
+            if (value is JObject jo && jo.Count == 0)
+                return;
+            if (value is JArray ja && ja.Count == 0)
+                return;
+            obj[key] = value;
+        }
+
+        private static void SetIfPresent(JObject obj, string key, string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+                obj[key] = value;
         }
 
         // MediaDeviceInputConfig = FormatConfig & InputConfig & AudioWorkletConfig
