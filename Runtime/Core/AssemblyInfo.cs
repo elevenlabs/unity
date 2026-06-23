@@ -5,3 +5,5 @@ using System.Runtime.CompilerServices;
 // internal contracts.
 [assembly: InternalsVisibleTo("ElevenLabs.Agents.WebGL")]
 [assembly: InternalsVisibleTo("ElevenLabs.Agents.WebGL.Tests")]
+[assembly: InternalsVisibleTo("ElevenLabs.Agents.Native")]
+[assembly: InternalsVisibleTo("ElevenLabs.Agents.Native.Tests")]

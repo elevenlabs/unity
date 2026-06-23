@@ -1,0 +1,27 @@
+{
+    "name": "ElevenLabs.Agents.Native.Tests",
+    "rootNamespace": "",
+    "references": [
+        "GUID:d91ada060a3e4829b26914b462b06f3b",
+        "GUID:946bdaa52efaf4cb39eb6d95cb795643",
+        "ElevenLabs.Agents.Core",
+        "ElevenLabs.Agents.Native",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
