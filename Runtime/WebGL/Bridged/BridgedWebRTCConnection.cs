@@ -5,7 +5,6 @@ using ElevenLabs.Agents;
 using ElevenLabs.Protocol;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using UnityEngine;
 
 namespace ElevenLabs.WebGL.Bridged
 {
@@ -72,20 +71,6 @@ namespace ElevenLabs.WebGL.Bridged
         public void Send(OutgoingSocketEvent message)
         {
             _connection.Call("sendMessage", message);
-        }
-
-        public Awaitable<string> UploadFileAsync(
-            byte[] bytes,
-            string mimeType,
-            string? filename = null
-        )
-        {
-            // Bridged path lands in a follow-up commit — see the matching stub
-            // on BridgedWebSocketConnection for the rationale.
-            throw new NotImplementedException(
-                "UploadFileAsync is not yet implemented on the bridged (WebGL) transport. "
-                    + "See Docs~/plans/v0.1-parity.md#11b for tracking."
-            );
         }
 
         public void Close()

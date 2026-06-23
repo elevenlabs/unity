@@ -42,6 +42,7 @@ namespace ElevenLabs.Agents
         private readonly IConnection _connection;
         private readonly IInputController _inputController;
         private readonly IOutputController _outputController;
+        private readonly IFileUploader _fileUploader;
         private readonly ConversationOptions _options;
 
         // Generated wire-event fan-out. Composition (not inheritance) keeps
@@ -142,12 +143,14 @@ namespace ElevenLabs.Agents
             IConnection connection,
             IInputController inputController,
             IOutputController outputController,
+            IFileUploader fileUploader,
             ConversationOptions options
         )
         {
             _connection = connection;
             _inputController = inputController;
             _outputController = outputController;
+            _fileUploader = fileUploader;
             _options = options;
 
             // Connection-level subscriptions — mirror BaseConversation's
@@ -299,7 +302,7 @@ namespace ElevenLabs.Agents
             string? filename = null
         )
         {
-            return _connection.UploadFileAsync(bytes, mimeType, filename);
+            return _fileUploader.UploadFileAsync(bytes, mimeType, filename);
         }
 
         /// <summary>

@@ -126,7 +126,14 @@ namespace ElevenLabs.Native
                 throw new ArgumentNullException(nameof(output));
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
-            var conversation = new Conversation(connection, input, output, options);
+            // The uploader needs the negotiated conversation id, which is only
+            // populated after the WebSocket handshake completes — so we wire
+            // it up here rather than at connection-construction time.
+            var fileUploader = new HttpFileUploader(
+                HttpFileUploader.DeriveHttpsOrigin(options),
+                connection.ConversationId
+            );
+            var conversation = new Conversation(connection, input, output, fileUploader, options);
             conversation.UpdateStatus(Status.Connected);
             conversation.RaiseConnected(conversation.ConversationId);
             return conversation;

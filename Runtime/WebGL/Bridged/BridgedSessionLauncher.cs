@@ -63,15 +63,34 @@ namespace ElevenLabs.WebGL.Bridged
         {
             ValidateOptions(options);
             BridgedSession session = await BridgedSession.StartAsync(options);
+            // Bridged path's IFileUploader lands in a follow-up commit — wire
+            // a not-implemented stub for now so the public surface compiles
+            // and WebGL game code only sees the failure on actual call.
             var conversation = new Conversation(
                 session.Connection,
                 session.Input,
                 session.Output,
+                new NotImplementedFileUploader(),
                 options
             );
             conversation.UpdateStatus(Status.Connected);
             conversation.RaiseConnected(conversation.ConversationId);
             return conversation;
+        }
+
+        private sealed class NotImplementedFileUploader : IFileUploader
+        {
+            public Awaitable<string> UploadFileAsync(
+                byte[] bytes,
+                string mimeType,
+                string? filename = null
+            )
+            {
+                throw new NotImplementedException(
+                    "UploadFileAsync is not yet implemented on the bridged (WebGL) transport. "
+                        + "See Docs~/plans/v0.1-parity.md#11b for tracking."
+                );
+            }
         }
 
         // Lives on the launcher rather than on ConversationOptions itself so

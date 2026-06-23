@@ -2,7 +2,6 @@
 
 using System;
 using ElevenLabs.Protocol;
-using UnityEngine;
 
 namespace ElevenLabs.Agents
 {
@@ -41,21 +40,6 @@ namespace ElevenLabs.Agents
         /// <summary>Send a typed outgoing event over the wire.</summary>
         /// <param name="message">Outgoing event (e.g. <c>UserMessage</c>, <c>UserAudioChunk</c>, <c>Pong</c>).</param>
         void Send(OutgoingSocketEvent message);
-
-        /// <summary>
-        /// Upload a file alongside the live conversation via the
-        /// <c>POST /v1/convai/conversations/{id}/files</c> HTTP side-channel.
-        /// The returned <c>file_id</c> can be passed to
-        /// <see cref="Conversation.SendMultimodalMessage"/>.
-        /// </summary>
-        /// <param name="bytes">Raw file bytes.</param>
-        /// <param name="mimeType">MIME type the server should associate with the upload (e.g. <c>image/png</c>).</param>
-        /// <param name="filename">
-        /// Filename to attach in the multipart form. <c>null</c> defaults to
-        /// <c>upload.&lt;ext&gt;</c> derived from <paramref name="mimeType"/>,
-        /// matching the JS SDK.
-        /// </param>
-        Awaitable<string> UploadFileAsync(byte[] bytes, string mimeType, string? filename = null);
 
         /// <summary>Close the underlying transport. Idempotent.</summary>
         void Close();

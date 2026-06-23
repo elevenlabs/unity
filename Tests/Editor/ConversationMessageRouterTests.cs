@@ -29,32 +29,8 @@ namespace ElevenLabs.WebGL.Tests
 
             public List<OutgoingSocketEvent> Sent { get; } = new();
             public int CloseCallCount { get; private set; }
-            public int UploadFileCallCount { get; private set; }
-            public byte[]? LastUploadBytes { get; private set; }
-            public string? LastUploadMimeType { get; private set; }
-            public string? LastUploadFilename { get; private set; }
-            public string UploadFileResult { get; set; } = "file_abc123";
-            public Exception? UploadFileException { get; set; }
 
             public void Send(OutgoingSocketEvent message) => Sent.Add(message);
-
-            public Awaitable<string> UploadFileAsync(
-                byte[] bytes,
-                string mimeType,
-                string? filename = null
-            )
-            {
-                UploadFileCallCount++;
-                LastUploadBytes = bytes;
-                LastUploadMimeType = mimeType;
-                LastUploadFilename = filename;
-                var source = new AwaitableCompletionSource<string>();
-                if (UploadFileException != null)
-                    source.SetException(UploadFileException);
-                else
-                    source.SetResult(UploadFileResult);
-                return source.Awaitable;
-            }
 
             public void Close() => CloseCallCount++;
 
@@ -186,6 +162,34 @@ namespace ElevenLabs.WebGL.Tests
             public void GetByteFrequencyData(byte[] buffer) => LastByteFrequencyBuffer = buffer;
         }
 
+        private sealed class MockFileUploader : IFileUploader
+        {
+            public int CallCount { get; private set; }
+            public byte[]? LastBytes { get; private set; }
+            public string? LastMimeType { get; private set; }
+            public string? LastFilename { get; private set; }
+            public string Result { get; set; } = "file_abc123";
+            public Exception? Exception { get; set; }
+
+            public Awaitable<string> UploadFileAsync(
+                byte[] bytes,
+                string mimeType,
+                string? filename = null
+            )
+            {
+                CallCount++;
+                LastBytes = bytes;
+                LastMimeType = mimeType;
+                LastFilename = filename;
+                var source = new AwaitableCompletionSource<string>();
+                if (Exception != null)
+                    source.SetException(Exception);
+                else
+                    source.SetResult(Result);
+                return source.Awaitable;
+            }
+        }
+
         private static Awaitable CompletedAwaitable()
         {
             var source = new AwaitableCompletionSource();
@@ -197,12 +201,26 @@ namespace ElevenLabs.WebGL.Tests
             out MockConnection connection,
             out MockInputController input,
             out MockOutputController output
+        ) => NewConversation(out connection, out input, out output, out _);
+
+        private static Conversation NewConversation(
+            out MockConnection connection,
+            out MockInputController input,
+            out MockOutputController output,
+            out MockFileUploader fileUploader
         )
         {
             connection = new MockConnection();
             input = new MockInputController();
             output = new MockOutputController();
-            return new Conversation(connection, input, output, new ConversationOptions());
+            fileUploader = new MockFileUploader();
+            return new Conversation(
+                connection,
+                input,
+                output,
+                fileUploader,
+                new ConversationOptions()
+            );
         }
 
         private static AudioResponse MakeAudio(int eventId, string payload = "")
@@ -1110,10 +1128,10 @@ namespace ElevenLabs.WebGL.Tests
         // File upload (public Conversation API) ------------------------------
 
         [Test]
-        public void UploadFileAsync_ForwardsArgsToConnectionAndReturnsFileId()
+        public void UploadFileAsync_ForwardsArgsToUploaderAndReturnsFileId()
         {
-            var conversation = NewConversation(out var connection, out _, out _);
-            connection.UploadFileResult = "file_xyz789";
+            var conversation = NewConversation(out _, out _, out _, out var uploader);
+            uploader.Result = "file_xyz789";
             byte[] payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
 
             string fileId = conversation
@@ -1122,33 +1140,31 @@ namespace ElevenLabs.WebGL.Tests
                 .GetResult();
 
             Assert.AreEqual("file_xyz789", fileId);
-            Assert.AreEqual(1, connection.UploadFileCallCount);
-            Assert.AreSame(payload, connection.LastUploadBytes);
-            Assert.AreEqual("image/png", connection.LastUploadMimeType);
-            Assert.AreEqual("screenshot.png", connection.LastUploadFilename);
+            Assert.AreEqual(1, uploader.CallCount);
+            Assert.AreSame(payload, uploader.LastBytes);
+            Assert.AreEqual("image/png", uploader.LastMimeType);
+            Assert.AreEqual("screenshot.png", uploader.LastFilename);
         }
 
         [Test]
         public void UploadFileAsync_DefaultFilename_ForwardsNullThrough()
         {
-            var conversation = NewConversation(out var connection, out _, out _);
+            var conversation = NewConversation(out _, out _, out _, out var uploader);
 
             conversation
                 .UploadFileAsync(new byte[] { 1, 2 }, "image/jpeg")
                 .GetAwaiter()
                 .GetResult();
 
-            Assert.AreEqual(1, connection.UploadFileCallCount);
-            Assert.IsNull(connection.LastUploadFilename);
+            Assert.AreEqual(1, uploader.CallCount);
+            Assert.IsNull(uploader.LastFilename);
         }
 
         [Test]
-        public void UploadFileAsync_PropagatesConnectionException()
+        public void UploadFileAsync_PropagatesUploaderException()
         {
-            var conversation = NewConversation(out var connection, out _, out _);
-            connection.UploadFileException = new InvalidOperationException(
-                "Upload failed: 413 file too large"
-            );
+            var conversation = NewConversation(out _, out _, out _, out var uploader);
+            uploader.Exception = new InvalidOperationException("Upload failed: 413 file too large");
 
             var task = conversation.UploadFileAsync(new byte[] { 0 }, "image/png");
             var ex = Assert.Throws<InvalidOperationException>(() => task.GetAwaiter().GetResult());
