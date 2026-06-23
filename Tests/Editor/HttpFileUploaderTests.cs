@@ -2,10 +2,9 @@
 
 using System;
 using ElevenLabs.Agents;
-using ElevenLabs.Native;
 using NUnit.Framework;
 
-namespace ElevenLabs.Native.Tests
+namespace ElevenLabs.Agents.Tests
 {
     /// <summary>
     /// Edit Mode tests for <see cref="HttpFileUploader"/>'s pure helpers

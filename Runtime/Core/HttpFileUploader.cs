@@ -2,19 +2,21 @@
 
 using System;
 using System.Collections.Generic;
-using ElevenLabs.Agents;
 using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.Networking;
 
-namespace ElevenLabs.Native
+namespace ElevenLabs.Agents
 {
     /// <summary>
     /// <see cref="IFileUploader"/> implementation that POSTs a multipart
     /// <c>file</c> field to <c>{origin}/v1/convai/conversations/{id}/files</c>
-    /// via <see cref="UnityWebRequest"/>. Used by
-    /// <see cref="NativeSessionLauncher"/> on every non-WebGL platform; the
-    /// WebGL launcher wires its own bridged uploader.
+    /// via <see cref="UnityWebRequest"/>. Used by both the native launcher
+    /// and the bridged WebGL launcher — on WebGL, <see cref="UnityWebRequest"/>
+    /// is backed by <c>XMLHttpRequest</c>, so the same code path works
+    /// wherever Unity can issue an HTTP POST (assuming the server returns
+    /// the necessary CORS headers, which the JS SDK's <c>fetch</c>-based
+    /// helper relies on too).
     /// </summary>
     /// <remarks>
     /// Held by <see cref="Conversation"/> for the lifetime of the session.

@@ -63,34 +63,26 @@ namespace ElevenLabs.WebGL.Bridged
         {
             ValidateOptions(options);
             BridgedSession session = await BridgedSession.StartAsync(options);
-            // Bridged path's IFileUploader lands in a follow-up commit — wire
-            // a not-implemented stub for now so the public surface compiles
-            // and WebGL game code only sees the failure on actual call.
+            // HttpFileUploader is platform-neutral: on WebGL it runs through
+            // UnityWebRequest → XMLHttpRequest, so the same code path that
+            // serves the native launcher works here too. No jslib primitive
+            // needed unless the server's CORS posture rejects the browser
+            // request — at which point the failure surfaces from the same
+            // UnityWebRequest path the user can inspect.
+            var fileUploader = new HttpFileUploader(
+                HttpFileUploader.DeriveHttpsOrigin(options),
+                session.Connection.ConversationId
+            );
             var conversation = new Conversation(
                 session.Connection,
                 session.Input,
                 session.Output,
-                new NotImplementedFileUploader(),
+                fileUploader,
                 options
             );
             conversation.UpdateStatus(Status.Connected);
             conversation.RaiseConnected(conversation.ConversationId);
             return conversation;
-        }
-
-        private sealed class NotImplementedFileUploader : IFileUploader
-        {
-            public Awaitable<string> UploadFileAsync(
-                byte[] bytes,
-                string mimeType,
-                string? filename = null
-            )
-            {
-                throw new NotImplementedException(
-                    "UploadFileAsync is not yet implemented on the bridged (WebGL) transport. "
-                        + "See Docs~/plans/v0.1-parity.md#11b for tracking."
-                );
-            }
         }
 
         // Lives on the launcher rather than on ConversationOptions itself so
