@@ -1,5 +1,6 @@
 using System;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -16,7 +17,8 @@ namespace ElevenLabs.WebGL.Editor
         {
             BuildSceneWithBehaviour(
                 "ElevenLabs.WebGL.Samples.BridgePrimitiveSmokeTest, ElevenLabs.WebGL.Samples.BridgeSmokeTest",
-                "WebGL"
+                "WebGL",
+                BuildTarget.WebGL
             );
         }
 
@@ -30,16 +32,87 @@ namespace ElevenLabs.WebGL.Editor
         {
             BuildSceneWithBehaviour(
                 "ElevenLabs.WebGL.Samples.ConversationSmokeTest.ConversationSmokeTest, ElevenLabs.WebGL.Samples.ConversationSmokeTest",
-                "WebGLConversationSmoke"
+                "WebGLConversationSmoke",
+                BuildTarget.WebGL
             );
+        }
+
+        /// <summary>
+        /// Entry point for headless desktop standalone smoke builds with
+        /// IL2CPP + managed stripping enabled
+        /// (<c>-executeMethod ElevenLabs.WebGL.Editor.HostBuild.BuildStandalone</c>).
+        /// Builds for the host OS so the same shell script works on every
+        /// developer / CI machine without a per-OS branch. The produced
+        /// binary exercises <see cref="ElevenLabs.Protocol"/> Newtonsoft
+        /// reflection under AOT and gates the
+        /// <c>Runtime/Native/link.xml</c> preservation.
+        /// </summary>
+        public static void BuildStandalone()
+        {
+            var hostTarget = HostStandaloneTarget();
+            var hostGroup = NamedBuildTarget.FromBuildTargetGroup(
+                BuildPipeline.GetBuildTargetGroup(hostTarget)
+            );
+
+            // IL2CPP + High stripping is the worst-case AOT shape — if the
+            // native link.xml ever drifts from the codegen output, the
+            // smoke surfaces it as a runtime JsonReaderException instead
+            // of a vague consumer-side bug report. Restore the pre-call
+            // settings so a developer running this on their workstation
+            // doesn't end up with their project silently flipped to IL2CPP.
+            ScriptingImplementation previousBackend = PlayerSettings.GetScriptingBackend(hostGroup);
+            ManagedStrippingLevel previousStripping = PlayerSettings.GetManagedStrippingLevel(
+                hostGroup
+            );
+            try
+            {
+                PlayerSettings.SetScriptingBackend(hostGroup, ScriptingImplementation.IL2CPP);
+                PlayerSettings.SetManagedStrippingLevel(hostGroup, ManagedStrippingLevel.High);
+
+                BuildSceneWithBehaviour(
+                    "ElevenLabs.Native.Samples.StandaloneSmokeTest.StandaloneSmokeTest, ElevenLabs.Native.Samples.StandaloneSmokeTest",
+                    System.IO.Path.Combine("Standalone", "StandaloneSmoke" + StandaloneExtension()),
+                    hostTarget
+                );
+            }
+            finally
+            {
+                PlayerSettings.SetScriptingBackend(hostGroup, previousBackend);
+                PlayerSettings.SetManagedStrippingLevel(hostGroup, previousStripping);
+            }
+        }
+
+        private static BuildTarget HostStandaloneTarget()
+        {
+            return Application.platform switch
+            {
+                RuntimePlatform.OSXEditor => BuildTarget.StandaloneOSX,
+                RuntimePlatform.WindowsEditor => BuildTarget.StandaloneWindows64,
+                RuntimePlatform.LinuxEditor => BuildTarget.StandaloneLinux64,
+                _ => throw new PlatformNotSupportedException(
+                    $"HostBuild.BuildStandalone does not support {Application.platform}"
+                ),
+            };
+        }
+
+        private static string StandaloneExtension()
+        {
+            return Application.platform switch
+            {
+                RuntimePlatform.OSXEditor => ".app",
+                RuntimePlatform.WindowsEditor => ".exe",
+                RuntimePlatform.LinuxEditor => "",
+                _ => "",
+            };
         }
 
         // Shared scene-build pipeline: assemble an empty scene with the named
         // MonoBehaviour as its only object, run BuildPipeline.BuildPlayer
-        // targeting WebGL, exit 0 on success / 1 on failure.
+        // targeting the requested platform, exit 0 on success / 1 on failure.
         private static void BuildSceneWithBehaviour(
             string assemblyQualifiedTypeName,
-            string outputSubdir
+            string outputSubdir,
+            BuildTarget target
         )
         {
             var testProjectRoot = System.IO.Path.GetFullPath(
@@ -72,7 +145,7 @@ namespace ElevenLabs.WebGL.Editor
                     {
                         scenes = new[] { tmpScenePath },
                         locationPathName = outputPath,
-                        target = BuildTarget.WebGL,
+                        target = target,
                         options = BuildOptions.None,
                     }
                 );
@@ -85,15 +158,13 @@ namespace ElevenLabs.WebGL.Editor
             if (report.summary.result == BuildResult.Succeeded)
             {
                 Debug.Log(
-                    $"WebGL smoke build succeeded ({outputSubdir}) — errors: {report.summary.totalErrors}, warnings: {report.summary.totalWarnings}"
+                    $"Smoke build succeeded ({outputSubdir}) — errors: {report.summary.totalErrors}, warnings: {report.summary.totalWarnings}"
                 );
                 EditorApplication.Exit(0);
             }
             else
             {
-                Debug.LogError(
-                    $"WebGL smoke build failed ({outputSubdir}): {report.summary.result}"
-                );
+                Debug.LogError($"Smoke build failed ({outputSubdir}): {report.summary.result}");
                 EditorApplication.Exit(1);
             }
         }

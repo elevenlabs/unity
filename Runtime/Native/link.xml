@@ -1,0 +1,34 @@
+<!--
+  Preserves stripping-fragile entry points for the native (non-WebGL)
+  transport path.
+
+  ElevenLabs.Native.NativeSessionLauncher: registers
+  Conversation.SessionFactory via a [RuntimeInitializeOnLoadMethod] hook on
+  Editor / standalone / mobile. Consumer projects only reference
+  Conversation.StartSessionAsync, not the platform asmdef, so IL2CPP
+  strips the launcher type entirely (along with the attribute) and
+  StartSessionAsync throws "No session factory is registered". Mirrors
+  the BridgedSessionLauncher preserve in Runtime/WebGL/link.xml.
+
+  ElevenLabs.Protocol.*: the wire-event DTOs (IncomingSocketEvent /
+  OutgoingSocketEvent subclasses + their nested event payload classes)
+  are deserialised from JSON via IncomingSocketEventConverter and
+  serialised via JsonConvert.SerializeObject. Newtonsoft.Json relies on
+  reflection over [JsonProperty]-attributed property setters/getters,
+  which IL2CPP's managed stripping can prune because no statically
+  reachable C# code calls them directly. preserve="all" keeps each
+  type and its members alive so the round-trip survives AOT. The Core
+  assembly hosts the Protocol namespace; this preserve lives next to
+  the Native launcher because the WebGL path serialises through the
+  JS-side SDK and doesn't exercise the same C# reflection path at
+  scale — moving the preserve here keeps the WebGL link.xml focused on
+  WebGL-only concerns.
+-->
+<linker>
+  <assembly fullname="ElevenLabs.Agents.Native">
+    <type fullname="ElevenLabs.Native.NativeSessionLauncher" preserve="all" />
+  </assembly>
+  <assembly fullname="ElevenLabs.Agents.Core">
+    <type fullname="ElevenLabs.Protocol.*" preserve="all" />
+  </assembly>
+</linker>

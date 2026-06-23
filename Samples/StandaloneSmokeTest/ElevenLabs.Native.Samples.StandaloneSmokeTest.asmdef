@@ -1,0 +1,19 @@
+{
+    "name": "ElevenLabs.Native.Samples.StandaloneSmokeTest",
+    "rootNamespace": "ElevenLabs.Native.Samples.StandaloneSmokeTest",
+    "references": [
+        "ElevenLabs.Agents.Core",
+        "ElevenLabs.Agents.Native"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [
+        "WebGL"
+    ],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
