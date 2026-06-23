@@ -88,7 +88,7 @@ else now has a generated DTO and the matching #11c PR is mechanical.
 | `guardrail_triggered` | (no inner object) | `handleGuardrailTriggered` → `onGuardrailTriggered` | ✅ Present (post-#38788) as `GuardrailTriggered` |
 | `agent_typing` | `agent_typing_event` | `handleAgentTyping` → `onAgentTyping` | Still absent — needs upstream PR |
 | `external_agent_connected` | (no inner object) | `handleExternalAgentConnected` → `onExternalAgentConnected` | Still absent — needs upstream PR |
-| `audio_event_alignment` (`AudioAlignmentEvent`) | n/a (delivered via `onAudioAlignment`, called from WebRTC audio adapter) | `onAudioAlignment` callback typed in `Callbacks` but never invoked from `BaseConversation` | Still absent — and confirm whether `onAudioAlignment` has any JS callsite at all before filing |
+| `audio_event_alignment` (`AudioAlignmentEvent`) | `event.audio_event.alignment` (sub-field of the existing `audio` event, **not** a top-level wire type) | `VoiceConversation.handleAudio` calls `onAudioAlignment(event.audio_event.alignment)` when present | ✅ Already in the spec as `AudioResponse.audio_event.alignment`; the generated `AudioEventAlignment` class is reachable via the existing `AudioResponse` DTO — no upstream spec change needed |
 | `tool_mock_config` (outgoing, in `conversation_initiation_client_data`) | n/a — `constructOverrides` adds it client-side | Sent by client when `ConversationOptions.ToolMockConfig` is set | Still absent in `ConversationInitiationClientData` schema |
 | `mcp_tool_approval_result` (outgoing) | `tool_call_id`, `is_approved` | `sendMCPToolApprovalResult` | ✅ Present (post-#38788) as `McpToolApprovalResult` — xi#39092 was redundant, filed before the re-vendor |
 | `source_info.source` enum value `unity_sdk` | n/a — enum widening | `constructOverrides` auto-injects `{ source: "js_sdk", version: <SDK_VERSION> }`; we need a corresponding `unity_sdk` slot | Still absent — `source` enum doesn't list `unity_sdk` |
@@ -135,7 +135,7 @@ One row per JS-SDK callback (`kind: callback`) or method (`kind: method`).
 | 18 | callback | `onInterruption` | `BaseConversation.handleInterruption` | `wire-existing` | `event Action<InterruptionArgs>? Interrupted` | ✅ shipped | none |
 | 19 | callback | `onAgentResponseCorrection` | `BaseConversation.handleAgentResponseCorrection` | `wire-existing` | `event Action<AgentResponseCorrectionArgs>? AgentResponseCorrected` | ✅ shipped | none |
 | 20 | callback | `onAgentChatResponsePart` | `BaseConversation.handleAgentChatResponsePart` | `wire-codegen` | None | `event Action<AgentChatResponsePartArgs>? AgentChatResponsePartReceived` | ✅ Unblocked by xi#38788 (now `AgentChatResponsePart` DTO) |
-| 21 | callback | `onAudioAlignment` | `Callbacks` type only — **not invoked from `BaseConversation`**. Likely wired separately by an internal adapter (WebRTC) or unused in JS SDK proper | `wire-codegen` | None | Defer: confirm whether the JS SDK invokes this anywhere (we couldn't find a callsite in `BaseConversation`). If yes, mirror; if no, drop from the parity surface entirely. | Confirm JS callsite + upstream spec PR (`audio_event_alignment`) |
+| 21 | callback | `onAudioAlignment` | `VoiceConversation.handleAudio` (not `BaseConversation`) calls `onAudioAlignment(event.audio_event.alignment)` when the audio event includes alignment data | `wire-existing` | None — alignment surfaces today via `AudioResponseArgs.AudioBase64` consumers reading the underlying `AudioResponse.AudioEvent.Alignment` is not exposed | Add an `Alignment` field on `AudioResponseArgs` (the generated `AudioEventAlignment` payload) so subscribers can render lip-sync without a parallel event. No upstream spec change needed — already in the spec. | ready |
 | 22 | callback | `onGuardrailTriggered` | `BaseConversation.handleGuardrailTriggered` | `wire-codegen` | None | `event Action? GuardrailTriggered` (no payload — JS callback takes no args) | ✅ Unblocked by xi#38788 (now `GuardrailTriggered` DTO with `guardrail_name`/`guardrail_response`) |
 | 23 | callback | `onAgentTyping` | `BaseConversation.handleAgentTyping` | `wire-codegen` | None | `event Action<AgentTypingArgs>? AgentTyping` | Upstream spec PR (`agent_typing`) |
 | 24 | callback | `onExternalAgentConnected` | `BaseConversation.handleExternalAgentConnected` | `wire-codegen` | None | `event Action? ExternalAgentConnected` (no payload) | Upstream spec PR (`external_agent_connected`) |
@@ -361,18 +361,18 @@ pass; the remaining four still need their own upstream PRs.
   ├─ AgentChatResponsePartReceived                  ── from `AgentChatResponsePart`
   └─ GuardrailTriggered                             ── from `GuardrailTriggered`
 
-  ── still upstream-blocked:
-  ├─ AsrInitiationMetadataReceived                  ── waits on upstream `asr_initiation_metadata`
-  ├─ AgentTyping                                    ── waits on upstream `agent_typing`
-  ├─ ExternalAgentConnected                         ── waits on upstream `external_agent_connected`
-  └─ AudioAlignment(deferred)                       ── confirm JS callsite exists first; then upstream `audio_event_alignment`
+  ── still upstream-blocked (xi issues filed):
+  ├─ AsrInitiationMetadataReceived                  ── xi#39099
+  ├─ AgentTyping                                    ── xi#39100
+  └─ ExternalAgentConnected                         ── xi#39101
+
+  ── ready (sub-field of existing `audio` event):
+  └─ AudioAlignment via AudioResponseArgs.Alignment ── alignment is already in the spec
 ```
 
 Everything in the "ready" buckets can land today in any order. Each
-"upstream-blocked" entry needs its own `elevenlabs/xi` PR before the
-matching C# work — same pattern as the four PR #38788 just resolved
-(and as xi#39092 which turned out to be redundant — the gap was already
-fixed on xi/main when filed).
+"upstream-blocked" entry has its own `elevenlabs/xi` issue filed and
+waits on a spec PR + re-vendor.
 
 ## Open question carried forward
 
