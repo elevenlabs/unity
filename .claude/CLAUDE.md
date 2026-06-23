@@ -213,3 +213,27 @@ someone bypasses the plugin.
 ## Project plans
 
 Implementation plans live in `Docs~/plans/` (alongside `Docs~/ARCHITECTURE.md`). Look there for context on agreed approaches, and place any new plans there too.
+
+## Reporting Unity issues
+
+When you're about to add a workaround for a Unity bug or undocumented
+limitation — anything where the "correct" answer per Unity's docs
+doesn't match observed behaviour — **flag it explicitly in chat
+before applying the workaround**. We want these surfaced to our Unity
+contacts upstream, and they're easy to miss if they land silently
+inside an unrelated PR. Phrasing like "this looks like a Unity bug —
+should I write it up?" is enough; the user will confirm.
+
+Once confirmed, add a self-contained writeup under
+[`Docs~/unity-issues/`](../Docs~/unity-issues/) (see the
+[README](../Docs~/unity-issues/README.md) for the file structure).
+Each writeup is meant to be handed to Unity support / a Unity
+engineering contact without further editing — Unity version, minimal
+repro, expected vs actual, the workaround applied with a link to
+where it lives in our tree, and explicit asks for Unity. Update the
+README's index when adding a new file.
+
+Don't add an entry for our own bugs we happened to find while
+debugging Unity, or for issues we couldn't reduce to a minimal repro.
+The folder is for things Unity engineering should see, not a general
+debugging log.
