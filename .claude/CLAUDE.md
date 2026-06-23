@@ -50,8 +50,9 @@ pnpm --dir Codegen~ run round-trip           # Serialize/deserialize each DTO vi
 pnpm --dir Codegen~ run verify:protocol-dtos # Regenerate and assert no git drift
 ```
 
-Generator reads `Codegen~/schemas/convai-asyncapi.yml` (vendored from `elevenlabs/xi`;
-see `Codegen~/schemas/README.md` for the pinned commit) and emits C# under
+Generator reads `Codegen~/schemas/convai-asyncapi.yml` (vendored from the
+ElevenLabs internal monorepo; see `Codegen~/schemas/README.md` for the pinned
+commit) and emits C# under
 `Runtime/Core/Protocol/`. It uses [`@asyncapi/parser`](https://github.com/asyncapi/parser-js)
 to resolve `$ref`s and [`@asyncapi/modelina`](https://github.com/asyncapi/modelina) to
 emit the models (same stack the JS SDK's codegen uses). On top of that:
@@ -237,3 +238,31 @@ Don't add an entry for our own bugs we happened to find while
 debugging Unity, or for issues we couldn't reduce to a minimal repro.
 The folder is for things Unity engineering should see, not a general
 debugging log.
+
+## Reporting upstream issues (AsyncAPI spec, JS SDK)
+
+When something looks wrong upstream — the vendored AsyncAPI spec at
+`Codegen~/schemas/convai-asyncapi.yml` is missing an event / missing a
+field / describing a field with the wrong name or type, or the
+`@elevenlabs/client` JS SDK behaves in a way that contradicts the spec
+or its own docs — **don't quietly hand-roll a mirror DTO, patch the
+schema locally, or stack a workaround on top to paper over it**.
+
+Our team maintains both upstreams (the AsyncAPI spec lives in the
+ElevenLabs internal monorepo; the JS SDK lives in the JS packages
+repo), so we have agency to fix this at the source: file a GitHub
+issue against the relevant repo, or draft a Slack message to discuss
+with the team that owns it. A GitHub issue is especially low-friction
+— it can be picked up by another session later without losing context.
+
+**Flag it explicitly in chat first** and defer to the user on the
+right resolution path — GitHub issue vs Slack, and which repo /
+channel. Phrasing like "the spec is missing `tool_mock_config` —
+should I open an issue or post in Slack, and where?" is enough; the
+user will pick the route.
+
+Until upstream is fixed, track the gap in the relevant plan under
+`Docs~/plans/` (see [`Docs~/plans/v0.1-parity.md`](../Docs~/plans/v0.1-parity.md)
+for the pattern: deferred to a spec re-vendor / hand-rolled mirror PR,
+linked back to the originating work item) so we don't lose the
+follow-up.
