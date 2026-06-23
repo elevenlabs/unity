@@ -84,10 +84,9 @@ namespace ElevenLabs.WebGL
         // that carries the bundled @elevenlabs/client SDK and the
         // EL_RegisterFactory calls that wire the factories into the
         // primitives dispatcher (see Bridge~/build/bundle-jslib.ts postset
-        // mode, and Docs~/plans/jslib-bundler-iife-scope.md). Without a
-        // DllImport reference here, the entry — and its bundled payload —
-        // gets stripped and the first StartSessionAsync fails with
-        // "Unknown factory: createWebSocketConnection".
+        // mode). Without a DllImport reference here, the entry — and its
+        // bundled payload — gets stripped and the first StartSessionAsync
+        // fails with "Unknown factory: createWebSocketConnection".
         [DllImport("__Internal")]
         public static extern void EL_EnsureConnectionFactoriesLoaded();
 #else

@@ -56,15 +56,15 @@ beforeAll(() => {
   }
 });
 
-// Stripping-regression for the bundler IIFE-scope bug
-// (Docs~/plans/jslib-bundler-iife-scope.md). The connection .jslib used to
-// wrap the bundled @elevenlabs/client/internal/unity SDK in a Rolldown IIFE;
-// only the library object returned from the IIFE survived Emscripten's
+// Stripping-regression for the bundler IIFE-scope bug fixed in commit
+// `14d7601`. The connection .jslib used to wrap the bundled
+// @elevenlabs/client/internal/unity SDK in a Rolldown IIFE; only the
+// library object returned from the IIFE survived Emscripten's
 // library-evaluation step, so the SDK classes the factory closures captured
 // ended up undefined at runtime. The three assertions cover the three pieces
-// of evidence the plan called out — a class definition, a runtime
-// side-effect call, and a factory-registration call — so a regression on any
-// one of them fails loud.
+// of evidence we measured — a class definition, a runtime side-effect call,
+// and a factory-registration call — so a regression on any one of them
+// fails loud.
 test("conversation-smoke framework.js retains SDK symbols the connection .jslib closes over", () => {
   expect(
     frameworkJs,
@@ -88,7 +88,7 @@ test("conversation-smoke framework.js retains SDK symbols the connection .jslib 
 });
 
 // Stripping-regression for the Emscripten JSDCE destructuring bug
-// (Docs~/plans/jslib-bundler-iife-scope.md, "Post-fix symptom" section).
+// (Docs~/unity-issues/emscripten-jsdce-destructuring.md).
 // `WebSocketConnection.create` in the bundled SDK does
 //   const { name: source, version } = sourceInfo;
 // then uses `${source}` and `${version}` in a template literal. Emscripten's
@@ -138,6 +138,6 @@ test("framework.js retains `source` and `version` declarations inside WebSocketC
     hasDestructuring || hasLowered,
     "WebSocketConnection.create has `${source}` template references but no `source` binding — " +
       "Emscripten's acorn-optimizer JSDCE pass likely stripped the declaration. " +
-      "See Docs~/plans/jslib-bundler-iife-scope.md.",
+      "See Docs~/unity-issues/emscripten-jsdce-destructuring.md.",
   ).toBe(true);
 });

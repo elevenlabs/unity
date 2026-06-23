@@ -12,7 +12,9 @@
 // longer surfaces these factories as Emscripten library entries. Instead the
 // entire bundle (including this map) lands at framework.js top scope via a
 // single `$EL_ConnectionInit` postset; registration happens inline at startup.
-// See Docs~/plans/jslib-bundler-iife-scope.md for the architectural rewrite.
+// The earlier IIFE-wrapped library-entries approach surfaced a stripping leak
+// (the IIFE body never reached the runtime); commit `14d7601` ports the
+// .jslib to postset mode — git log there for the full design rationale.
 //
 // Return shape is not declared here — each C# call site picks it per-call via
 // the generic <T> parameter (e.g. JsBridge.InvokeFactoryAsync<JsObject>(...)).

@@ -23,8 +23,8 @@
 //   then writes the bundle verbatim into framework.js at top scope. Every
 //   symbol the bundle declares — SDK classes, helpers, factory registrations,
 //   side-effects — lands in runtime scope, instead of being trapped inside
-//   an IIFE whose body Emscripten drops on the floor. See
-//   Docs~/plans/jslib-bundler-iife-scope.md.
+//   an IIFE whose body Emscripten drops on the floor. (See commit `14d7601`
+//   for the IIFE-to-postset port.)
 //
 // The `--mode` flag has no default per se; if omitted, the script picks
 // `iife` for back-compat with the primitives build.
@@ -100,7 +100,7 @@ function renderIife(chunk: OutputChunk): string {
 // stringified and emitted as the value of a single `$EL_<Name>Init` library
 // entry. The `;`-prefix is what makes Emscripten emit the bundle source
 // verbatim at framework.js top scope (jsifier.js handling for
-// `var <mangled>;<code>;` — see Docs~/plans/jslib-bundler-iife-scope.md).
+// `var <mangled>;<code>;`).
 //
 // The bundle is responsible for self-registering with the primitives layer
 // (via `EL_RegisterFactory` calls in the bundled code), so no factory entries
@@ -117,8 +117,7 @@ function renderPostset(chunk: OutputChunk, entry: string): string {
   // build. Emscripten would otherwise strip the whole entry — including its
   // bundle payload — because no library function depends on it. The function
   // body is intentionally empty; reachability is the entire point. See
-  // Runtime/WebGL/Bridged/BridgedSessionLauncher.cs for the C# call site
-  // and Docs~/plans/jslib-bundler-iife-scope.md for the rationale.
+  // Runtime/WebGL/Bridged/BridgedSessionLauncher.cs for the C# call site.
   return `mergeInto(LibraryManager.library, {
   $${initName}__deps: ["$EL_RegisterFactory"],
   $${initName}: ${escaped},

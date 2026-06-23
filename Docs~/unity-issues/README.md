@@ -18,6 +18,11 @@ See the "Reporting Unity issues" section of
 
 ## Index
 
+- [`emscripten-jsdce-destructuring.md`](./emscripten-jsdce-destructuring.md)
+  — Emscripten's JSDCE pass deletes `const { x } = obj` destructuring
+  declarations from WebGL builds; references remain, producing a
+  runtime `ReferenceError`. Fixed upstream in Emscripten 3.1.47
+  (Oct 2023), but Unity 6.0–6.4 LTS ship pre-fix Emscripten 3.1.x.
 - [`link-xml-autodiscovery-file-package.md`](./link-xml-autodiscovery-file-package.md)
   — UnityLinker silently drops package-internal `link.xml` files when
   the package is referenced as a local file-path package whose root is

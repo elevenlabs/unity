@@ -16,7 +16,7 @@ function transform(code: string): string | null {
 describe("lowerDestructuring — transformDestructuring", () => {
   it("lowers a renamed object-destructuring with multiple bindings", () => {
     // This is the actual production failure shape — see WebSocketConnection.create
-    // in @elevenlabs/client and Docs~/plans/jslib-bundler-iife-scope.md.
+    // in @elevenlabs/client and Docs~/unity-issues/emscripten-jsdce-destructuring.md.
     const code = `const { name: source, version } = sourceInfo;`;
     expect(transform(code)).toBe(
       `const source = sourceInfo.name, version = sourceInfo.version;`,

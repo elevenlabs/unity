@@ -10,12 +10,12 @@
 // being trapped inside a Rolldown IIFE whose body Emscripten dropped on the
 // floor.
 //
-// Background: see Docs~/plans/jslib-bundler-iife-scope.md for the
-// architectural rewrite. The pre-fix design exported `$EL_*` library entries
-// from `factories.ts` / `audio-glue.ts`, but the SDK classes the factory
-// closures referenced were never reachable in the runtime emit — Emscripten
-// only preserves declared library entries, and the IIFE wrapper was
-// discarded.
+// Background: commit `14d7601` ports the connection .jslib from an IIFE-
+// wrapped Emscripten library to this postset emit. The pre-fix design
+// exported `$EL_*` library entries from `factories.ts` / `audio-glue.ts`,
+// but the SDK classes the factory closures referenced were never reachable
+// in the runtime emit — Emscripten only preserves declared library entries,
+// and the IIFE wrapper was discarded.
 
 import {
   installIosAudioUnlockListener,

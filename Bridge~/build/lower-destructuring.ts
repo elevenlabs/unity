@@ -11,8 +11,9 @@
 // `${source}` and `${version}` template-literal references that *did* get
 // recorded as `use` survive, producing a runtime `ReferenceError: source is
 // not defined` from inside `WebSocketConnection.create` the first time a
-// session opens. See Docs~/plans/jslib-bundler-iife-scope.md for the full
-// root-cause writeup.
+// session opens. See Docs~/unity-issues/emscripten-jsdce-destructuring.md
+// for the full root-cause writeup and the drop-when condition (Unity ≥6.5
+// bundles Emscripten 4.0.19, which includes the upstream fix).
 //
 // We side-step the bug by rewriting the destructuring at bundle time:
 //   const { name: source, version } = sourceInfo;
