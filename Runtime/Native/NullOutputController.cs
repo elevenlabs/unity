@@ -16,6 +16,8 @@ namespace ElevenLabs.Native
     {
         public Awaitable Close() => CompletedAwaitable();
 
+        public void PushAudio(byte[] pcm) { }
+
         public Awaitable SetDevice(
             OutputDeviceConfig? config = null,
             FormatConfig? format = null

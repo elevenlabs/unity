@@ -94,12 +94,15 @@ namespace ElevenLabs.WebGL.Tests
             public float VolumeReturnValue { get; set; } = 0f;
             public int GetVolumeCallCount { get; private set; }
             public byte[]? LastByteFrequencyBuffer { get; private set; }
+            public List<byte[]> PushAudioCalls { get; } = new();
 
             public Awaitable Close()
             {
                 CloseCallCount++;
                 return CompletedAwaitable();
             }
+
+            public void PushAudio(byte[] pcm) => PushAudioCalls.Add(pcm);
 
             public Awaitable SetDevice(
                 OutputDeviceConfig? config = null,
@@ -292,12 +295,60 @@ namespace ElevenLabs.WebGL.Tests
             var modeChanges = new List<Mode>();
             conversation.ModeChanged += mode => modeChanges.Add(mode);
 
-            connection.FireMessage(MakeAudio(eventId: 12, payload: "abc"));
+            // "YWJj" is base64 for "abc"; needs to be valid base64 now that
+            // HandleAudioResponse decodes the payload to feed the output.
+            connection.FireMessage(MakeAudio(eventId: 12, payload: "YWJj"));
 
-            Assert.AreEqual("abc", received!.AudioBase64);
+            Assert.AreEqual("YWJj", received!.AudioBase64);
             Assert.AreEqual(12, received.EventId);
             Assert.AreEqual(Mode.Speaking, conversation.Mode);
             CollectionAssert.AreEqual(new[] { Mode.Speaking }, modeChanges);
+        }
+
+        [Test]
+        public void Dispatch_Audio_DecodesBase64AndPushesToOutputController()
+        {
+            var conversation = NewConversation(out var connection, out _, out var output);
+
+            // "YWJj" decodes to [0x61, 0x62, 0x63] = "abc".
+            connection.FireMessage(MakeAudio(eventId: 3, payload: "YWJj"));
+
+            Assert.AreEqual(1, output.PushAudioCalls.Count);
+            CollectionAssert.AreEqual(new byte[] { 0x61, 0x62, 0x63 }, output.PushAudioCalls[0]);
+        }
+
+        [Test]
+        public void Dispatch_Audio_EmptyPayloadSkipsPushAudio()
+        {
+            // Bridged WebGL strips audio_base_64 JS-side, so the wire event
+            // arrives at C# with an empty payload. The output controller
+            // shouldn't see a PushAudio call in that case.
+            var conversation = NewConversation(out var connection, out _, out var output);
+
+            connection.FireMessage(MakeAudio(eventId: 4));
+
+            Assert.AreEqual(0, output.PushAudioCalls.Count);
+        }
+
+        [Test]
+        public void Dispatch_Audio_MalformedBase64_RaisesErrorWithoutCrashing()
+        {
+            var conversation = NewConversation(out var connection, out _, out var output);
+            string? raised = null;
+            conversation.ErrorOccurred += msg => raised = msg;
+
+            // "abc" is 3 chars — not a multiple of 4, so FromBase64String
+            // throws FormatException. The router should surface that as an
+            // ErrorOccurred event and keep going.
+            connection.FireMessage(MakeAudio(eventId: 6, payload: "abc"));
+
+            Assert.IsNotNull(raised);
+            StringAssert.Contains("audio", raised!.ToLowerInvariant());
+            Assert.AreEqual(0, output.PushAudioCalls.Count);
+            // Mode still advances even when the decode failed — AudioReceived
+            // fired (user got the event), and currentEventId tracking should
+            // not be derailed by a malformed payload.
+            Assert.AreEqual(Mode.Speaking, conversation.Mode);
         }
 
         [Test]

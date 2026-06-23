@@ -19,6 +19,21 @@ namespace ElevenLabs.Agents
         /// <summary>Tear down the audio playback pipeline. Idempotent.</summary>
         Awaitable Close();
 
+        /// <summary>
+        /// Push a chunk of 16-bit little-endian PCM samples to the output
+        /// pipeline. Called by <see cref="Conversation"/> after decoding the
+        /// wire payload from each <c>audio</c> event.
+        /// </summary>
+        /// <remarks>
+        /// The Bridged (WebGL default-mode) implementation no-ops — audio
+        /// flows JS-internal between connection and output via
+        /// <c>attachConnectionToOutput</c>, and the wire payload arrives at C#
+        /// with the base64 field stripped, so <paramref name="pcm"/> is empty.
+        /// Native implementations decode <c>int16-LE → float</c> and write
+        /// into the playback ring buffer for the audio thread to consume.
+        /// </remarks>
+        void PushAudio(byte[] pcm);
+
         /// <summary>Switch output device or override the output format.</summary>
         /// <param name="config">
         /// Device selection. Pass <c>null</c> to keep the current device.

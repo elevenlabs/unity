@@ -381,8 +381,11 @@ namespace ElevenLabs.Agents
 
         // Mirrors VoiceConversation.handleAudio's gating: drop chunks that
         // belong to an event the user already interrupted, otherwise advance
-        // currentEventId, refresh the feedback gate, and switch mode to
-        // speaking.
+        // currentEventId, refresh the feedback gate, push the decoded PCM
+        // into the output controller, and switch mode to speaking. The push
+        // is a no-op on Bridged WebGL (audio_base_64 is stripped JS-side
+        // before the event reaches C#, so the payload is empty); on native
+        // the controller decodes int16-LE → float into its playback ring.
         private void HandleAudioResponse(AudioResponse evt)
         {
             var eventId = evt.AudioEvent.EventId;
@@ -390,7 +393,22 @@ namespace ElevenLabs.Agents
             {
                 return;
             }
-            AudioReceived?.Invoke(evt.ToArgs());
+            var args = evt.ToArgs();
+            AudioReceived?.Invoke(args);
+            if (!string.IsNullOrEmpty(args.AudioBase64))
+            {
+                try
+                {
+                    _outputController.PushAudio(Convert.FromBase64String(args.AudioBase64));
+                }
+                catch (FormatException ex)
+                {
+                    // Malformed base64 from the agent shouldn't kill the
+                    // session — surface it as an error and keep the
+                    // event-id bookkeeping advancing.
+                    RaiseError($"Failed to decode audio payload: {ex.Message}");
+                }
+            }
             _currentEventId = eventId;
             RefreshCanSendFeedback();
             UpdateMode(Mode.Speaking);

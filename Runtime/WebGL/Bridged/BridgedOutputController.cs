@@ -31,6 +31,13 @@ namespace ElevenLabs.WebGL.Bridged
             _output = output ?? throw new System.ArgumentNullException(nameof(output));
         }
 
+        // Default-mode WebGL plays audio entirely JS-side via
+        // attachConnectionToOutput; the bridge strips audio_base_64 before
+        // the event reaches C# (see Bridge~/src/connection/audio-glue.ts).
+        // Conversation.HandleAudioResponse therefore calls this with an
+        // empty payload — nothing to forward.
+        public void PushAudio(byte[] pcm) { }
+
         public async Awaitable Close()
         {
             if (_disposed)

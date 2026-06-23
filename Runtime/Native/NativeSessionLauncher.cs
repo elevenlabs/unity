@@ -33,10 +33,10 @@ namespace ElevenLabs.Native
     /// </para>
     /// <para>
     /// Input is captured by <see cref="UnityMicrophoneInput"/> at the
-    /// negotiated format; output is still <see cref="NullOutputController"/>
-    /// until <c>UnityAudioSourceOutput</c> (#9d) lands. Tests inject their
-    /// own controllers via the <see cref="BuildConversation"/> overload that
-    /// takes them explicitly.
+    /// negotiated user-input format; output is played by
+    /// <see cref="UnityAudioSourceOutput"/> at the negotiated agent-output
+    /// format. Tests inject their own controllers via the
+    /// <see cref="BuildConversation"/> overload that takes them explicitly.
     /// </para>
     /// </remarks>
     internal static class NativeSessionLauncher
@@ -62,7 +62,8 @@ namespace ElevenLabs.Native
         }
 
         // Drives NativeWebSocketConnection.CreateAsync, opens the microphone
-        // at the negotiated input format, then hands both to BuildConversation
+        // at the negotiated input format and the AudioSource at the
+        // negotiated output format, then hands all three to BuildConversation
         // to construct the cross-platform Conversation and mark it Connected.
         // Status.Connecting is skipped on purpose: callers learn they're
         // connecting from the awaited Awaitable, not from a transitory state
@@ -88,7 +89,20 @@ namespace ElevenLabs.Native
                 connection.Close();
                 throw;
             }
-            return BuildConversation(connection, input, new NullOutputController(), options);
+            UnityAudioSourceOutput output;
+            try
+            {
+                output = await UnityAudioSourceOutput.CreateAsync(connection.OutputFormat);
+            }
+            catch
+            {
+                // Output init failed — tear down the mic + connection we
+                // already opened so a user catch site doesn't leak either.
+                await input.Close();
+                connection.Close();
+                throw;
+            }
+            return BuildConversation(connection, input, output, options);
         }
 
         // Post-handshake wiring split out as an internal seam so tests can
