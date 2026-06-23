@@ -1,17 +1,18 @@
 #nullable enable
 
+using System;
 using ElevenLabs.Agents;
 using UnityEngine;
 
 namespace ElevenLabs.Native
 {
     /// <summary>
-    /// No-op <see cref="IInputController"/> used by <see cref="NativeSessionLauncher"/>
-    /// before <c>UnityMicrophoneInput</c> (#9c) lands. Lets the launcher build a
-    /// <see cref="Conversation"/> for text-only sessions on non-WebGL targets:
-    /// every method returns a completed <see cref="Awaitable"/>, the mute flag
-    /// is honoured but never observed by any wire path, and the level/frequency
-    /// queries report silence.
+    /// No-op <see cref="IInputController"/> for text-only or test sessions on
+    /// non-WebGL targets. Every method returns a completed <see cref="Awaitable"/>,
+    /// the mute flag is honoured but never observed by any wire path, and the
+    /// level/frequency queries report silence. Production native sessions use
+    /// <see cref="UnityMicrophoneInput"/> instead; this remains the default
+    /// for Edit Mode tests and for callers who want to disable audio capture.
     /// </summary>
     internal sealed class NullInputController : IInputController
     {
@@ -20,6 +21,10 @@ namespace ElevenLabs.Native
         // Lets user-facing code (e.g. a Mute toggle UI) operate against the
         // null controller without behavioural surprises.
         public bool IsMuted { get; private set; }
+
+#pragma warning disable CS0067 // Never fired — the null controller emits no audio. Required by IInputController.
+        public event Action<byte[]>? AudioChunkAvailable;
+#pragma warning restore CS0067
 
         public Awaitable Close() => CompletedAwaitable();
 

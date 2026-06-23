@@ -1,5 +1,6 @@
 #nullable enable
 
+using System;
 using UnityEngine;
 
 namespace ElevenLabs.Agents
@@ -11,13 +12,32 @@ namespace ElevenLabs.Agents
     /// <remarks>
     /// Audio routing differs by platform: on WebGL the input controller is
     /// wired directly into the connection inside JavaScript (audio bytes
-    /// never cross the bridge); on native, the input emits PCM frames that
-    /// the C# <see cref="Conversation"/> wraps as <c>UserAudioChunk</c>.
+    /// never cross the bridge); on native, the input emits PCM frames via
+    /// <see cref="AudioChunkAvailable"/> and the C# <see cref="Conversation"/>
+    /// wraps each chunk as <c>UserAudioChunk</c>.
     /// </remarks>
     internal interface IInputController
     {
         /// <summary>Current mute state. Updated synchronously by <see cref="SetMuted"/>.</summary>
         bool IsMuted { get; }
+
+        /// <summary>
+        /// Raised when the controller has produced a chunk of 16-bit little-endian
+        /// PCM samples to forward to the agent. The payload is the raw PCM bytes
+        /// at the negotiated <see cref="FormatConfig.SampleRate"/>; the
+        /// <see cref="Conversation"/> base64-encodes them into a
+        /// <c>UserAudioChunk</c> wire message.
+        /// </summary>
+        /// <remarks>
+        /// The Bridged (WebGL) implementation never fires this — audio flows
+        /// JS-internal between input and connection via
+        /// <c>attachInputToConnection</c>. Native implementations fire it on
+        /// the Unity main thread at the SDK's expected chunk cadence
+        /// (~25 ms). While muted, the chunk payload is silence (all zeros)
+        /// so the wire cadence stays uniform — matches the JS worklet's
+        /// behaviour.
+        /// </remarks>
+        event Action<byte[]>? AudioChunkAvailable;
 
         /// <summary>Tear down the audio capture pipeline. Idempotent.</summary>
         Awaitable Close();

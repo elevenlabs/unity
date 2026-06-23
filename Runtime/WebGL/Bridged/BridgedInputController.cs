@@ -23,6 +23,10 @@ namespace ElevenLabs.WebGL.Bridged
 
         public bool IsMuted => _input.Get<bool>("isMuted");
 
+#pragma warning disable CS0067 // Never fired — audio bytes never cross the bridge; attachInputToConnection wires the JS-side input straight into the JS-side connection. Required by IInputController.
+        public event System.Action<byte[]>? AudioChunkAvailable;
+#pragma warning restore CS0067
+
         /// <summary>
         /// Wraps an already-created JS <c>MediaDeviceInput</c> handle. Typed
         /// against <see cref="IJsObject"/> so router-level tests can substitute

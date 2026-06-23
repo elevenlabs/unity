@@ -156,6 +156,13 @@ namespace ElevenLabs.Agents
             _connection.OnDisconnect += OnConnectionDisconnect;
             _connection.OnModeChange += UpdateMode;
 
+            // Input → connection wiring — mirrors attachInputToConnection in
+            // the JS SDK. Bridged inputs never fire this (audio is routed
+            // entirely on the JS side); native inputs fire one chunk per
+            // ~25 ms cadence so the conversation can wrap each into a
+            // UserAudioChunk wire message.
+            _inputController.AudioChunkAvailable += OnInputAudioChunkAvailable;
+
             // Dispatcher fan-out — translate each wire-typed event into the
             // args-typed user-facing event, applying suppression and
             // side-effects per BaseConversation.onMessage.
@@ -335,6 +342,18 @@ namespace ElevenLabs.Agents
             // idempotent so a missed observation won't leave the conversation
             // half-open.
             _ = EndSessionWithDetails(details);
+        }
+
+        // Forward each native PCM chunk as a UserAudioChunk wire event. The
+        // input controller handles mute by emitting silence so the wire
+        // cadence stays uniform — no gating needed here.
+        private void OnInputAudioChunkAvailable(byte[] pcm)
+        {
+            if (pcm == null || pcm.Length == 0)
+                return;
+            _connection.Send(
+                new UserAudioChunk { UserAudioChunkData = Convert.ToBase64String(pcm) }
+            );
         }
 
         // Dispatcher → args translation ---------------------------------------

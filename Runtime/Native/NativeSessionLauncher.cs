@@ -32,11 +32,11 @@ namespace ElevenLabs.Native
     /// <see cref="Conversation.SessionFactory"/>.
     /// </para>
     /// <para>
-    /// I/O controllers are <see cref="NullInputController"/> / <see cref="NullOutputController"/>
-    /// at v0.1 — the launcher delivers a text-only session against a real
-    /// agent. <c>UnityMicrophoneInput</c> (#9c) and <c>UnityAudioSourceOutput</c>
-    /// (#9d) replace these in subsequent PRs without touching the launcher's
-    /// wiring shape.
+    /// Input is captured by <see cref="UnityMicrophoneInput"/> at the
+    /// negotiated format; output is still <see cref="NullOutputController"/>
+    /// until <c>UnityAudioSourceOutput</c> (#9d) lands. Tests inject their
+    /// own controllers via the <see cref="BuildConversation"/> overload that
+    /// takes them explicitly.
     /// </para>
     /// </remarks>
     internal static class NativeSessionLauncher
@@ -61,39 +61,57 @@ namespace ElevenLabs.Native
             Conversation.SessionFactory = StartAsync;
         }
 
-        // Drives NativeWebSocketConnection.CreateAsync, then hands the
-        // resulting connection to BuildConversation to construct the
-        // cross-platform Conversation around the (connection, null input,
-        // null output) triple and mark it Connected. Status.Connecting is
-        // skipped on purpose: callers learn they're connecting from the
-        // awaited Awaitable, not from a transitory state on a Conversation
-        // reference they don't yet hold. Mirrors BridgedSessionLauncher.StartAsync's
-        // shape so behaviour stays uniform across transports.
+        // Drives NativeWebSocketConnection.CreateAsync, opens the microphone
+        // at the negotiated input format, then hands both to BuildConversation
+        // to construct the cross-platform Conversation and mark it Connected.
+        // Status.Connecting is skipped on purpose: callers learn they're
+        // connecting from the awaited Awaitable, not from a transitory state
+        // on a Conversation reference they don't yet hold. Mirrors
+        // BridgedSessionLauncher.StartAsync's shape so behaviour stays
+        // uniform across transports.
         internal static async Awaitable<Conversation> StartAsync(ConversationOptions options)
         {
             ValidateOptions(options);
             NativeWebSocketConnection connection = await NativeWebSocketConnection.CreateAsync(
                 options
             );
-            return BuildConversation(connection, options);
+            UnityMicrophoneInput input;
+            try
+            {
+                input = await UnityMicrophoneInput.CreateAsync(connection.InputFormat);
+            }
+            catch
+            {
+                // Mic init failed (no permission, no device, …). The
+                // connection is already open; close it cleanly so the
+                // user's catch site doesn't have to hand-roll cleanup.
+                connection.Close();
+                throw;
+            }
+            return BuildConversation(connection, input, new NullOutputController(), options);
         }
 
         // Post-handshake wiring split out as an internal seam so tests can
         // pair NativeWebSocketConnection.CreateInternalAsync (with a
         // PairedWebSocket fixture) directly against the launcher's
         // Conversation construction — exercising the launcher's wiring
-        // shape without dialling a real TCP server.
+        // shape without dialling a real TCP server, and without needing a
+        // real microphone in the test environment.
         internal static Conversation BuildConversation(
             NativeWebSocketConnection connection,
+            IInputController input,
+            IOutputController output,
             ConversationOptions options
         )
         {
             if (connection == null)
                 throw new ArgumentNullException(nameof(connection));
+            if (input == null)
+                throw new ArgumentNullException(nameof(input));
+            if (output == null)
+                throw new ArgumentNullException(nameof(output));
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
-            var input = new NullInputController();
-            var output = new NullOutputController();
             var conversation = new Conversation(connection, input, output, options);
             conversation.UpdateStatus(Status.Connected);
             conversation.RaiseConnected(conversation.ConversationId);

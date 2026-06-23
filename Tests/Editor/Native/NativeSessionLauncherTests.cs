@@ -129,6 +129,8 @@ namespace ElevenLabs.Native.Tests
 
             Conversation conversation = NativeSessionLauncher.BuildConversation(
                 connection,
+                new NullInputController(),
+                new NullOutputController(),
                 new ConversationOptions { AgentId = "agent-test" }
             );
             try
@@ -154,7 +156,12 @@ namespace ElevenLabs.Native.Tests
         public void BuildConversation_NullConnection_Throws()
         {
             Assert.Throws<ArgumentNullException>(() =>
-                NativeSessionLauncher.BuildConversation(null!, new ConversationOptions())
+                NativeSessionLauncher.BuildConversation(
+                    null!,
+                    new NullInputController(),
+                    new NullOutputController(),
+                    new ConversationOptions()
+                )
             );
         }
 

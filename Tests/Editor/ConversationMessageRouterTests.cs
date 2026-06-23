@@ -51,6 +51,12 @@ namespace ElevenLabs.WebGL.Tests
             public int GetVolumeCallCount { get; private set; }
             public byte[]? LastByteFrequencyBuffer { get; private set; }
 
+            public event System.Action<byte[]>? AudioChunkAvailable;
+
+            // Test helper — lets tests pump a synthetic PCM chunk through the
+            // Conversation router as if the microphone had emitted one.
+            public void FireAudioChunkAvailable(byte[] pcm) => AudioChunkAvailable?.Invoke(pcm);
+
             public Awaitable Close()
             {
                 CloseCallCount++;
@@ -834,6 +840,37 @@ namespace ElevenLabs.WebGL.Tests
             var msg = connection.Sent[0] as UserActivity;
             Assert.IsNotNull(msg);
             Assert.AreEqual("user_activity", msg!.Type);
+        }
+
+        // Input controller → connection routing ------------------------------
+
+        [Test]
+        public void InputAudioChunk_WrappedAsUserAudioChunk_AndForwardedToConnection()
+        {
+            // Mirrors attachInputToConnection.js — every PCM chunk the input
+            // controller emits is base64-encoded and forwarded as a
+            // user_audio_chunk wire event.
+            var conversation = NewConversation(out var connection, out var input, out _);
+            byte[] pcm = new byte[] { 0x01, 0x00, 0xff, 0x7f, 0x00, 0x80 };
+
+            input.FireAudioChunkAvailable(pcm);
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as UserAudioChunk;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual(System.Convert.ToBase64String(pcm), msg!.UserAudioChunkData);
+        }
+
+        [Test]
+        public void InputAudioChunk_EmptyPayload_NotForwarded()
+        {
+            // A zero-length chunk is meaningless on the wire; the JS SDK never
+            // sees one because the worklet only posts when the buffer fills.
+            var conversation = NewConversation(out var connection, out var input, out _);
+
+            input.FireAudioChunkAvailable(System.Array.Empty<byte>());
+
+            Assert.AreEqual(0, connection.Sent.Count);
         }
 
         // Audio control passthroughs (public Conversation API) --------------
