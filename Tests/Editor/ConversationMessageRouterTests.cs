@@ -50,6 +50,10 @@ namespace ElevenLabs.WebGL.Tests
             public float VolumeReturnValue { get; set; } = 0f;
             public int GetVolumeCallCount { get; private set; }
             public byte[]? LastByteFrequencyBuffer { get; private set; }
+            public int SetDeviceCallCount { get; private set; }
+            public InputDeviceConfig? LastSetDeviceConfig { get; private set; }
+            public FormatConfig? LastSetDeviceFormat { get; private set; }
+            public Exception? SetDeviceException { get; set; }
 
             public event System.Action<byte[]>? AudioChunkAvailable;
 
@@ -66,7 +70,19 @@ namespace ElevenLabs.WebGL.Tests
             public Awaitable SetDevice(
                 InputDeviceConfig? config = null,
                 FormatConfig? format = null
-            ) => CompletedAwaitable();
+            )
+            {
+                SetDeviceCallCount++;
+                LastSetDeviceConfig = config;
+                LastSetDeviceFormat = format;
+                if (SetDeviceException != null)
+                {
+                    var source = new AwaitableCompletionSource();
+                    source.SetException(SetDeviceException);
+                    return source.Awaitable;
+                }
+                return CompletedAwaitable();
+            }
 
             public Awaitable SetMuted(bool isMuted)
             {
@@ -95,6 +111,10 @@ namespace ElevenLabs.WebGL.Tests
             public int GetVolumeCallCount { get; private set; }
             public byte[]? LastByteFrequencyBuffer { get; private set; }
             public List<byte[]> PushAudioCalls { get; } = new();
+            public int SetDeviceCallCount { get; private set; }
+            public OutputDeviceConfig? LastSetDeviceConfig { get; private set; }
+            public FormatConfig? LastSetDeviceFormat { get; private set; }
+            public Exception? SetDeviceException { get; set; }
 
             public Awaitable Close()
             {
@@ -107,7 +127,19 @@ namespace ElevenLabs.WebGL.Tests
             public Awaitable SetDevice(
                 OutputDeviceConfig? config = null,
                 FormatConfig? format = null
-            ) => CompletedAwaitable();
+            )
+            {
+                SetDeviceCallCount++;
+                LastSetDeviceConfig = config;
+                LastSetDeviceFormat = format;
+                if (SetDeviceException != null)
+                {
+                    var source = new AwaitableCompletionSource();
+                    source.SetException(SetDeviceException);
+                    return source.Awaitable;
+                }
+                return CompletedAwaitable();
+            }
 
             public void SetVolume(float volume)
             {
@@ -970,6 +1002,85 @@ namespace ElevenLabs.WebGL.Tests
             Assert.IsNotNull(msg);
             Assert.IsNull(msg!.Text);
             Assert.IsNull(msg.File);
+        }
+
+        // Audio device control (public Conversation API) ---------------------
+
+        [Test]
+        public void ChangeInputDevice_ForwardsConfigAndFormatToInputController()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+            var config = new InputDeviceConfig(
+                InputDeviceId: "mic-2",
+                PreferHeadphonesForIosDevices: true
+            );
+            var format = new FormatConfig("pcm", 22050);
+
+            conversation.ChangeInputDevice(config, format).GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, input.SetDeviceCallCount);
+            Assert.AreSame(config, input.LastSetDeviceConfig);
+            Assert.AreEqual(format, input.LastSetDeviceFormat);
+        }
+
+        [Test]
+        public void ChangeInputDevice_DefaultArgs_ForwardsNulls()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+
+            conversation.ChangeInputDevice().GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, input.SetDeviceCallCount);
+            Assert.IsNull(input.LastSetDeviceConfig);
+            Assert.IsNull(input.LastSetDeviceFormat);
+        }
+
+        [Test]
+        public void ChangeInputDevice_PropagatesControllerException()
+        {
+            var conversation = NewConversation(out _, out var input, out _);
+            input.SetDeviceException = new InvalidOperationException("mic in use");
+
+            var task = conversation.ChangeInputDevice(new InputDeviceConfig("mic-x"));
+            var ex = Assert.Throws<InvalidOperationException>(() => task.GetAwaiter().GetResult());
+            Assert.AreEqual("mic in use", ex!.Message);
+        }
+
+        [Test]
+        public void ChangeOutputDevice_ForwardsConfigAndFormatToOutputController()
+        {
+            var conversation = NewConversation(out _, out _, out var output);
+            var config = new OutputDeviceConfig(OutputDeviceId: "speaker-2");
+            var format = new FormatConfig("pcm", 48000);
+
+            conversation.ChangeOutputDevice(config, format).GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, output.SetDeviceCallCount);
+            Assert.AreSame(config, output.LastSetDeviceConfig);
+            Assert.AreEqual(format, output.LastSetDeviceFormat);
+        }
+
+        [Test]
+        public void ChangeOutputDevice_DefaultArgs_ForwardsNulls()
+        {
+            var conversation = NewConversation(out _, out _, out var output);
+
+            conversation.ChangeOutputDevice().GetAwaiter().GetResult();
+
+            Assert.AreEqual(1, output.SetDeviceCallCount);
+            Assert.IsNull(output.LastSetDeviceConfig);
+            Assert.IsNull(output.LastSetDeviceFormat);
+        }
+
+        [Test]
+        public void ChangeOutputDevice_PropagatesControllerException()
+        {
+            var conversation = NewConversation(out _, out _, out var output);
+            output.SetDeviceException = new InvalidOperationException("speaker missing");
+
+            var task = conversation.ChangeOutputDevice(new OutputDeviceConfig("speaker-x"));
+            var ex = Assert.Throws<InvalidOperationException>(() => task.GetAwaiter().GetResult());
+            Assert.AreEqual("speaker missing", ex!.Message);
         }
 
         // Input controller → connection routing ------------------------------

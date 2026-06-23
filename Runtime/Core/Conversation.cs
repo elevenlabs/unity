@@ -318,6 +318,36 @@ namespace ElevenLabs.Agents
         }
 
         /// <summary>
+        /// Switch the active microphone, optionally re-negotiating the input
+        /// format. Mirrors the JS SDK's <c>changeInputDevice</c>; exceptions
+        /// from the underlying controller propagate to the caller.
+        /// </summary>
+        /// <param name="config">Device selection. Pass <c>null</c> to keep the current device.</param>
+        /// <param name="format">Audio format override. Pass <c>null</c> to keep the negotiated format.</param>
+        public Awaitable ChangeInputDevice(
+            InputDeviceConfig? config = null,
+            FormatConfig? format = null
+        )
+        {
+            return _inputController.SetDevice(config, format);
+        }
+
+        /// <summary>
+        /// Switch the active output device, optionally re-negotiating the
+        /// output format. Mirrors the JS SDK's <c>changeOutputDevice</c>;
+        /// exceptions from the underlying controller propagate to the caller.
+        /// </summary>
+        /// <param name="config">Device selection. Pass <c>null</c> to keep the current device.</param>
+        /// <param name="format">Audio format override. Pass <c>null</c> to keep the negotiated format.</param>
+        public Awaitable ChangeOutputDevice(
+            OutputDeviceConfig? config = null,
+            FormatConfig? format = null
+        )
+        {
+            return _outputController.SetDevice(config, format);
+        }
+
+        /// <summary>
         /// Write byte-frequency data (0-255) for the microphone input into
         /// <paramref name="buffer"/>, focused on the human voice range
         /// (100-8000 Hz). Use for input visualisers.
