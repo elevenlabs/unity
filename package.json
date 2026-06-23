@@ -40,6 +40,7 @@
   ],
   "dependencies": {
     "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.unitywebrequest": "1.0.0",
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   }
 }

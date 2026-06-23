@@ -267,7 +267,7 @@ namespace ElevenLabs.Agents
         /// (referenced by id), or both. Mirrors the JS SDK's
         /// <c>sendMultimodalMessage</c>: a null or empty argument means the
         /// corresponding wire field is omitted. <paramref name="fileId"/> comes
-        /// from <c>UploadFileAsync</c> (when implemented).
+        /// from <see cref="UploadFileAsync"/>.
         /// </summary>
         public void SendMultimodalMessage(string? text = null, string? fileId = null)
         {
@@ -278,6 +278,28 @@ namespace ElevenLabs.Agents
                     File = string.IsNullOrEmpty(fileId) ? null : new File { FileId = fileId },
                 }
             );
+        }
+
+        /// <summary>
+        /// Upload a file (image, document, …) for the agent to reference in
+        /// its next response. Returns the server-assigned <c>file_id</c>; pass
+        /// it to <see cref="SendMultimodalMessage"/> to attach the file to a
+        /// user message. Mirrors the JS SDK's <c>uploadFile</c> — an HTTP
+        /// side-channel against the same backend as the live conversation.
+        /// </summary>
+        /// <param name="bytes">Raw file bytes.</param>
+        /// <param name="mimeType">MIME type the server should associate with the upload (e.g. <c>image/png</c>).</param>
+        /// <param name="filename">
+        /// Filename to attach in the multipart form. <c>null</c> defaults to
+        /// <c>upload.&lt;ext&gt;</c> derived from <paramref name="mimeType"/>.
+        /// </param>
+        public Awaitable<string> UploadFileAsync(
+            byte[] bytes,
+            string mimeType,
+            string? filename = null
+        )
+        {
+            return _connection.UploadFileAsync(bytes, mimeType, filename);
         }
 
         /// <summary>

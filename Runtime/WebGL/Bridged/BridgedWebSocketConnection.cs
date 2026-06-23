@@ -5,6 +5,7 @@ using ElevenLabs.Agents;
 using ElevenLabs.Protocol;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using UnityEngine;
 
 namespace ElevenLabs.WebGL.Bridged
 {
@@ -86,6 +87,23 @@ namespace ElevenLabs.WebGL.Bridged
             // the [JsonProperty] attributes on each OutgoingSocketEvent subclass
             // — wire shape lines up with the SDK's expected message format.
             _connection.Call("sendMessage", message);
+        }
+
+        public Awaitable<string> UploadFileAsync(
+            byte[] bytes,
+            string mimeType,
+            string? filename = null
+        )
+        {
+            // Bridged path lands in a follow-up commit — it needs a new jslib
+            // primitive wrapping `@elevenlabs/client@1.12.1`'s `uploadFile`
+            // helper plus Blob marshalling across the bridge. Native already
+            // ships an implementation; WebGL users see this stub until the
+            // primitive is wired.
+            throw new NotImplementedException(
+                "UploadFileAsync is not yet implemented on the bridged (WebGL) transport. "
+                    + "See Docs~/plans/v0.1-parity.md#11b for tracking."
+            );
         }
 
         /// <summary>

@@ -29,8 +29,32 @@ namespace ElevenLabs.WebGL.Tests
 
             public List<OutgoingSocketEvent> Sent { get; } = new();
             public int CloseCallCount { get; private set; }
+            public int UploadFileCallCount { get; private set; }
+            public byte[]? LastUploadBytes { get; private set; }
+            public string? LastUploadMimeType { get; private set; }
+            public string? LastUploadFilename { get; private set; }
+            public string UploadFileResult { get; set; } = "file_abc123";
+            public Exception? UploadFileException { get; set; }
 
             public void Send(OutgoingSocketEvent message) => Sent.Add(message);
+
+            public Awaitable<string> UploadFileAsync(
+                byte[] bytes,
+                string mimeType,
+                string? filename = null
+            )
+            {
+                UploadFileCallCount++;
+                LastUploadBytes = bytes;
+                LastUploadMimeType = mimeType;
+                LastUploadFilename = filename;
+                var source = new AwaitableCompletionSource<string>();
+                if (UploadFileException != null)
+                    source.SetException(UploadFileException);
+                else
+                    source.SetResult(UploadFileResult);
+                return source.Awaitable;
+            }
 
             public void Close() => CloseCallCount++;
 
@@ -1081,6 +1105,54 @@ namespace ElevenLabs.WebGL.Tests
             var task = conversation.ChangeOutputDevice(new OutputDeviceConfig("speaker-x"));
             var ex = Assert.Throws<InvalidOperationException>(() => task.GetAwaiter().GetResult());
             Assert.AreEqual("speaker missing", ex!.Message);
+        }
+
+        // File upload (public Conversation API) ------------------------------
+
+        [Test]
+        public void UploadFileAsync_ForwardsArgsToConnectionAndReturnsFileId()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            connection.UploadFileResult = "file_xyz789";
+            byte[] payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
+
+            string fileId = conversation
+                .UploadFileAsync(payload, "image/png", "screenshot.png")
+                .GetAwaiter()
+                .GetResult();
+
+            Assert.AreEqual("file_xyz789", fileId);
+            Assert.AreEqual(1, connection.UploadFileCallCount);
+            Assert.AreSame(payload, connection.LastUploadBytes);
+            Assert.AreEqual("image/png", connection.LastUploadMimeType);
+            Assert.AreEqual("screenshot.png", connection.LastUploadFilename);
+        }
+
+        [Test]
+        public void UploadFileAsync_DefaultFilename_ForwardsNullThrough()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation
+                .UploadFileAsync(new byte[] { 1, 2 }, "image/jpeg")
+                .GetAwaiter()
+                .GetResult();
+
+            Assert.AreEqual(1, connection.UploadFileCallCount);
+            Assert.IsNull(connection.LastUploadFilename);
+        }
+
+        [Test]
+        public void UploadFileAsync_PropagatesConnectionException()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            connection.UploadFileException = new InvalidOperationException(
+                "Upload failed: 413 file too large"
+            );
+
+            var task = conversation.UploadFileAsync(new byte[] { 0 }, "image/png");
+            var ex = Assert.Throws<InvalidOperationException>(() => task.GetAwaiter().GetResult());
+            StringAssert.Contains("file too large", ex!.Message);
         }
 
         // Input controller → connection routing ------------------------------

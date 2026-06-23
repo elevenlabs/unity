@@ -80,6 +80,140 @@ namespace ElevenLabs.Native.Tests
             Assert.Throws<ArgumentNullException>(() => NativeWebSocketConnection.BuildUrl(null!));
         }
 
+        // DeriveHttpsOrigin (upload side-channel) ---------------------------
+
+        [Test]
+        public void DeriveHttpsOrigin_NoSignedUrl_ReturnsDefaultProductionOrigin()
+        {
+            var options = new ConversationOptions { AgentId = "agent-42" };
+            Assert.AreEqual(
+                "https://api.elevenlabs.io",
+                NativeWebSocketConnection.DeriveHttpsOrigin(options)
+            );
+        }
+
+        [Test]
+        public void DeriveHttpsOrigin_SignedUrl_RewritesWssToHttpsAndStripsPath()
+        {
+            var options = new ConversationOptions
+            {
+                SignedUrl =
+                    "wss://custom.example.com/v1/convai/conversation?agent_id=foo&token=bar",
+            };
+            Assert.AreEqual(
+                "https://custom.example.com",
+                NativeWebSocketConnection.DeriveHttpsOrigin(options)
+            );
+        }
+
+        [Test]
+        public void DeriveHttpsOrigin_SignedUrl_RewritesWsToHttp()
+        {
+            // Local-dev signed URLs over plain WebSocket should map to HTTP —
+            // mirrors uploadFile.js's `ws://` → `http://` rewrite.
+            var options = new ConversationOptions { SignedUrl = "ws://localhost:8000/x" };
+            Assert.AreEqual(
+                "http://localhost:8000",
+                NativeWebSocketConnection.DeriveHttpsOrigin(options)
+            );
+        }
+
+        [Test]
+        public void DeriveHttpsOrigin_SignedUrl_PassesHttpsThrough()
+        {
+            // Already-HTTPS signed URLs (unusual, but legal per the JS SDK's
+            // schema) shouldn't be re-rewritten.
+            var options = new ConversationOptions { SignedUrl = "https://custom.example.com/x" };
+            Assert.AreEqual(
+                "https://custom.example.com",
+                NativeWebSocketConnection.DeriveHttpsOrigin(options)
+            );
+        }
+
+        [Test]
+        public void DeriveHttpsOrigin_NullOptions_Throws()
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                NativeWebSocketConnection.DeriveHttpsOrigin(null!)
+            );
+        }
+
+        // BuildUploadUrl ----------------------------------------------------
+
+        [Test]
+        public void BuildUploadUrl_ComposesUnderConversationsFilesPath()
+        {
+            Assert.AreEqual(
+                "https://api.elevenlabs.io/v1/convai/conversations/conv-123/files",
+                NativeWebSocketConnection.BuildUploadUrl("https://api.elevenlabs.io", "conv-123")
+            );
+        }
+
+        [Test]
+        public void BuildUploadUrl_EscapesConversationIdAsPathSegment()
+        {
+            // Conversation ids are URL-safe in practice, but the implementation
+            // must not assume so — a slash in the id would otherwise change the
+            // resource being addressed.
+            Assert.AreEqual(
+                "https://api.elevenlabs.io/v1/convai/conversations/odd%2Fid/files",
+                NativeWebSocketConnection.BuildUploadUrl("https://api.elevenlabs.io", "odd/id")
+            );
+        }
+
+        [Test]
+        public void BuildUploadUrl_EmptyArgs_Throws()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                NativeWebSocketConnection.BuildUploadUrl("", "conv-1")
+            );
+            Assert.Throws<ArgumentException>(() =>
+                NativeWebSocketConnection.BuildUploadUrl("https://api.elevenlabs.io", "")
+            );
+        }
+
+        // DeriveDefaultFilename ---------------------------------------------
+
+        [Test]
+        public void DeriveDefaultFilename_SimpleMime_UsesSubtypeAsExtension()
+        {
+            Assert.AreEqual(
+                "upload.png",
+                NativeWebSocketConnection.DeriveDefaultFilename("image/png")
+            );
+            Assert.AreEqual(
+                "upload.pdf",
+                NativeWebSocketConnection.DeriveDefaultFilename("application/pdf")
+            );
+        }
+
+        [Test]
+        public void DeriveDefaultFilename_SubtypeWithPlus_StripsSuffix()
+        {
+            // `image/svg+xml` → `upload.svg` per uploadFile.js's
+            // `.split("+")[0]` rule.
+            Assert.AreEqual(
+                "upload.svg",
+                NativeWebSocketConnection.DeriveDefaultFilename("image/svg+xml")
+            );
+        }
+
+        [Test]
+        public void DeriveDefaultFilename_NullOrEmpty_FallsBackToPng()
+        {
+            // Matches JS's `(file.type || "image/png")` default.
+            Assert.AreEqual("upload.png", NativeWebSocketConnection.DeriveDefaultFilename(null));
+            Assert.AreEqual("upload.png", NativeWebSocketConnection.DeriveDefaultFilename(""));
+        }
+
+        [Test]
+        public void DeriveDefaultFilename_NoSlash_UsesWholeString()
+        {
+            // Malformed MIME without a slash shouldn't crash — fall back to the
+            // string itself as the extension. Matches `.split("/").pop()`.
+            Assert.AreEqual("upload.txt", NativeWebSocketConnection.DeriveDefaultFilename("txt"));
+        }
+
         // ValidateTransport -------------------------------------------------
 
         [Test]
