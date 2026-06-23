@@ -26,15 +26,23 @@ static string Roundtrip<T>(T instance) where T : notnull
 // --- IncomingSocketEvent subtypes ---
 Console.WriteLine(Roundtrip(new ConversationInitiationMetadata()));
 Console.WriteLine(Roundtrip(new AgentResponseComplete()));
+Console.WriteLine(Roundtrip(new McpToolCall()));
+Console.WriteLine(Roundtrip(new ClientError()));
+Console.WriteLine(Roundtrip(new GuardrailTriggered()));
 Console.WriteLine(Roundtrip(new UserTranscript()));
 Console.WriteLine(Roundtrip(new AgentResponse()));
 Console.WriteLine(Roundtrip(new AgentResponseCorrection()));
+Console.WriteLine(Roundtrip(new AgentResponseMetadata()));
 Console.WriteLine(Roundtrip(new AudioResponse()));
 Console.WriteLine(Roundtrip(new Interruption()));
 Console.WriteLine(Roundtrip(new VadScore()));
+Console.WriteLine(Roundtrip(new AgentChatResponsePart()));
 Console.WriteLine(Roundtrip(new ClientToolCall()));
+Console.WriteLine(Roundtrip(new AgentToolResponse()));
 Console.WriteLine(Roundtrip(new AgentToolResponseFullPayload()));
+Console.WriteLine(Roundtrip(new AgentToolRequest()));
 Console.WriteLine(Roundtrip(new Ping()));
+Console.WriteLine(Roundtrip(new McpConnectionStatus()));
 
 // --- OutgoingSocketEvent subtypes ---
 Console.WriteLine(Roundtrip(new UserAudioChunk()));
@@ -44,6 +52,7 @@ Console.WriteLine(Roundtrip(new UserActivity()));
 Console.WriteLine(Roundtrip(new MultimodalMessage()));
 Console.WriteLine(Roundtrip(new Pong()));
 Console.WriteLine(Roundtrip(new ClientToolResult()));
+Console.WriteLine(Roundtrip(new McpToolApprovalResult()));
 Console.WriteLine(Roundtrip(new ContextualUpdate()));
 Console.WriteLine(Roundtrip(new ConversationInitiationClientData()));
 

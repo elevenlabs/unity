@@ -13,15 +13,9 @@ Wire protocol for the Conversational AI WebSocket.
 | ------------- | -------------------------------------------------------------------------------- |
 | Upstream repo | ElevenLabs internal monorepo (private)                                           |
 | Upstream path | `docs/convai-asyncapi.yml`                                                       |
-| Pinned commit | `3b73154ddaf2176e297c037b9af8e69231b8d42d`                                       |
-| Commit date   | 2026-06-19                                                                       |
-| Source branch | `cursor/fix-convai-asyncapi-ref-c38c` (internal PR #37707 - rebased onto post-#38542 main) |
-
-> The current pin is the head of an open PR. It carries both the
-> `DynamicVariableNestedValueType` ref fix (needed to parse the spec) and the
-> `feedback` outgoing message declared by the merged internal PR #38542,
-> picked up via a rebase onto post-#38542 `main`. Re-pin to the
-> merged-to-`main` commit once #37707 lands.
+| Pinned commit | `87a762f38086ea67286dc549701c075702742444`                                       |
+| Commit date   | 2026-06-22                                                                       |
+| Source branch | `main` (internal PR #38788 — "register public AsyncAPI events and reduce unregistered allowlist") |
 
 Verify the vendored content matches the pin:
 

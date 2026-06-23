@@ -21,6 +21,15 @@ namespace ElevenLabs.Protocol
         /// <summary>Notification that the agent has finished generating a complete response.</summary>
         internal event System.Action<AgentResponseComplete>? OnAgentResponseComplete;
 
+        /// <summary>MCP tool call event with state updates (loading, awaiting_approval, success, failure).</summary>
+        internal event System.Action<McpToolCall>? OnMcpToolCall;
+
+        /// <summary>Error event sent when an error occurs during the conversation.</summary>
+        internal event System.Action<ClientError>? OnClientError;
+
+        /// <summary>Notification that a guardrail was triggered during the conversation.</summary>
+        internal event System.Action<GuardrailTriggered>? OnGuardrailTriggered;
+
         /// <summary>Real-time transcriptions of user speech input.</summary>
         internal event System.Action<UserTranscript>? OnUserTranscript;
 
@@ -29,6 +38,9 @@ namespace ElevenLabs.Protocol
 
         /// <summary>Correction to a previous agent response.</summary>
         internal event System.Action<AgentResponseCorrection>? OnAgentResponseCorrection;
+
+        /// <summary>Metadata associated with an agent response, such as custom LLM response metadata.</summary>
+        internal event System.Action<AgentResponseMetadata>? OnAgentResponseMetadata;
 
         /// <summary>Synthesized audio chunks of the agent's speech response.</summary>
         internal event System.Action<AudioResponse>? OnAudioResponse;
@@ -39,14 +51,26 @@ namespace ElevenLabs.Protocol
         /// <summary>Voice Activity Detection scoring information.</summary>
         internal event System.Action<VadScore>? OnVadScore;
 
+        /// <summary>Streaming text chunks of an agent's chat response.</summary>
+        internal event System.Action<AgentChatResponsePart>? OnAgentChatResponsePart;
+
         /// <summary>Requests from server for client to execute specific tool functions.</summary>
         internal event System.Action<ClientToolCall>? OnClientToolCall;
+
+        /// <summary>Response from an agent tool execution including status and metadata.</summary>
+        internal event System.Action<AgentToolResponse>? OnAgentToolResponse;
 
         /// <summary>Tool response including the tool's full result payload as a string.</summary>
         internal event System.Action<AgentToolResponseFullPayload>? OnAgentToolResponseFullPayload;
 
+        /// <summary>Notification that the agent is requesting a tool to be executed.</summary>
+        internal event System.Action<AgentToolRequest>? OnAgentToolRequest;
+
         /// <summary>Server-initiated ping messages for measuring connection latency.</summary>
         internal event System.Action<Ping>? OnPing;
+
+        /// <summary>MCP connection status update with integration connection states.</summary>
+        internal event System.Action<McpConnectionStatus>? OnMcpConnectionStatus;
 
         /// <summary>
         /// Wire types the server may add ahead of an SDK refresh land here
@@ -65,6 +89,15 @@ namespace ElevenLabs.Protocol
                 case AgentResponseComplete e:
                     OnAgentResponseComplete?.Invoke(e);
                     break;
+                case McpToolCall e:
+                    OnMcpToolCall?.Invoke(e);
+                    break;
+                case ClientError e:
+                    OnClientError?.Invoke(e);
+                    break;
+                case GuardrailTriggered e:
+                    OnGuardrailTriggered?.Invoke(e);
+                    break;
                 case UserTranscript e:
                     OnUserTranscript?.Invoke(e);
                     break;
@@ -73,6 +106,9 @@ namespace ElevenLabs.Protocol
                     break;
                 case AgentResponseCorrection e:
                     OnAgentResponseCorrection?.Invoke(e);
+                    break;
+                case AgentResponseMetadata e:
+                    OnAgentResponseMetadata?.Invoke(e);
                     break;
                 case AudioResponse e:
                     OnAudioResponse?.Invoke(e);
@@ -83,14 +119,26 @@ namespace ElevenLabs.Protocol
                 case VadScore e:
                     OnVadScore?.Invoke(e);
                     break;
+                case AgentChatResponsePart e:
+                    OnAgentChatResponsePart?.Invoke(e);
+                    break;
                 case ClientToolCall e:
                     OnClientToolCall?.Invoke(e);
+                    break;
+                case AgentToolResponse e:
+                    OnAgentToolResponse?.Invoke(e);
                     break;
                 case AgentToolResponseFullPayload e:
                     OnAgentToolResponseFullPayload?.Invoke(e);
                     break;
+                case AgentToolRequest e:
+                    OnAgentToolRequest?.Invoke(e);
+                    break;
                 case Ping e:
                     OnPing?.Invoke(e);
+                    break;
+                case McpConnectionStatus e:
+                    OnMcpConnectionStatus?.Invoke(e);
                     break;
                 default:
                     OnUnhandled?.Invoke(evt);

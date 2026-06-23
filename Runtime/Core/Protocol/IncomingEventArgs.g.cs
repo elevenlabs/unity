@@ -5,6 +5,7 @@
 #nullable enable
 
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 
 namespace ElevenLabs.Protocol
 {
@@ -18,6 +19,15 @@ namespace ElevenLabs.Protocol
     /// <summary>Notification that the agent has finished generating a complete response.</summary>
     public record AgentResponseCompleteArgs(int EventId);
 
+    /// <summary>MCP tool call event with state updates (loading, awaiting_approval, success, failure).</summary>
+    public record McpToolCallArgs(JToken McpToolCallData);
+
+    /// <summary>Error event sent when an error occurs during the conversation.</summary>
+    public record ClientErrorArgs(int Code, string ErrorName, string? Message);
+
+    /// <summary>Notification that a guardrail was triggered during the conversation.</summary>
+    public record GuardrailTriggeredArgs(string GuardrailName);
+
     /// <summary>Real-time transcriptions of user speech input.</summary>
     public record UserTranscriptArgs(string UserTranscript, int EventId);
 
@@ -30,6 +40,9 @@ namespace ElevenLabs.Protocol
         string CorrectedAgentResponse,
         int EventId
     );
+
+    /// <summary>Metadata associated with an agent response, such as custom LLM response metadata.</summary>
+    public record AgentResponseMetadataArgs(Dictionary<string, dynamic> Metadata, int EventId);
 
     /// <summary>Synthesized audio chunks of the agent's speech response.</summary>
     public record AudioResponseArgs(
@@ -45,6 +58,9 @@ namespace ElevenLabs.Protocol
     /// <summary>Voice Activity Detection scoring information.</summary>
     public record VadScoreArgs(double VadScore);
 
+    /// <summary>Streaming text chunks of an agent's chat response.</summary>
+    public record AgentChatResponsePartArgs(string Text, string Type, int EventId);
+
     /// <summary>Requests from server for client to execute specific tool functions.</summary>
     public record ClientToolCallArgs(
         string ToolName,
@@ -52,6 +68,17 @@ namespace ElevenLabs.Protocol
         Dictionary<string, dynamic> Parameters,
         int EventId,
         bool ExpectsResponse
+    );
+
+    /// <summary>Response from an agent tool execution including status and metadata.</summary>
+    public record AgentToolResponseArgs(
+        string ToolName,
+        string ToolCallId,
+        string ToolType,
+        bool IsError,
+        bool? IsBlocked,
+        int EventId,
+        bool IsCalled
     );
 
     /// <summary>Tool response including the tool's full result payload as a string.</summary>
@@ -67,8 +94,25 @@ namespace ElevenLabs.Protocol
         bool? Truncated
     );
 
+    /// <summary>Notification that the agent is requesting a tool to be executed.</summary>
+    public record AgentToolRequestArgs(
+        string ToolName,
+        string ToolCallId,
+        string ToolType,
+        int EventId,
+        bool ExpectsResponse,
+        bool DisableInterruptions,
+        int ResponseTimeoutSecs,
+        string ExecutionMode
+    );
+
     /// <summary>Server-initiated ping messages for measuring connection latency.</summary>
     public record PingArgs(int EventId, int? PingMs);
+
+    /// <summary>MCP connection status update with integration connection states.</summary>
+    public record McpConnectionStatusArgs(
+        IEnumerable<McpConnectionStatusIntegrationsItem>? Integrations
+    );
 
     /// <summary>
     /// <c>ToArgs</c> extensions that translate each wire-typed
@@ -89,6 +133,19 @@ namespace ElevenLabs.Protocol
         public static AgentResponseCompleteArgs ToArgs(this AgentResponseComplete e) =>
             new(EventId: e.AgentResponseCompleteEvent.EventId);
 
+        public static McpToolCallArgs ToArgs(this McpToolCall e) =>
+            new(McpToolCallData: e.McpToolCallData);
+
+        public static ClientErrorArgs ToArgs(this ClientError e) =>
+            new(
+                Code: e.ErrorEvent.Code,
+                ErrorName: e.ErrorEvent.ErrorName,
+                Message: e.ErrorEvent.Message
+            );
+
+        public static GuardrailTriggeredArgs ToArgs(this GuardrailTriggered e) =>
+            new(GuardrailName: e.GuardrailTriggeredEvent.GuardrailName);
+
         public static UserTranscriptArgs ToArgs(this UserTranscript e) =>
             new(
                 UserTranscript: e.UserTranscriptionEvent.UserTranscript,
@@ -108,6 +165,12 @@ namespace ElevenLabs.Protocol
                 EventId: e.AgentResponseCorrectionEvent.EventId
             );
 
+        public static AgentResponseMetadataArgs ToArgs(this AgentResponseMetadata e) =>
+            new(
+                Metadata: e.AgentResponseMetadataEvent.Metadata,
+                EventId: e.AgentResponseMetadataEvent.EventId
+            );
+
         public static AudioResponseArgs ToArgs(this AudioResponse e) =>
             new(
                 AudioBase64: e.AudioEvent.AudioBase64,
@@ -122,6 +185,13 @@ namespace ElevenLabs.Protocol
         public static VadScoreArgs ToArgs(this VadScore e) =>
             new(VadScore: e.VadScoreEvent.VadScore);
 
+        public static AgentChatResponsePartArgs ToArgs(this AgentChatResponsePart e) =>
+            new(
+                Text: e.TextResponsePart.Text,
+                Type: e.TextResponsePart.Type,
+                EventId: e.TextResponsePart.EventId
+            );
+
         public static ClientToolCallArgs ToArgs(this ClientToolCall e) =>
             new(
                 ToolName: e.ClientToolCallData.ToolName,
@@ -129,6 +199,17 @@ namespace ElevenLabs.Protocol
                 Parameters: e.ClientToolCallData.Parameters,
                 EventId: e.ClientToolCallData.EventId,
                 ExpectsResponse: e.ClientToolCallData.ExpectsResponse
+            );
+
+        public static AgentToolResponseArgs ToArgs(this AgentToolResponse e) =>
+            new(
+                ToolName: e.AgentToolResponseData.ToolName,
+                ToolCallId: e.AgentToolResponseData.ToolCallId,
+                ToolType: e.AgentToolResponseData.ToolType,
+                IsError: e.AgentToolResponseData.IsError,
+                IsBlocked: e.AgentToolResponseData.IsBlocked,
+                EventId: e.AgentToolResponseData.EventId,
+                IsCalled: e.AgentToolResponseData.IsCalled
             );
 
         public static AgentToolResponseFullPayloadArgs ToArgs(
@@ -146,7 +227,22 @@ namespace ElevenLabs.Protocol
                 Truncated: e.AgentToolResponseFullPayloadData.Truncated
             );
 
+        public static AgentToolRequestArgs ToArgs(this AgentToolRequest e) =>
+            new(
+                ToolName: e.AgentToolRequestData.ToolName,
+                ToolCallId: e.AgentToolRequestData.ToolCallId,
+                ToolType: e.AgentToolRequestData.ToolType,
+                EventId: e.AgentToolRequestData.EventId,
+                ExpectsResponse: e.AgentToolRequestData.ExpectsResponse,
+                DisableInterruptions: e.AgentToolRequestData.DisableInterruptions,
+                ResponseTimeoutSecs: e.AgentToolRequestData.ResponseTimeoutSecs,
+                ExecutionMode: e.AgentToolRequestData.ExecutionMode
+            );
+
         public static PingArgs ToArgs(this Ping e) =>
             new(EventId: e.PingEvent.EventId, PingMs: e.PingEvent.PingMs);
+
+        public static McpConnectionStatusArgs ToArgs(this McpConnectionStatus e) =>
+            new(Integrations: e.McpConnectionStatusData.Integrations);
     }
 }

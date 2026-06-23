@@ -6,6 +6,7 @@
 
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace ElevenLabs.Protocol
 {
@@ -46,6 +47,156 @@ namespace ElevenLabs.Protocol
     {
         [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
+    }
+
+    public class McpToolCall : IncomingSocketEvent
+    {
+        [JsonProperty("mcp_tool_call")]
+        public JToken McpToolCallData { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "mcp_tool_call";
+    }
+
+    public class McpToolCallAnyOf_0
+    {
+        [JsonProperty("service_id")]
+        public string ServiceId { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_description")]
+        public JToken? ToolDescription { get; set; }
+
+        [JsonProperty("parameters")]
+        public Dictionary<string, dynamic> Parameters { get; set; } = new();
+
+        [JsonProperty("timestamp")]
+        public string? Timestamp { get; set; }
+
+        [JsonProperty("state")]
+        public string State { get; init; } = "loading";
+    }
+
+    public class McpToolCallAnyOf_1
+    {
+        [JsonProperty("service_id")]
+        public string ServiceId { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_description")]
+        public JToken? ToolDescription { get; set; }
+
+        [JsonProperty("parameters")]
+        public Dictionary<string, dynamic> Parameters { get; set; } = new();
+
+        [JsonProperty("timestamp")]
+        public string? Timestamp { get; set; }
+
+        [JsonProperty("state")]
+        public string State { get; init; } = "awaiting_approval";
+
+        [JsonProperty("approval_timeout_secs")]
+        public int? ApprovalTimeoutSecs { get; set; }
+    }
+
+    public class McpToolCallAnyOf_2
+    {
+        [JsonProperty("service_id")]
+        public string ServiceId { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_description")]
+        public JToken? ToolDescription { get; set; }
+
+        [JsonProperty("parameters")]
+        public Dictionary<string, dynamic> Parameters { get; set; } = new();
+
+        [JsonProperty("timestamp")]
+        public string? Timestamp { get; set; }
+
+        [JsonProperty("state")]
+        public string State { get; init; } = "success";
+
+        [JsonProperty("result")]
+        public IEnumerable<Dictionary<string, dynamic>> Result { get; set; } = null!;
+    }
+
+    public class McpToolCallAnyOf_3
+    {
+        [JsonProperty("service_id")]
+        public string ServiceId { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_description")]
+        public JToken? ToolDescription { get; set; }
+
+        [JsonProperty("parameters")]
+        public Dictionary<string, dynamic> Parameters { get; set; } = new();
+
+        [JsonProperty("timestamp")]
+        public string? Timestamp { get; set; }
+
+        [JsonProperty("state")]
+        public string State { get; init; } = "failure";
+
+        [JsonProperty("error_message")]
+        public string ErrorMessage { get; set; } = "";
+    }
+
+    public class ClientError : IncomingSocketEvent
+    {
+        [JsonProperty("error_event")]
+        public ErrorEvent ErrorEvent { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "client_error";
+    }
+
+    public class ErrorEvent
+    {
+        [JsonProperty("code")]
+        public int Code { get; set; } = 0;
+
+        [JsonProperty("error_name")]
+        public string ErrorName { get; set; } = "";
+
+        [JsonProperty("message")]
+        public string? Message { get; set; }
+    }
+
+    public class GuardrailTriggered : IncomingSocketEvent
+    {
+        [JsonProperty("guardrail_triggered_event")]
+        public GuardrailTriggeredEvent GuardrailTriggeredEvent { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "guardrail_triggered";
+    }
+
+    public class GuardrailTriggeredEvent
+    {
+        [JsonProperty("guardrail_name")]
+        public string GuardrailName { get; set; } = "";
     }
 
     public class UserTranscript : IncomingSocketEvent
@@ -100,6 +251,24 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("corrected_agent_response")]
         public string CorrectedAgentResponse { get; set; } = "";
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+    }
+
+    public class AgentResponseMetadata : IncomingSocketEvent
+    {
+        [JsonProperty("agent_response_metadata_event")]
+        public AgentResponseMetadataEvent AgentResponseMetadataEvent { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "agent_response_metadata";
+    }
+
+    public class AgentResponseMetadataEvent
+    {
+        [JsonProperty("metadata")]
+        public Dictionary<string, dynamic> Metadata { get; set; } = new();
 
         [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
@@ -171,6 +340,27 @@ namespace ElevenLabs.Protocol
         public double VadScore { get; set; } = 0;
     }
 
+    public class AgentChatResponsePart : IncomingSocketEvent
+    {
+        [JsonProperty("text_response_part")]
+        public TextResponsePart TextResponsePart { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "agent_chat_response_part";
+    }
+
+    public class TextResponsePart
+    {
+        [JsonProperty("text")]
+        public string Text { get; set; } = "";
+
+        [JsonProperty("type")]
+        public string Type { get; set; } = "";
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+    }
+
     public class ClientToolCall : IncomingSocketEvent
     {
         [JsonProperty("client_tool_call")]
@@ -196,6 +386,39 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("expects_response")]
         public bool ExpectsResponse { get; set; } = false;
+    }
+
+    public class AgentToolResponse : IncomingSocketEvent
+    {
+        [JsonProperty("agent_tool_response")]
+        public AgentToolResponseEvent AgentToolResponseData { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "agent_tool_response";
+    }
+
+    public class AgentToolResponseEvent
+    {
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_type")]
+        public string ToolType { get; set; } = "";
+
+        [JsonProperty("is_error")]
+        public bool IsError { get; set; } = false;
+
+        [JsonProperty("is_blocked")]
+        public bool? IsBlocked { get; set; }
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+
+        [JsonProperty("is_called")]
+        public bool IsCalled { get; set; } = false;
     }
 
     public class AgentToolResponseFullPayload : IncomingSocketEvent
@@ -238,6 +461,42 @@ namespace ElevenLabs.Protocol
         public bool? Truncated { get; set; }
     }
 
+    public class AgentToolRequest : IncomingSocketEvent
+    {
+        [JsonProperty("agent_tool_request")]
+        public AgentToolRequestEvent AgentToolRequestData { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "agent_tool_request";
+    }
+
+    public class AgentToolRequestEvent
+    {
+        [JsonProperty("tool_name")]
+        public string ToolName { get; set; } = "";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("tool_type")]
+        public string ToolType { get; set; } = "";
+
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+
+        [JsonProperty("expects_response")]
+        public bool ExpectsResponse { get; set; } = false;
+
+        [JsonProperty("disable_interruptions")]
+        public bool DisableInterruptions { get; set; } = false;
+
+        [JsonProperty("response_timeout_secs")]
+        public int ResponseTimeoutSecs { get; set; } = 0;
+
+        [JsonProperty("execution_mode")]
+        public string ExecutionMode { get; set; } = "";
+    }
+
     public class Ping : IncomingSocketEvent
     {
         [JsonProperty("ping_event")]
@@ -254,5 +513,35 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("ping_ms")]
         public int? PingMs { get; set; }
+    }
+
+    public class McpConnectionStatus : IncomingSocketEvent
+    {
+        [JsonProperty("mcp_connection_status")]
+        public McpConnectionStatusEvent McpConnectionStatusData { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "mcp_connection_status";
+    }
+
+    public class McpConnectionStatusEvent
+    {
+        [JsonProperty("integrations")]
+        public IEnumerable<McpConnectionStatusIntegrationsItem>? Integrations { get; set; }
+    }
+
+    public class McpConnectionStatusIntegrationsItem
+    {
+        [JsonProperty("integration_id")]
+        public string IntegrationId { get; set; } = "";
+
+        [JsonProperty("integration_type")]
+        public string IntegrationType { get; set; } = "";
+
+        [JsonProperty("is_connected")]
+        public bool IsConnected { get; set; } = false;
+
+        [JsonProperty("tool_count")]
+        public int? ToolCount { get; set; }
     }
 }

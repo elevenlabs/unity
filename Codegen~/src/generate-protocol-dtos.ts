@@ -12,6 +12,7 @@ import {
 import {
   isPrimitive,
   makeProtocolPreset,
+  sanitizeCSType,
   toPascalCase,
 } from "./protocol-preset.ts";
 
@@ -590,7 +591,12 @@ function csPropName(
 }
 
 function csPropType(p: ConstrainedObjectPropertyModel): string {
-  const baseType = p.property.type;
+  // Sanitize first so the args records match what the wire-DTO renderer
+  // emits — Modelina's `dynamic` becomes `JToken` (see protocol-preset
+  // for the Unity / Mono rationale). Without this, the args record types
+  // would diverge from the underlying wire types and the `ToArgs(...)`
+  // extension methods wouldn't typecheck.
+  const baseType = sanitizeCSType(p.property.type);
   if (!p.required && !baseType.endsWith("?") && !isPrimitive(baseType)) {
     return `${baseType}?`;
   }
@@ -720,6 +726,9 @@ function emitIncomingArgs(
     "#nullable enable",
     "",
     "using System.Collections.Generic;",
+    // Unconditional — sibling DTO file does the same; some args records
+    // forward `JToken` fields from the wire DTOs (see sanitizeCSType).
+    "using Newtonsoft.Json.Linq;",
     "",
     "namespace ElevenLabs.Protocol",
     "{",

@@ -53,17 +53,25 @@ namespace ElevenLabs.Protocol
                     serializer
                 ),
                 "agent_response_complete" => obj.ToObject<AgentResponseComplete>(serializer),
+                "mcp_tool_call" => obj.ToObject<McpToolCall>(serializer),
+                "client_error" => obj.ToObject<ClientError>(serializer),
+                "guardrail_triggered" => obj.ToObject<GuardrailTriggered>(serializer),
                 "user_transcript" => obj.ToObject<UserTranscript>(serializer),
                 "agent_response" => obj.ToObject<AgentResponse>(serializer),
                 "agent_response_correction" => obj.ToObject<AgentResponseCorrection>(serializer),
+                "agent_response_metadata" => obj.ToObject<AgentResponseMetadata>(serializer),
                 "audio" => obj.ToObject<AudioResponse>(serializer),
                 "interruption" => obj.ToObject<Interruption>(serializer),
                 "vad_score" => obj.ToObject<VadScore>(serializer),
+                "agent_chat_response_part" => obj.ToObject<AgentChatResponsePart>(serializer),
                 "client_tool_call" => obj.ToObject<ClientToolCall>(serializer),
+                "agent_tool_response" => obj.ToObject<AgentToolResponse>(serializer),
                 "agent_tool_response_full_payload" => obj.ToObject<AgentToolResponseFullPayload>(
                     serializer
                 ),
+                "agent_tool_request" => obj.ToObject<AgentToolRequest>(serializer),
                 "ping" => obj.ToObject<Ping>(serializer),
+                "mcp_connection_status" => obj.ToObject<McpConnectionStatus>(serializer),
                 _ => new UnknownIncomingEvent(type, obj.ToString(Formatting.None)),
             };
         }

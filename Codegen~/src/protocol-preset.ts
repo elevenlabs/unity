@@ -40,6 +40,36 @@ export function isCollection(csType: string): boolean {
   return csType.startsWith("List<") || csType.startsWith("Dictionary<");
 }
 
+/**
+ * Rewrites Modelina's **bare** `dynamic` (emitted for `anyOf` schemas)
+ * to `Newtonsoft.Json.Linq.JToken`.
+ *
+ * Why: passing a bare `dynamic` value as a constructor / method argument
+ * forces a dynamic call site (`CallSite<...>.Create`), which requires
+ * `Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo.Create` — a member
+ * Unity's Mono / IL2CPP runtimes don't ship. The generator emits args
+ * records and `ToArgs(...)` extensions that pass these fields directly
+ * to a positional record ctor (`new(Field: e.Field)`), which is the
+ * call site that trips CS0656. `JToken` removes the dynamic dispatch
+ * without losing schema flexibility.
+ *
+ * Intentionally **not** rewritten: `dynamic` inside generic type arguments
+ * (`Dictionary<string, dynamic>`, `IEnumerable<Dictionary<string, dynamic>>`).
+ * Those values stay statically typed at the dictionary / list level — the
+ * field type the compiler sees is the generic, not `dynamic` itself, so
+ * call sites that pass the whole collection don't require the binder.
+ * The pre-existing `CustomLlmExtraBody` / `DynamicVariables` fields prove
+ * this in practice; widening the rewrite would force callers to manually
+ * box every value as `JToken` for no compilation benefit.
+ */
+export function sanitizeCSType(csType: string): string {
+  // Bare dynamic or dynamic? as the entire type — anchored to avoid the
+  // intra-generic case.
+  if (csType === "dynamic") return "JToken";
+  if (csType === "dynamic?") return "JToken?";
+  return csType;
+}
+
 export function toPascalCase(s: string): string {
   return s
     .split(/[_\s-]+/)
@@ -134,7 +164,7 @@ export function renderProtocolProperty({
   const pascal = toPascalCase(jsonName);
   const propName = pascal === enclosingName ? `${pascal}Data` : pascal;
 
-  const csType = property.property.type;
+  const csType = sanitizeCSType(property.property.type);
   const isRequired = property.required;
   const attr = `[JsonProperty("${jsonName}")]`;
 
@@ -200,6 +230,16 @@ export function makeProtocolPreset(
     class: {
       self({ renderer, model, content }) {
         renderer.dependencyManager.addDependency("using Newtonsoft.Json;");
+        // JToken is the post-sanitize replacement for Modelina's `dynamic` —
+        // emitted whenever a schema has `anyOf` (the wire DTOs for MCP
+        // tool calls, agent tool requests, etc.) or `additionalProperties:
+        // true` dictionary values. Adding the import unconditionally keeps
+        // the preset stateless; the cost is one extra using line in files
+        // that happen not to reference JToken — negligible vs branching
+        // logic that would have to walk every property's csType.
+        renderer.dependencyManager.addDependency(
+          "using Newtonsoft.Json.Linq;",
+        );
         return renderProtocolClassHeader({
           content,
           modelName: model.name,

@@ -6,6 +6,7 @@
 
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace ElevenLabs.Protocol
 {
@@ -36,6 +37,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("text")]
         public string? Text { get; set; }
+
+        [JsonProperty("user_identifier")]
+        public string? UserIdentifier { get; set; }
     }
 
     public class UserActivity : OutgoingSocketEvent
@@ -63,6 +67,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("text")]
         public string? TextData { get; set; }
+
+        [JsonProperty("user_identifier")]
+        public string? UserIdentifier { get; set; }
     }
 
     public class File
@@ -101,6 +108,18 @@ namespace ElevenLabs.Protocol
         public string? ErrorType { get; set; }
     }
 
+    public class McpToolApprovalResult : OutgoingSocketEvent
+    {
+        [JsonProperty("type")]
+        public string Type { get; init; } = "mcp_tool_approval_result";
+
+        [JsonProperty("tool_call_id")]
+        public string ToolCallId { get; set; } = "";
+
+        [JsonProperty("is_approved")]
+        public bool IsApproved { get; set; } = false;
+    }
+
     public class ContextualUpdate : OutgoingSocketEvent
     {
         [JsonProperty("type")]
@@ -108,6 +127,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("text")]
         public string Text { get; set; } = "";
+
+        [JsonProperty("context_id")]
+        public string? ContextId { get; set; }
     }
 
     public class ConversationInitiationClientData : OutgoingSocketEvent
@@ -142,6 +164,9 @@ namespace ElevenLabs.Protocol
 
     public class ConversationConfigOverride
     {
+        [JsonProperty("asr")]
+        public ConversationConfigOverrideAsr? Asr { get; set; }
+
         [JsonProperty("turn")]
         public ConversationConfigOverrideTurn? Turn { get; set; }
 
@@ -153,6 +178,12 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("agent")]
         public ConversationConfigOverrideAgent? Agent { get; set; }
+    }
+
+    public class ConversationConfigOverrideAsr
+    {
+        [JsonProperty("keywords")]
+        public IEnumerable<string>? Keywords { get; set; }
     }
 
     public class ConversationConfigOverrideTurn

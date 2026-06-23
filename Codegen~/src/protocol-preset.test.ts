@@ -12,6 +12,7 @@ import {
   pickRequiredInitializer,
   renderProtocolClassHeader,
   renderProtocolProperty,
+  sanitizeCSType,
   toPascalCase,
   unwrapStringConst,
 } from "./protocol-preset.ts";
@@ -326,5 +327,36 @@ describe("renderProtocolClassHeader", () => {
       out,
       "public class Agent { }\npublic partial class AgentResponse { }",
     );
+  });
+});
+
+describe("sanitizeCSType", () => {
+  it("rewrites bare dynamic to JToken", () => {
+    assert.equal(sanitizeCSType("dynamic"), "JToken");
+    assert.equal(sanitizeCSType("dynamic?"), "JToken?");
+  });
+
+  it("does NOT rewrite dynamic inside generic arguments", () => {
+    // Dictionary<string, dynamic> values stay statically typed at the
+    // dictionary level — the field type the compiler sees is the generic,
+    // not `dynamic`, so call sites that pass the whole collection don't
+    // require Microsoft.CSharp.RuntimeBinder. Rewriting would force
+    // callers (e.g. tests, NativeWebSocketConnection.ToDynamicDictionary)
+    // to box every value as JToken for no compilation benefit.
+    assert.equal(
+      sanitizeCSType("Dictionary<string, dynamic>"),
+      "Dictionary<string, dynamic>",
+    );
+    assert.equal(
+      sanitizeCSType("IEnumerable<Dictionary<string, dynamic>>"),
+      "IEnumerable<Dictionary<string, dynamic>>",
+    );
+  });
+
+  it("leaves non-dynamic types untouched", () => {
+    assert.equal(sanitizeCSType("string"), "string");
+    assert.equal(sanitizeCSType("List<int>"), "List<int>");
+    assert.equal(sanitizeCSType("MyModel"), "MyModel");
+    assert.equal(sanitizeCSType("DynamicVariables"), "DynamicVariables");
   });
 });

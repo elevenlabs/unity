@@ -69,32 +69,42 @@ and the generated dispatcher at
 
 ## Upstream-spec gaps surfaced by the inventory
 
-These items are **`wire-codegen` rows that are blocked on the
-AsyncAPI spec** — every #11c PR for them must either wait on #7's spec
-re-vendor or land an upstream PR against `elevenlabs/xi` first.
+Status column reflects the **2026-06-22 re-vendor** at xi commit
+`87a762f3` (internal PR #38788 — "register public AsyncAPI events and
+reduce unregistered allowlist"). PR #38788 unblocked 8 of the original
+14 gaps in one pass. The remaining six are tracked below; everything
+else now has a generated DTO and the matching #11c PR is mechanical.
 
 | Wire type (JS) | JS field name | Used by JS SDK in | Status in vendored spec |
 |---|---|---|---|
-| `internal_tentative_agent_response` | `tentative_agent_response_internal_event` | `handleTentativeAgentResponse` → `onDebug` | Absent |
-| `mcp_tool_call` | `mcp_tool_call` | `handleMCPToolCall` → `onMCPToolCall` | Absent |
-| `mcp_connection_status` | `mcp_connection_status` | `handleMCPConnectionStatus` → `onMCPConnectionStatus` | Absent |
-| `agent_tool_request` | `agent_tool_request` | `handleAgentToolRequest` → `onAgentToolRequest` | Absent |
-| `agent_tool_response` (non-full-payload variant) | `agent_tool_response` | `handleAgentToolResponse` → `onAgentToolResponse` (and `end_call` shortcut) | Absent (only `agent_tool_response_full_payload` is in the spec) |
-| `asr_initiation_metadata` | `asr_initiation_metadata_event` | `handleAsrInitiationMetadata` → `onAsrInitiationMetadata` | Absent |
-| `agent_chat_response_part` | `text_response_part` | `handleAgentChatResponsePart` → `onAgentChatResponsePart` | Absent |
-| `error` | `error_event` | `handleErrorEvent` → `onError` + `max_duration_exceeded` shortcut | Absent |
-| `guardrail_triggered` | (no inner object) | `handleGuardrailTriggered` → `onGuardrailTriggered` | Absent |
-| `agent_typing` | `agent_typing_event` | `handleAgentTyping` → `onAgentTyping` | Absent |
-| `external_agent_connected` | (no inner object) | `handleExternalAgentConnected` → `onExternalAgentConnected` | Absent |
-| `audio_event_alignment` (`AudioAlignmentEvent`) | n/a (delivered via `onAudioAlignment`, called from WebRTC audio adapter) | `onAudioAlignment` callback typed in `Callbacks` but never invoked from `BaseConversation` | Absent; also unused in `BaseConversation` — confirm whether this is dead code in JS SDK |
-| `tool_mock_config` (outgoing, in `conversation_initiation_client_data`) | n/a — `constructOverrides` adds it client-side | Sent by client when `ConversationOptions.ToolMockConfig` is set | Absent in `ConversationInitiationClientData` schema |
-| `mcp_tool_approval_result` (outgoing) | `tool_call_id`, `is_approved` | `sendMCPToolApprovalResult` | Absent in `OutgoingSocketEvent` union |
-| `source_info.source` enum value `unity_sdk` | n/a — enum widening | `constructOverrides` auto-injects `{ source: "js_sdk", version: <SDK_VERSION> }`; we need a corresponding `unity_sdk` slot | Enum at [`convai-asyncapi.yml:962-980`](../../Codegen~/schemas/convai-asyncapi.yml#L962-L980) lacks `unity_sdk` |
+| `internal_tentative_agent_response` | `tentative_agent_response_internal_event` | `handleTentativeAgentResponse` → `onDebug` | Absent (and intentionally so — per [Resolved gap: `onDebug` policy](#resolved-gap-ondebug-policy) this is routed via `EnableDebugLogging` rather than a typed event, so we don't need it in the spec) |
+| `mcp_tool_call` | `mcp_tool_call` | `handleMCPToolCall` → `onMCPToolCall` | ✅ Present (post-#38788) as `McpToolCall` |
+| `mcp_connection_status` | `mcp_connection_status` | `handleMCPConnectionStatus` → `onMCPConnectionStatus` | ✅ Present (post-#38788) as `McpConnectionStatus` |
+| `agent_tool_request` | `agent_tool_request` | `handleAgentToolRequest` → `onAgentToolRequest` | ✅ Present (post-#38788) as `AgentToolRequest` |
+| `agent_tool_response` (non-full-payload variant) | `agent_tool_response` | `handleAgentToolResponse` → `onAgentToolResponse` (and `end_call` shortcut) | ✅ Present (post-#38788) as `AgentToolResponse` (sits alongside the existing `AgentToolResponseFullPayload`) |
+| `asr_initiation_metadata` | `asr_initiation_metadata_event` | `handleAsrInitiationMetadata` → `onAsrInitiationMetadata` | Still absent — needs upstream PR |
+| `agent_chat_response_part` | `text_response_part` | `handleAgentChatResponsePart` → `onAgentChatResponsePart` | ✅ Present (post-#38788) as `AgentChatResponsePart` |
+| `error` / `client_error` | `error_event` | `handleErrorEvent` → `onError` + `max_duration_exceeded` shortcut | ✅ Present (post-#38788) as `ClientError` (spec names it `client_error`; JS still uses `error` — confirm whether the server emits both or just one) |
+| `guardrail_triggered` | (no inner object) | `handleGuardrailTriggered` → `onGuardrailTriggered` | ✅ Present (post-#38788) as `GuardrailTriggered` |
+| `agent_typing` | `agent_typing_event` | `handleAgentTyping` → `onAgentTyping` | Still absent — needs upstream PR |
+| `external_agent_connected` | (no inner object) | `handleExternalAgentConnected` → `onExternalAgentConnected` | Still absent — needs upstream PR |
+| `audio_event_alignment` (`AudioAlignmentEvent`) | n/a (delivered via `onAudioAlignment`, called from WebRTC audio adapter) | `onAudioAlignment` callback typed in `Callbacks` but never invoked from `BaseConversation` | Still absent — and confirm whether `onAudioAlignment` has any JS callsite at all before filing |
+| `tool_mock_config` (outgoing, in `conversation_initiation_client_data`) | n/a — `constructOverrides` adds it client-side | Sent by client when `ConversationOptions.ToolMockConfig` is set | Still absent in `ConversationInitiationClientData` schema |
+| `mcp_tool_approval_result` (outgoing) | `tool_call_id`, `is_approved` | `sendMCPToolApprovalResult` | ✅ Present (post-#38788) as `McpToolApprovalResult` — xi#39092 was redundant, filed before the re-vendor |
+| `source_info.source` enum value `unity_sdk` | n/a — enum widening | `constructOverrides` auto-injects `{ source: "js_sdk", version: <SDK_VERSION> }`; we need a corresponding `unity_sdk` slot | Still absent — `source` enum doesn't list `unity_sdk` |
 
-**Action**: per [v0.1-parity.md:165](./v0.1-parity.md#L165), file each
-of these as an upstream PR against `elevenlabs/xi` before promising the
-matching C# method/event. The dependency is unidirectional — the spec
-PR has to merge first, then a re-vendor here, then the #11c PR.
+**New wire types introduced by #38788** that weren't in the inventory
+above (the spec went past the JS-SDK callback surface in one place):
+
+| Wire type | Generated DTO | JS SDK status | Disposition |
+|---|---|---|---|
+| `agent_response_metadata` | `AgentResponseMetadata` (payload: opaque `metadata: object`, `event_id`) | No `handle*` method, no callback | Wire DTO exists but nothing handles it yet. Skip from #11c surface until the JS SDK or product asks for it — adding a typed C# event on a payload the server-side schema treats as `additionalProperties: true` would just be exposing a `Dictionary<string, dynamic>` to game code with no contract. |
+
+**Action**: file the remaining four blockers (`asr_initiation_metadata`,
+`agent_typing`, `external_agent_connected`, `audio_event_alignment` — if
+confirmed live) as upstream PRs against `elevenlabs/xi` before promising
+the matching C# methods/events. The dependency is unidirectional — the
+spec PR has to merge first, then a re-vendor here, then the #11c PR.
 
 ## The parity matrix
 
@@ -107,7 +117,7 @@ One row per JS-SDK callback (`kind: callback`) or method (`kind: method`).
 |---|---|---|---|---|---|---|---|
 | 1 | callback | `onConnect` | `BaseConversation.markConnected` → `updateStatus("connected")` (and the bridged session's explicit `RaiseConnected` after the handshake) | `derived` | `event Action<string>? Connected` | ✅ shipped | none |
 | 2 | callback | `onDisconnect` | `BaseConversation.endSessionWithDetails`, fired from transport `disconnect()` or user `endSession()` | `derived` | `event Action<DisconnectionDetails>? Disconnected` | ✅ shipped | none |
-| 3 | callback | `onError` | `BaseConversation.onError`; called by client-tool dispatch, by `handleErrorEvent` (server `error` frame), and by `max_duration_exceeded` end-of-session shortcut | `hybrid` | `event Action<string>? ErrorOccurred` (transport / client-tool only — see [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)) | Keep `event Action<string>? ErrorOccurred`. Wire-`error`-frame integration lands with the upstream `error` event PR. | Wire `error` frame absent from spec (upstream PR) |
+| 3 | callback | `onError` | `BaseConversation.onError`; called by client-tool dispatch, by `handleErrorEvent` (server `error` frame), and by `max_duration_exceeded` end-of-session shortcut | `hybrid` | `event Action<string>? ErrorOccurred` (transport / client-tool only — see [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)) | Keep `event Action<string>? ErrorOccurred` for the transport / client-tool paths; widen to `event Action<ErrorArgs>? ErrorOccurred` once we surface the wire frame (per [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)). | ✅ Unblocked by xi#38788 (now `ClientError` DTO; spec names it `client_error`, JS still uses `error` — confirm which the server emits) |
 | 4 | callback | `onMessage` (user) | `BaseConversation.handleUserTranscript` → `onMessage({ role: "user", ... })` | `wire-existing` | `event Action<UserTranscriptArgs>? UserTranscriptReceived` | ✅ shipped (kept C#-idiomatic `UserTranscriptReceived` + `AgentResponded` split rather than mirroring JS's combined `onMessage`) | none |
 | 5 | callback | `onMessage` (agent) | `BaseConversation.handleAgentResponse` → `onMessage({ role: "agent", ... })` | `wire-existing` | `event Action<AgentResponseArgs>? AgentResponded` | ✅ shipped | none |
 | 6 | callback | `onAudio` | `BaseConversation.handleAudio` (no-op in base; `WebSocketConnection.handleMessage` and `WebRTCConnection.setupAudioCapture` emit the actual `audio` frames) | `wire-existing` | `event Action<AudioResponseArgs>? AudioReceived` | ✅ shipped | none |
@@ -116,17 +126,17 @@ One row per JS-SDK callback (`kind: callback`) or method (`kind: method`).
 | 9 | callback | `onCanSendFeedbackChange` | `BaseConversation.updateCanSendFeedback` | `derived` | `event Action<bool>? CanSendFeedbackChanged` | ✅ shipped | none |
 | 10 | callback | `onUnhandledClientToolCall` | `BaseConversation.handleClientToolCall` else-branch | `derived` | None (the C# side raises `ErrorOccurred` for the same case at [`Conversation.cs:413-418`](../../Runtime/Core/Conversation.cs#L413-L418), without giving handlers a chance to opt in) | Add `event Action<ClientToolCallArgs>? UnhandledClientToolCall`. When a subscriber exists, suppress the error-and-tool-error response and let the subscriber decide; when no subscriber, keep today's behaviour. | none (`ClientToolCall` already generated) |
 | 11 | callback | `onVadScore` | `BaseConversation.handleVadScore` | `wire-existing` | `event Action<VadScoreArgs>? VadScoreUpdated` | ✅ shipped | none |
-| 12 | callback | `onMCPToolCall` | `BaseConversation.handleMCPToolCall` | `wire-codegen` | None | `event Action<MCPToolCallArgs>? MCPToolCallReceived` once the DTO is generated. | Upstream spec PR (`mcp_tool_call`) |
-| 13 | callback | `onMCPConnectionStatus` | `BaseConversation.handleMCPConnectionStatus` | `wire-codegen` | None | `event Action<MCPConnectionStatusArgs>? MCPConnectionStatusChanged` | Upstream spec PR (`mcp_connection_status`) |
-| 14 | callback | `onAgentToolRequest` | `BaseConversation.handleAgentToolRequest` | `wire-codegen` | None | `event Action<AgentToolRequestArgs>? AgentToolRequested` | Upstream spec PR (`agent_tool_request`) |
-| 15 | callback | `onAgentToolResponse` | `BaseConversation.handleAgentToolResponse` **and** `handleAgentToolResponseFullPayload` — both invoke the same callback; the C# router already handles only the `_full_payload` variant via `OnAgentToolResponseFullPayload` for the `end_call` shortcut, without surfacing it as an event | `hybrid` | None | `event Action<AgentToolResponseArgs>? AgentToolResponded`. C# surface should unify both variants behind one args record (JS does the same). | Upstream spec PR (`agent_tool_response` non-full variant) |
+| 12 | callback | `onMCPToolCall` | `BaseConversation.handleMCPToolCall` | `wire-codegen` | None | `event Action<MCPToolCallArgs>? MCPToolCallReceived` once the DTO is generated. | ✅ Unblocked by xi#38788 (now `McpToolCall` DTO) |
+| 13 | callback | `onMCPConnectionStatus` | `BaseConversation.handleMCPConnectionStatus` | `wire-codegen` | None | `event Action<MCPConnectionStatusArgs>? MCPConnectionStatusChanged` | ✅ Unblocked by xi#38788 (now `McpConnectionStatus` DTO) |
+| 14 | callback | `onAgentToolRequest` | `BaseConversation.handleAgentToolRequest` | `wire-codegen` | None | `event Action<AgentToolRequestArgs>? AgentToolRequested` | ✅ Unblocked by xi#38788 (now `AgentToolRequest` DTO) |
+| 15 | callback | `onAgentToolResponse` | `BaseConversation.handleAgentToolResponse` **and** `handleAgentToolResponseFullPayload` — both invoke the same callback; the C# router already handles only the `_full_payload` variant via `OnAgentToolResponseFullPayload` for the `end_call` shortcut, without surfacing it as an event | `hybrid` | None | `event Action<AgentToolResponseArgs>? AgentToolResponded`. C# surface should unify both variants behind one args record (JS does the same). | ✅ Unblocked by xi#38788 (now `AgentToolResponse` DTO sits alongside the existing `AgentToolResponseFullPayload`) |
 | 16 | callback | `onConversationMetadata` | `BaseConversation.handleConversationMetadata` | `wire-existing` | `event Action<ConversationInitiationMetadataArgs>? InitiationMetadataReceived` | ✅ shipped | none |
 | 17 | callback | `onAsrInitiationMetadata` | `BaseConversation.handleAsrInitiationMetadata` | `wire-codegen` | None | `event Action<AsrInitiationMetadataArgs>? AsrInitiationMetadataReceived` | Upstream spec PR (`asr_initiation_metadata`) |
 | 18 | callback | `onInterruption` | `BaseConversation.handleInterruption` | `wire-existing` | `event Action<InterruptionArgs>? Interrupted` | ✅ shipped | none |
 | 19 | callback | `onAgentResponseCorrection` | `BaseConversation.handleAgentResponseCorrection` | `wire-existing` | `event Action<AgentResponseCorrectionArgs>? AgentResponseCorrected` | ✅ shipped | none |
-| 20 | callback | `onAgentChatResponsePart` | `BaseConversation.handleAgentChatResponsePart` | `wire-codegen` | None | `event Action<AgentChatResponsePartArgs>? AgentChatResponsePartReceived` | Upstream spec PR (`agent_chat_response_part`) |
+| 20 | callback | `onAgentChatResponsePart` | `BaseConversation.handleAgentChatResponsePart` | `wire-codegen` | None | `event Action<AgentChatResponsePartArgs>? AgentChatResponsePartReceived` | ✅ Unblocked by xi#38788 (now `AgentChatResponsePart` DTO) |
 | 21 | callback | `onAudioAlignment` | `Callbacks` type only — **not invoked from `BaseConversation`**. Likely wired separately by an internal adapter (WebRTC) or unused in JS SDK proper | `wire-codegen` | None | Defer: confirm whether the JS SDK invokes this anywhere (we couldn't find a callsite in `BaseConversation`). If yes, mirror; if no, drop from the parity surface entirely. | Confirm JS callsite + upstream spec PR (`audio_event_alignment`) |
-| 22 | callback | `onGuardrailTriggered` | `BaseConversation.handleGuardrailTriggered` | `wire-codegen` | None | `event Action? GuardrailTriggered` (no payload — JS callback takes no args) | Upstream spec PR (`guardrail_triggered`) |
+| 22 | callback | `onGuardrailTriggered` | `BaseConversation.handleGuardrailTriggered` | `wire-codegen` | None | `event Action? GuardrailTriggered` (no payload — JS callback takes no args) | ✅ Unblocked by xi#38788 (now `GuardrailTriggered` DTO with `guardrail_name`/`guardrail_response`) |
 | 23 | callback | `onAgentTyping` | `BaseConversation.handleAgentTyping` | `wire-codegen` | None | `event Action<AgentTypingArgs>? AgentTyping` | Upstream spec PR (`agent_typing`) |
 | 24 | callback | `onExternalAgentConnected` | `BaseConversation.handleExternalAgentConnected` | `wire-codegen` | None | `event Action? ExternalAgentConnected` (no payload) | Upstream spec PR (`external_agent_connected`) |
 | 25 | callback | `onDebug` | `BaseConnection.debug` (transport-internal: parse errors, invalid events, audio_element_ready, send-message errors) **and** `BaseConversation.onMessage` default arm (unknown wire types) | `transport-only` (transport half) + `derived` (unknown-wire half) | None | Per [Resolved gap: `onDebug` policy](#resolved-gap-ondebug-policy), bridge to `UnityEngine.Debug.Log` behind `ConversationOptions.EnableDebugLogging`. Unknown-wire arm is already covered by `IncomingEventDispatcher.OnUnhandled` (internal). | none — recipe is "do it without adding a public event" |
@@ -140,7 +150,7 @@ One row per JS-SDK callback (`kind: callback`) or method (`kind: method`).
 | 33 | method | `sendContextualUpdate(text, options?)` | `BaseConversation.sendContextualUpdate` | `derived` (outgoing) | `void SendContextualUpdate(string)` | Extend to accept the optional `context_id` to match JS's `ContextualUpdateOptions`. One-line addition. | none — `ContextualUpdate` DTO already generated; add the optional field on the wire DTO if missing |
 | 34 | method | `sendUserMessage(text)` | `BaseConversation.sendUserMessage` | `derived` (outgoing) | `void SendUserMessage(string)` | ✅ shipped | none |
 | 35 | method | `sendUserActivity()` | `BaseConversation.sendUserActivity` | `derived` (outgoing) | `void SendUserActivity()` | ✅ shipped | none |
-| 36 | method | `sendMCPToolApprovalResult(toolCallId, isApproved)` | `BaseConversation.sendMCPToolApprovalResult` | `wire-codegen` | None | `void SendMCPToolApprovalResult(string toolCallId, bool isApproved)` | Upstream spec PR (`mcp_tool_approval_result` outgoing) |
+| 36 | method | `sendMCPToolApprovalResult(toolCallId, isApproved)` | `BaseConversation.sendMCPToolApprovalResult` | `wire-codegen` | None | `void SendMCPToolApprovalResult(string toolCallId, bool isApproved)` | ✅ Unblocked by xi#38788 (now `McpToolApprovalResult` outgoing DTO; xi#39092 was redundant) |
 | 37 | method | `sendMultimodalMessage({ text?, fileId? })` | `BaseConversation.sendMultimodalMessage` | `wire-existing` | None | `void SendMultimodalMessage(string? text = null, string? fileId = null)` — `MultimodalMessage` DTO already generated; one-line forward into `_connection.Send(...)` | none |
 | 38 | method | `uploadFile(file)` → `{ fileId }` | `BaseConversation.uploadFile` — HTTP POST to `${origin}/v1/convai/conversations/${conversationId}/files` | `http-side-channel` | None | `Awaitable<string> UploadFileAsync(byte[] bytes, string mimeType, string? filename = null)` on `Conversation`. Bridged path wraps the `uploadFile` helper re-exported from `@elevenlabs/client/internal/unity` (shipped in `1.12.1` per [elevenlabs/packages#852](https://github.com/elevenlabs/packages/issues/852)); native path makes the HTTP call directly. See [Resolved gap: upload-file transport](#resolved-gap-upload-file-transport). | None (both paths unblocked once `Bridge~/` consumes `^1.12.1`). |
 | 39 | method | `endSession()` | `BaseConversation.endSession` | `derived` | `Awaitable EndSession()` | ✅ shipped | none |
@@ -328,36 +338,41 @@ factory; the native sub-path uses `UnityWebRequest` directly.
 
 ## Dependencies and PR order
 
+Updated after the **2026-06-22 re-vendor** at xi `87a762f3` (PR #38788).
+Most of the #11c list moved from "waits on upstream" to "ready" in one
+pass; the remaining four still need their own upstream PRs.
+
 ```
-#11a (this doc)                ── lands now ──────────────────────┐
-                                                                  │
-#11b (methods)                                                    ▼
-  ├─ ChangeInputDevice + ChangeOutputDevice         ── independent
-  ├─ SendMultimodalMessage                          ── independent
-  ├─ SendContextualUpdate(contextId)                ── independent
-  ├─ UnhandledClientToolCall + onDebug flag         ── independent
-  ├─ UploadFileAsync (native)                       ── independent (UnityWebRequest)
-  ├─ UploadFileAsync (bridged)                      ── independent (since @elevenlabs/client@1.12.1)
-  └─ SendMCPToolApprovalResult                      ── waits on upstream PR
-                                                                  │
-#11c (events)                                                     ▼
-  ├─ ErrorOccurred widening to ErrorArgs            ── waits on upstream `error` event
-  ├─ AgentToolResponded (unifies both variants)     ── waits on upstream `agent_tool_response`
-  ├─ MCPToolCallReceived                            ── waits on upstream `mcp_tool_call`
-  ├─ MCPConnectionStatusChanged                     ── waits on upstream `mcp_connection_status`
-  ├─ AgentToolRequested                             ── waits on upstream `agent_tool_request`
+#11b (methods)
+  ├─ ChangeInputDevice + ChangeOutputDevice         ✅ shipped
+  ├─ SendMultimodalMessage                          ✅ shipped
+  ├─ SendContextualUpdate(contextId)                ── ready
+  ├─ UnhandledClientToolCall + onDebug flag         ── ready (derived, no codegen gate)
+  ├─ UploadFileAsync (native + bridged)             ✅ shipped
+  └─ SendMCPToolApprovalResult                      ── ready (post-#38788)
+
+#11c (events)
+  ── ready (post-#38788):
+  ├─ ErrorOccurred widening to ErrorArgs            ── from `ClientError` DTO
+  ├─ AgentToolResponded (unifies both variants)     ── from `AgentToolResponse` + existing `AgentToolResponseFullPayload`
+  ├─ MCPToolCallReceived                            ── from `McpToolCall`
+  ├─ MCPConnectionStatusChanged                     ── from `McpConnectionStatus`
+  ├─ AgentToolRequested                             ── from `AgentToolRequest`
+  ├─ AgentChatResponsePartReceived                  ── from `AgentChatResponsePart`
+  └─ GuardrailTriggered                             ── from `GuardrailTriggered`
+
+  ── still upstream-blocked:
   ├─ AsrInitiationMetadataReceived                  ── waits on upstream `asr_initiation_metadata`
-  ├─ AgentChatResponsePartReceived                  ── waits on upstream `agent_chat_response_part`
   ├─ AgentTyping                                    ── waits on upstream `agent_typing`
-  ├─ GuardrailTriggered                             ── waits on upstream `guardrail_triggered`
   ├─ ExternalAgentConnected                         ── waits on upstream `external_agent_connected`
-  └─ AudioAlignment(deferred)                       ── confirm JS callsite exists first
+  └─ AudioAlignment(deferred)                       ── confirm JS callsite exists first; then upstream `audio_event_alignment`
 ```
 
-The `independent` branches under #11b can land in any order today —
-none depend on the spec sync. Everything on the `waits on upstream PR`
-list is gated on either #7 (spec re-vendor) or a `elevenlabs/xi` PR
-authored alongside it.
+Everything in the "ready" buckets can land today in any order. Each
+"upstream-blocked" entry needs its own `elevenlabs/xi` PR before the
+matching C# work — same pattern as the four PR #38788 just resolved
+(and as xi#39092 which turned out to be redundant — the gap was already
+fixed on xi/main when filed).
 
 ## Open question carried forward
 

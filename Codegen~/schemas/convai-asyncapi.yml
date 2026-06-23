@@ -57,6 +57,7 @@ channels:
         - $ref: '#/components/messages/MultimodalMessage'
         - $ref: '#/components/messages/Pong'
         - $ref: '#/components/messages/ClientToolResult'
+        - $ref: '#/components/messages/McpToolApprovalResult'
         - $ref: '#/components/messages/ContextualUpdate'
         - $ref: '#/components/messages/ConversationInitiationClientData'
     subscribe:
@@ -66,15 +67,23 @@ channels:
         oneOf:
         - $ref: '#/components/messages/ConversationInitiationMetadata'
         - $ref: '#/components/messages/AgentResponseComplete'
+        - $ref: '#/components/messages/McpToolCall'
+        - $ref: '#/components/messages/ClientError'
+        - $ref: '#/components/messages/GuardrailTriggered'
         - $ref: '#/components/messages/UserTranscript'
         - $ref: '#/components/messages/AgentResponse'
         - $ref: '#/components/messages/AgentResponseCorrection'
+        - $ref: '#/components/messages/AgentResponseMetadata'
         - $ref: '#/components/messages/AudioResponse'
         - $ref: '#/components/messages/Interruption'
         - $ref: '#/components/messages/VadScore'
+        - $ref: '#/components/messages/AgentChatResponsePart'
         - $ref: '#/components/messages/ClientToolCall'
+        - $ref: '#/components/messages/AgentToolResponse'
         - $ref: '#/components/messages/AgentToolResponseFullPayload'
+        - $ref: '#/components/messages/AgentToolRequest'
         - $ref: '#/components/messages/Ping'
+        - $ref: '#/components/messages/McpConnectionStatus'
     x-fern-examples:
     - messages:
       - type: publish
@@ -226,6 +235,21 @@ components:
       description: Notification that the agent has finished generating a complete response.
       payload:
         $ref: '#/components/schemas/AgentResponseComplete'
+    McpToolCall:
+      name: Mcp Tool Call
+      description: MCP tool call event with state updates (loading, awaiting_approval, success, failure).
+      payload:
+        $ref: '#/components/schemas/McpToolCall'
+    ClientError:
+      name: Client Error
+      description: Error event sent when an error occurs during the conversation.
+      payload:
+        $ref: '#/components/schemas/ClientError'
+    GuardrailTriggered:
+      name: Guardrail Triggered
+      description: Notification that a guardrail was triggered during the conversation.
+      payload:
+        $ref: '#/components/schemas/GuardrailTriggered'
     UserTranscript:
       name: User Transcript
       description: Real-time transcriptions of user speech input.
@@ -241,6 +265,11 @@ components:
       description: Correction to a previous agent response.
       payload:
         $ref: '#/components/schemas/AgentResponseCorrection'
+    AgentResponseMetadata:
+      name: Agent Response Metadata
+      description: Metadata associated with an agent response, such as custom LLM response metadata.
+      payload:
+        $ref: '#/components/schemas/AgentResponseMetadata'
     AudioResponse:
       name: Audio Response
       description: Synthesized audio chunks of the agent's speech response.
@@ -256,21 +285,41 @@ components:
       description: Voice Activity Detection scoring information.
       payload:
         $ref: '#/components/schemas/VadScore'
+    AgentChatResponsePart:
+      name: Agent Chat Response Part
+      description: Streaming text chunks of an agent's chat response.
+      payload:
+        $ref: '#/components/schemas/AgentChatResponsePart'
     ClientToolCall:
       name: Client Tool Call
       description: Requests from server for client to execute specific tool functions.
       payload:
         $ref: '#/components/schemas/ClientToolCall'
+    AgentToolResponse:
+      name: Agent Tool Response
+      description: Response from an agent tool execution including status and metadata.
+      payload:
+        $ref: '#/components/schemas/AgentToolResponse'
     AgentToolResponseFullPayload:
       name: Agent Tool Response Full Payload
       description: Tool response including the tool's full result payload as a string.
       payload:
         $ref: '#/components/schemas/AgentToolResponseFullPayload'
+    AgentToolRequest:
+      name: Agent Tool Request
+      description: Notification that the agent is requesting a tool to be executed.
+      payload:
+        $ref: '#/components/schemas/AgentToolRequest'
     Ping:
       name: Ping
       description: Server-initiated ping messages for measuring connection latency.
       payload:
         $ref: '#/components/schemas/Ping'
+    McpConnectionStatus:
+      name: Mcp Connection Status
+      description: MCP connection status update with integration connection states.
+      payload:
+        $ref: '#/components/schemas/McpConnectionStatus'
     UserAudioChunk:
       name: User Audio Chunk
       description: Send audio data chunks from the user to the server for processing.
@@ -306,6 +355,11 @@ components:
       description: Results from client-side tool execution requested by the server.
       payload:
         $ref: '#/components/schemas/ClientToolResult'
+    McpToolApprovalResult:
+      name: Mcp Tool Approval Result
+      description: User approval or rejection of an MCP tool call that requires confirmation.
+      payload:
+        $ref: '#/components/schemas/McpToolApprovalResult'
     ContextualUpdate:
       name: Contextual Update
       description: Non-interrupting content sent to update the conversation state without disrupting the flow.
@@ -369,6 +423,169 @@ components:
       required:
       - agent_response_complete_event
       type: object
+    McpToolCall:
+      properties:
+        mcp_tool_call:
+          anyOf:
+          - properties:
+              service_id:
+                type: string
+              tool_call_id:
+                type: string
+              tool_name:
+                type: string
+              tool_description:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+              parameters:
+                additionalProperties: true
+                type: object
+              timestamp:
+                type: string
+              state:
+                const: loading
+                type: string
+            required:
+            - service_id
+            - tool_call_id
+            - tool_name
+            - parameters
+            - state
+            type: object
+          - properties:
+              service_id:
+                type: string
+              tool_call_id:
+                type: string
+              tool_name:
+                type: string
+              tool_description:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+              parameters:
+                additionalProperties: true
+                type: object
+              timestamp:
+                type: string
+              state:
+                const: awaiting_approval
+                type: string
+              approval_timeout_secs:
+                default: 300
+                description: Timeout in seconds for user approval
+                type: integer
+            required:
+            - service_id
+            - tool_call_id
+            - tool_name
+            - parameters
+            - state
+            type: object
+          - properties:
+              service_id:
+                type: string
+              tool_call_id:
+                type: string
+              tool_name:
+                type: string
+              tool_description:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+              parameters:
+                additionalProperties: true
+                type: object
+              timestamp:
+                type: string
+              state:
+                const: success
+                type: string
+              result:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+            required:
+            - service_id
+            - tool_call_id
+            - tool_name
+            - parameters
+            - state
+            - result
+            type: object
+          - properties:
+              service_id:
+                type: string
+              tool_call_id:
+                type: string
+              tool_name:
+                type: string
+              tool_description:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+              parameters:
+                additionalProperties: true
+                type: object
+              timestamp:
+                type: string
+              state:
+                const: failure
+                type: string
+              error_message:
+                type: string
+            required:
+            - service_id
+            - tool_call_id
+            - tool_name
+            - parameters
+            - state
+            - error_message
+            type: object
+        type:
+          x-fern-type: literal<"mcp_tool_call">
+      required:
+      - mcp_tool_call
+      type: object
+    ClientError:
+      properties:
+        error_event:
+          properties:
+            code:
+              type: integer
+            error_name:
+              type: string
+            message:
+              type: string
+          required:
+          - code
+          - error_name
+          type: object
+        type:
+          x-fern-type: literal<"client_error">
+      required:
+      - error_event
+      type: object
+    GuardrailTriggered:
+      properties:
+        guardrail_triggered_event:
+          properties:
+            guardrail_name:
+              type: string
+          required:
+          - guardrail_name
+          type: object
+        type:
+          x-fern-type: literal<"guardrail_triggered">
+      required:
+      - guardrail_triggered_event
+      type: object
     UserTranscript:
       properties:
         user_transcription_event:
@@ -422,6 +639,24 @@ components:
           x-fern-type: literal<"agent_response_correction">
       required:
       - agent_response_correction_event
+      type: object
+    AgentResponseMetadata:
+      properties:
+        agent_response_metadata_event:
+          properties:
+            metadata:
+              additionalProperties: true
+              type: object
+            event_id:
+              type: integer
+          required:
+          - metadata
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"agent_response_metadata">
+      required:
+      - agent_response_metadata_event
       type: object
     AudioResponse:
       properties:
@@ -492,6 +727,30 @@ components:
       required:
       - vad_score_event
       type: object
+    AgentChatResponsePart:
+      properties:
+        text_response_part:
+          properties:
+            text:
+              type: string
+            type:
+              enum:
+              - start
+              - delta
+              - stop
+              type: string
+            event_id:
+              type: integer
+          required:
+          - text
+          - type
+          - event_id
+          type: object
+        type:
+          x-fern-type: literal<"agent_chat_response_part">
+      required:
+      - text_response_part
+      type: object
     ClientToolCall:
       properties:
         client_tool_call:
@@ -519,6 +778,38 @@ components:
           x-fern-type: literal<"client_tool_call">
       required:
       - client_tool_call
+      type: object
+    AgentToolResponse:
+      properties:
+        agent_tool_response:
+          properties:
+            tool_name:
+              type: string
+            tool_call_id:
+              type: string
+            tool_type:
+              type: string
+            is_error:
+              type: boolean
+            is_blocked:
+              default: false
+              type: boolean
+            event_id:
+              type: integer
+            is_called:
+              type: boolean
+          required:
+          - tool_name
+          - tool_call_id
+          - tool_type
+          - is_error
+          - event_id
+          - is_called
+          type: object
+        type:
+          x-fern-type: literal<"agent_tool_response">
+      required:
+      - agent_tool_response
       type: object
     AgentToolResponseFullPayload:
       properties:
@@ -558,6 +849,41 @@ components:
       required:
       - agent_tool_response_full_payload
       type: object
+    AgentToolRequest:
+      properties:
+        agent_tool_request:
+          properties:
+            tool_name:
+              type: string
+            tool_call_id:
+              type: string
+            tool_type:
+              type: string
+            event_id:
+              type: integer
+            expects_response:
+              type: boolean
+            disable_interruptions:
+              type: boolean
+            response_timeout_secs:
+              type: integer
+            execution_mode:
+              type: string
+          required:
+          - tool_name
+          - tool_call_id
+          - tool_type
+          - event_id
+          - expects_response
+          - disable_interruptions
+          - response_timeout_secs
+          - execution_mode
+          type: object
+        type:
+          x-fern-type: literal<"agent_tool_request">
+      required:
+      - agent_tool_request
+      type: object
     Ping:
       properties:
         ping_event:
@@ -573,6 +899,39 @@ components:
           x-fern-type: literal<"ping">
       required:
       - ping_event
+      type: object
+    McpConnectionStatus:
+      properties:
+        mcp_connection_status:
+          description: MCP connection status with array of integration statuses.
+          properties:
+            integrations:
+              items:
+                description: Status of a single MCP integration/server.
+                properties:
+                  integration_id:
+                    type: string
+                  integration_type:
+                    enum:
+                    - mcp_server
+                    - mcp_integration
+                    type: string
+                  is_connected:
+                    type: boolean
+                  tool_count:
+                    default: 0
+                    type: integer
+                required:
+                - integration_id
+                - integration_type
+                - is_connected
+                type: object
+              type: array
+          type: object
+        type:
+          x-fern-type: literal<"mcp_connection_status">
+      required:
+      - mcp_connection_status
       type: object
     UserAudioChunk:
       properties:
@@ -605,6 +964,8 @@ components:
           x-fern-type: literal<"user_message">
         text:
           type: string
+        user_identifier:
+          type: string
       type: object
     UserActivity:
       properties:
@@ -622,6 +983,8 @@ components:
               default: user_message
               type: string
             text:
+              type: string
+            user_identifier:
               type: string
           type: object
         file:
@@ -658,11 +1021,6 @@ components:
         is_error:
           type: boolean
         error_type:
-          description: Optional category for the failure reason. When set, `is_error`
-            is treated as true. `user_rejected` is special-cased to mark the tool
-            as not having been called.
-          type: string
-          nullable: true
           enum:
           - user_rejected
           - external_server
@@ -670,10 +1028,27 @@ components:
           - customer_auth
           - client_timeout
           - unknown
+          type: string
+          description: Optional category for the failure reason. When set, `is_error` is treated as true. `user_rejected`
+            is special-cased to mark the tool as not having been called.
       required:
       - tool_call_id
       - result
       - is_error
+      type: object
+    McpToolApprovalResult:
+      properties:
+        type:
+          x-fern-type: literal<"mcp_tool_approval_result">
+        tool_call_id:
+          description: The ID of the tool call this approval responds to.
+          type: string
+        is_approved:
+          description: Whether the user approved the tool call.
+          type: boolean
+      required:
+      - tool_call_id
+      - is_approved
       type: object
     ContextualUpdate:
       properties:
@@ -682,19 +1057,14 @@ components:
         text:
           description: Context text to inject into the conversation without interrupting.
           type: string
+        context_id:
+          type: string
+          description: 'Optional client-supplied identifier. When a newer update with the same context_id arrives, the older
+            one supersedes it: the older update is dropped from the LLM view and visually marked as superseded in the rendered
+            transcript.'
       required:
       - text
       type: object
-    DynamicVariableNestedValueType:
-      anyOf:
-      - type: string
-      - type: integer
-      - type: number
-      - type: boolean
-      - items:
-          $ref: '#/components/schemas/DynamicVariableNestedValueType'
-        type: array
-      - type: 'null'
     ConversationInitiationClientData:
       properties:
         conversation_config_override:
@@ -707,6 +1077,10 @@ components:
                 llm: gemini-2.0-flash-001
                 prompt: You are a helpful assistant that can answer questions about the topic of the conversation.
                 tool_ids: []
+            asr:
+              keywords:
+              - hello
+              - world
             tts:
               similarity_boost: 0.8
               speed: 1.0
@@ -716,6 +1090,21 @@ components:
               soft_timeout_config:
                 message: Hhmmmm...yeah.
           properties:
+            asr:
+              example:
+                keywords:
+                - hello
+                - world
+              properties:
+                keywords:
+                  items:
+                    type: string
+                  type: array
+                  description: Keywords to boost prediction probability for
+                  x-convai-client-override: true
+                  x-convai-soft-override-disallowed: true
+              type: object
+              description: Configuration for conversational transcription
             turn:
               example:
                 soft_timeout_config:
@@ -727,7 +1116,8 @@ components:
                   properties:
                     message:
                       type: string
-                      description: Message to show when soft timeout is reached while waiting for LLM response
+                      description: Message to show when the first soft timeout is reached while waiting for LLM response.
+                        Supports dynamic variables (e.g., {{system__time}}, {{custom_variable}}).
                       x-convai-client-override: true
                       x-convai-language-override: true
                   type: object
@@ -819,6 +1209,8 @@ components:
                       - gpt-5.2
                       - gpt-5.2-chat-latest
                       - gpt-5.4
+                      - gpt-5.4-mini
+                      - gpt-5.4-nano
                       - gpt-5.5
                       - gpt-5-mini
                       - gpt-5-nano
@@ -833,6 +1225,7 @@ components:
                       - gemini-3-flash-preview
                       - gemini-3.1-pro-preview
                       - gemini-3.1-flash-lite-preview
+                      - gemini-3.1-flash-lite
                       - gemini-3.5-flash
                       - claude-sonnet-4-5
                       - claude-opus-4-7
@@ -848,6 +1241,7 @@ components:
                       - qwen3-4b
                       - qwen3-30b-a3b
                       - qwen36-35b-a3b
+                      - qwen35-397b-a17b
                       - gpt-oss-20b
                       - gpt-oss-120b
                       - glm-45-air-fp8
@@ -873,6 +1267,8 @@ components:
                       - gpt-5.1-2025-11-13
                       - gpt-5.2-2025-12-11
                       - gpt-5.4-2026-03-05
+                      - gpt-5.4-mini-2026-03-17
+                      - gpt-5.4-nano-2026-03-17
                       - gpt-5.5-2026-04-23
                       - gpt-5-mini-2025-08-07
                       - gpt-5-nano-2025-08-07
@@ -970,13 +1366,19 @@ components:
               - widget
               - sip_trunk
               - twilio
+              - exotel
               - genesys
               - swift_sdk
               - whatsapp
+              - twilio_sms
               - flutter_sdk
               - zendesk_integration
               - slack_integration
+              - telegram_integration
+              - intercom_integration
+              - freshdesk_integration
               - template_preview
+              - genesys_bot_connector
               type: string
             version:
               maxLength: 50
@@ -1015,3 +1417,13 @@ components:
         type:
           x-fern-type: literal<"conversation_initiation_client_data">
       type: object
+    DynamicVariableNestedValueType:
+      anyOf:
+      - type: string
+      - type: integer
+      - type: number
+      - type: boolean
+      - items:
+          $ref: '#/components/schemas/DynamicVariableNestedValueType'
+        type: array
+      - type: 'null'
