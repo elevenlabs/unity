@@ -4,6 +4,7 @@ using System;
 using ElevenLabs.Agents;
 using ElevenLabs.WebGL.Internal;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace ElevenLabs.WebGL.Bridged.Tests
 {
@@ -17,6 +18,20 @@ namespace ElevenLabs.WebGL.Bridged.Tests
     /// </summary>
     public class BridgedSessionLauncherTests
     {
+        // After NativeSessionLauncher landed (#9b), the Editor with a non-WebGL
+        // active build target loads both launchers and the last one to run its
+        // [InitializeOnLoadMethod] wins SessionFactory. Pin the bridged factory
+        // for the duration of every test in this class so we're asserting on the
+        // launcher under test, not on whichever happened to register last.
+        private Func<ConversationOptions, Awaitable<Conversation>>? _previousFactory;
+
+        [SetUp]
+        public void SetUp()
+        {
+            _previousFactory = Conversation.SessionFactory;
+            Conversation.SessionFactory = BridgedSessionLauncher.StartAsync;
+        }
+
         [TearDown]
         public void TearDown()
         {
@@ -26,17 +41,18 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             // tests.
             PromiseRegistry.ResetForTests();
             CallbackRegistry.ResetForTests();
+            Conversation.SessionFactory = _previousFactory;
         }
 
         [Test]
         public void SessionFactory_IsRegisteredAtEditorLoad()
         {
             // [InitializeOnLoadMethod] runs at every script reload — by the
-            // time Edit Mode tests execute, the launcher has already pointed
-            // SessionFactory at BridgedSession.StartAsync. If this assertion
-            // fails, the Editor hook is missing or the gating ifdefs have
-            // drifted.
-            Assert.IsNotNull(Conversation.SessionFactory);
+            // time Edit Mode tests execute, *some* launcher has pointed
+            // SessionFactory at a real factory (Native or Bridged depending on
+            // domain-load order). If this assertion fails, neither launcher's
+            // Editor hook fired.
+            Assert.IsNotNull(_previousFactory);
         }
 
         [Test]

@@ -947,15 +947,33 @@ namespace ElevenLabs.WebGL.Tests
             // with a BridgeException carrying the DllImport's
             // PlatformNotSupportedException. If this assertion changes shape,
             // the WebGL launcher has stopped registering its factory.
-            var task = Conversation.StartSessionAsync(
-                new ConversationOptions { AgentId = "agent-test" }
-            );
-            Assert.Throws<BridgeException>(() => task.GetAwaiter().GetResult());
-            // Stale registry state can bleed into sibling tests; clean up
-            // both the promise that surfaced the failure and any callback
-            // BridgedWebSocketConnection registered before the throw.
-            ElevenLabs.WebGL.Internal.PromiseRegistry.ResetForTests();
-            ElevenLabs.WebGL.Internal.CallbackRegistry.ResetForTests();
+            //
+            // NativeSessionLauncher (#9b) also registers in the Editor when
+            // the active build target is non-WebGL — last-write-wins, so pin
+            // the bridged factory for the scope of this test and restore on
+            // teardown so we exercise *this* launcher's path explicitly.
+            var previousFactory = Conversation.SessionFactory;
+            Conversation.SessionFactory = ElevenLabs
+                .WebGL
+                .Bridged
+                .BridgedSessionLauncher
+                .StartAsync;
+            try
+            {
+                var task = Conversation.StartSessionAsync(
+                    new ConversationOptions { AgentId = "agent-test" }
+                );
+                Assert.Throws<BridgeException>(() => task.GetAwaiter().GetResult());
+                // Stale registry state can bleed into sibling tests; clean up
+                // both the promise that surfaced the failure and any callback
+                // BridgedWebSocketConnection registered before the throw.
+                ElevenLabs.WebGL.Internal.PromiseRegistry.ResetForTests();
+                ElevenLabs.WebGL.Internal.CallbackRegistry.ResetForTests();
+            }
+            finally
+            {
+                Conversation.SessionFactory = previousFactory;
+            }
         }
 
         [Test]
