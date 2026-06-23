@@ -142,7 +142,7 @@ One row per JS-SDK callback (`kind: callback`) or method (`kind: method`).
 | 35 | method | `sendUserActivity()` | `BaseConversation.sendUserActivity` | `derived` (outgoing) | `void SendUserActivity()` | ✅ shipped | none |
 | 36 | method | `sendMCPToolApprovalResult(toolCallId, isApproved)` | `BaseConversation.sendMCPToolApprovalResult` | `wire-codegen` | None | `void SendMCPToolApprovalResult(string toolCallId, bool isApproved)` | Upstream spec PR (`mcp_tool_approval_result` outgoing) |
 | 37 | method | `sendMultimodalMessage({ text?, fileId? })` | `BaseConversation.sendMultimodalMessage` | `wire-existing` | None | `void SendMultimodalMessage(string? text = null, string? fileId = null)` — `MultimodalMessage` DTO already generated; one-line forward into `_connection.Send(...)` | none |
-| 38 | method | `uploadFile(file)` → `{ fileId }` | `BaseConversation.uploadFile` — HTTP POST to `${origin}/v1/convai/conversations/${conversationId}/files` | `http-side-channel` | None | `Awaitable<string> UploadFileAsync(byte[] bytes, string mimeType, string? filename = null)` on `Conversation`. Bridged path calls the upstream helper once [elevenlabs/packages#852](https://github.com/elevenlabs/packages/issues/852) exposes it; native path makes the HTTP call directly. See [Resolved gap: upload-file transport](#resolved-gap-upload-file-transport). | Bridged path: upstream [elevenlabs/packages#852](https://github.com/elevenlabs/packages/issues/852). Native path: none. |
+| 38 | method | `uploadFile(file)` → `{ fileId }` | `BaseConversation.uploadFile` — HTTP POST to `${origin}/v1/convai/conversations/${conversationId}/files` | `http-side-channel` | None | `Awaitable<string> UploadFileAsync(byte[] bytes, string mimeType, string? filename = null)` on `Conversation`. Bridged path wraps the `uploadFile` helper re-exported from `@elevenlabs/client/internal/unity` (shipped in `1.12.1` per [elevenlabs/packages#852](https://github.com/elevenlabs/packages/issues/852)); native path makes the HTTP call directly. See [Resolved gap: upload-file transport](#resolved-gap-upload-file-transport). | None (both paths unblocked once `Bridge~/` consumes `^1.12.1`). |
 | 39 | method | `endSession()` | `BaseConversation.endSession` | `derived` | `Awaitable EndSession()` | ✅ shipped | none |
 | 40 | method | `getId()` | `BaseConversation.getId` (`connection.conversationId`) | `derived` | `string ConversationId` (property) | ✅ shipped — exposed as a property to match the C# convention | none |
 | 41 | method | `isOpen()` | `BaseConversation.isOpen` (`status === "connected"`) | `derived` | None (subsumed by `Status` property + `StatusChanged` event) | Decide: do we add a convenience `bool IsOpen => Status == Status.Connected;` property, or document that game code should read `conversation.Status`? Lean toward **don't add** — one more way to express the same thing is API surface noise. | none (decision, not work) |
@@ -269,10 +269,12 @@ string? filename = null) → Awaitable<string>`.
   `WebSocketConnection` / `WebRTCConnection` / `createConnection` /
   `attachInputToConnection` / `attachConnectionToOutput` /
   `setWebRTCAudioAdapterFactory` / `installIosAudioUnlockListener`
-  ([`internal/unity.d.ts`](../../Bridge~/node_modules/@elevenlabs/client/dist/internal/unity.d.ts)) —
-  but **not** `uploadFile` or `BaseConversation` itself. The bridged
-  path can't re-use the JS helper without going around the curated
-  entrypoint.
+  ([`internal/unity.d.ts`](../../Bridge~/node_modules/@elevenlabs/client/dist/internal/unity.d.ts)).
+  Originally it did **not** re-export `uploadFile`, so the bridged path
+  was blocked on going around the curated entrypoint.
+  **Resolved**: `@elevenlabs/client@1.12.1` ships the helper as a free
+  function (see "Upstream issue" below); the entrypoint now exposes
+  `uploadFile({ conversationId, origin?, file: Blob, filename? }): Promise<{ fileId: string }>`.
 - The sibling `@elevenlabs/client/internal` entrypoint exposes
   `mergeOptions`, `parseLocation`, `sourceInfo`, `setupWebRTCSession`,
   etc. — likewise no upload helper.
@@ -284,12 +286,12 @@ Going via JS in the bridged path keeps that contract single-sourced
 upstream. On native we own the HTTP layer anyway (no JS to call), so
 direct `UnityWebRequest` there is the natural fit.
 
-**Upstream issue**:
+**Upstream issue (merged)**:
 [elevenlabs/packages#852](https://github.com/elevenlabs/packages/issues/852)
-asks for `uploadFile` to be re-exported as a free helper on
-`@elevenlabs/client/internal/unity`. Until that lands, the bridged
-half of #11b's UploadFileAsync PR is blocked; the native half can ship
-independently.
+asked for `uploadFile` to be re-exported as a free helper on
+`@elevenlabs/client/internal/unity`. **Shipped in `@elevenlabs/client@1.12.1`**
+(2026-06-23). Both halves of #11b's UploadFileAsync PR are now ready to
+ship in parallel.
 
 **Open thread for the bridged implementer (post-upstream-merge)**:
 once the helper is exposed, the bridged path likely needs a new jslib
@@ -306,10 +308,10 @@ multipart but `AddBinaryData` has a history of quirks at large
 payloads. Worst case: drop to `UnityWebRequest.Post(url, new
 UploadHandlerRaw(bytes))` with manual multipart framing.
 
-**Action**: lands as its own #11b PR with two sub-paths. Native sub-path
-can ship the moment the C# surface is approved; bridged sub-path lands
-after [elevenlabs/packages#852](https://github.com/elevenlabs/packages/issues/852)
-is merged and the next package version is consumed in `Bridge~/`.
+**Action**: lands as its own #11b PR with two sub-paths. Both are now
+unblocked — `Bridge~/` consumes `@elevenlabs/client@^1.12.1` so the
+bridged sub-path can wire the helper through a new connection-side
+factory; the native sub-path uses `UnityWebRequest` directly.
 
 ## Out of scope (won't appear in #11)
 
@@ -335,7 +337,7 @@ is merged and the next package version is consumed in `Bridge~/`.
   ├─ SendContextualUpdate(contextId)                ── independent
   ├─ UnhandledClientToolCall + onDebug flag         ── independent
   ├─ UploadFileAsync (native)                       ── independent (UnityWebRequest)
-  ├─ UploadFileAsync (bridged)                      ── waits on elevenlabs/packages#852
+  ├─ UploadFileAsync (bridged)                      ── independent (since @elevenlabs/client@1.12.1)
   └─ SendMCPToolApprovalResult                      ── waits on upstream PR
                                                                   │
 #11c (events)                                                     ▼

@@ -35,6 +35,6 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@elevenlabs/client": "^1.11.2"
+    "@elevenlabs/client": "^1.12.1"
   }
 }
