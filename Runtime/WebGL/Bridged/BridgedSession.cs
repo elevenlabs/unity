@@ -85,6 +85,21 @@ namespace ElevenLabs.WebGL.Bridged
         // peer wiring; no separate factories, no attachDefaultAudio.
         private static async Awaitable<BridgedSession> StartWebRtcAsync(ConversationOptions options)
         {
+            // OutputAudioSource is honored on the WebSocket arm but not on
+            // WebRTC: the audio path goes through livekit-client's
+            // RemoteAudioTrack, which doesn't expose a hook for an external
+            // sink. A v0.3 WebRTCAudioAdapter will close this gap; until
+            // then surface a one-time warning so users don't silently miss
+            // the spatial routing they expected.
+            if (options.OutputAudioSource != null)
+            {
+                UnityEngine.Debug.LogWarning(
+                    "[ElevenLabs] ConversationOptions.OutputAudioSource is ignored on the "
+                        + "WebRTC transport: livekit-client owns audio playback and the SDK "
+                        + "can't redirect it to a Unity AudioSource yet. Coming in v0.3."
+                );
+            }
+
             JObject sessionConfig = BuildSessionConfig(options);
             JsObject connectionHandle = await JsBridge.InvokeFactoryAsync<JsObject>(
                 "createWebRTCConnection",
@@ -126,7 +141,7 @@ namespace ElevenLabs.WebGL.Bridged
             JsObject? inputHandle = null;
             JsObject? outputHandle = null;
             BridgedInputController? input = null;
-            BridgedOutputController? output = null;
+            WebAudioBackedOutput? output = null;
             JsFunction? detach = null;
             try
             {
@@ -137,18 +152,32 @@ namespace ElevenLabs.WebGL.Bridged
                 // inputFormat / outputFormat are populated by the time we read
                 // them here.
                 JObject inputConfig = BuildInputConfig(options, connection.InputFormat);
-                JObject outputConfig = BuildOutputConfig(options, connection.OutputFormat);
+                JObject outputConfig = BuildOutputSinkConfig(connection.OutputFormat);
+
+                if (options.Output != null && !string.IsNullOrEmpty(options.Output.OutputDeviceId))
+                {
+                    UnityEngine.Debug.LogWarning(
+                        "[ElevenLabs] OutputDeviceConfig.OutputDeviceId is ignored on WebGL: "
+                            + "Web Audio doesn't expose per-context output device selection in the "
+                            + "stable browser API. Falling back to the system default device."
+                    );
+                }
 
                 inputHandle = await JsBridge.InvokeFactoryAsync<JsObject>(
                     "createMediaDeviceInput",
                     inputConfig
                 );
                 outputHandle = await JsBridge.InvokeFactoryAsync<JsObject>(
-                    "createMediaDeviceOutput",
+                    "createWebAudioSink",
                     outputConfig
                 );
                 input = new BridgedInputController(inputHandle);
-                output = new BridgedOutputController(outputHandle);
+                // OutputAudioSource is honored on WebGL's WebSocket arm:
+                // WebAudioBackedOutput polls the supplied AudioSource's
+                // properties per frame and mirrors them onto the JS sink's
+                // Web Audio graph. When null, the sink plays unspatialized
+                // mono at unit volume.
+                output = new WebAudioBackedOutput(outputHandle, options.OutputAudioSource);
 
                 // Pass the connection's own IncomingMessageCallback so the JS
                 // side's withoutAudioPayload wrapper fires the same C# delegate
@@ -330,22 +359,15 @@ namespace ElevenLabs.WebGL.Bridged
             return obj;
         }
 
-        // MediaDeviceOutputConfig mirrors the input shape — format + sample
-        // rate from the connection, optional output device id from options.
-        private static JObject BuildOutputConfig(
-            ConversationOptions options,
-            FormatConfig connectionOutputFormat
-        )
+        // WebAudioSinkConfig from Bridge~/src/connection/web-audio-sink.ts is
+        // just `{ sampleRate: number }`. Format isn't passed because the sink
+        // is PCM-only at v0.1 (matches the SDK's audio wire contract).
+        // OutputDeviceId isn't represented because Web Audio doesn't expose
+        // per-context output device selection in the stable browser API; the
+        // caller is warned at session start if they set one.
+        private static JObject BuildOutputSinkConfig(FormatConfig connectionOutputFormat)
         {
-            var obj = new JObject
-            {
-                ["format"] = connectionOutputFormat.Format,
-                ["sampleRate"] = connectionOutputFormat.SampleRate,
-            };
-            OutputDeviceConfig? device = options.Output;
-            if (device != null && !string.IsNullOrEmpty(device.OutputDeviceId))
-                obj["outputDeviceId"] = device.OutputDeviceId;
-            return obj;
+            return new JObject { ["sampleRate"] = connectionOutputFormat.SampleRate };
         }
 
         // Swallows cleanup-path errors so the original setup failure surfaces

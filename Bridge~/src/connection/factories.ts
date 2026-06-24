@@ -24,12 +24,17 @@ import {
   WebRTCConnection,
   createConnection,
   MediaDeviceInput,
-  MediaDeviceOutput,
   type SessionConfig,
   type MediaDeviceInputConfig,
-  type MediaDeviceOutputConfig,
   type WebRTCConnectionConfig,
 } from "@elevenlabs/client/internal/unity";
+
+// MediaDeviceOutput is intentionally absent. The WebSocket arm now uses our
+// own `createWebAudioSink` (Bridge~/src/connection/web-audio-sink.ts) so the
+// supplied `AudioSource` can drive Web Audio's PannerNode + StereoPannerNode
+// from C#-side property polling. The WebRTC arm has its own coupled output
+// (read via `BridgedWebRTCConnection.GetCoupledOutput`) and never used this
+// factory.
 
 // Config args arrive as rehydrated JSON from C# — the first arg is the config
 // object. We cast to the SDK's expected type; the C# caller is responsible for
@@ -43,6 +48,4 @@ export const connectionFactories: Record<string, (config: unknown) => unknown> =
     createConnection: (config) => createConnection(config as SessionConfig),
     createMediaDeviceInput: (config) =>
       MediaDeviceInput.create(config as MediaDeviceInputConfig),
-    createMediaDeviceOutput: (config) =>
-      MediaDeviceOutput.create(config as MediaDeviceOutputConfig),
   };

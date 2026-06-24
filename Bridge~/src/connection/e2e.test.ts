@@ -10,7 +10,10 @@
 // Flow:
 //   1. createWebSocketConnection  → JsObject handle for the connection
 //   2. createMediaDeviceInput     → JsObject handle for the input controller
-//   3. createMediaDeviceOutput    → JsObject handle for the output controller
+//   3. createTestOutput           → JsObject handle for the output sink (stub
+//                                   for the real createWebAudioSink, which
+//                                   needs Web Audio globals that don't exist
+//                                   in Node — see beforeEach for rationale)
 //   4. attachDefaultAudio         → JsFunction handle for the detach closure
 //   5. fire incoming messages     → assert bridge callback receives stripped events
 //   6. send a user message        → assert connection.sendMessage is called
@@ -65,11 +68,6 @@ vi.mock("@elevenlabs/client/internal/unity", () => {
     },
     createConnection: vi.fn().mockResolvedValue(mockWsConn),
     MediaDeviceInput: {
-      create: vi
-        .fn()
-        .mockResolvedValue({ close: vi.fn().mockResolvedValue(undefined) }),
-    },
-    MediaDeviceOutput: {
       create: vi
         .fn()
         .mockResolvedValue({ close: vi.fn().mockResolvedValue(undefined) }),
@@ -176,6 +174,17 @@ beforeEach(() => {
   for (const [name, fn] of Object.entries(audioGlueFactories)) {
     $EL_RegisterFactory(name, fn as (...args: unknown[]) => unknown);
   }
+  // Register a minimal output sink stub. The real createWebAudioSink reaches
+  // for browser-only globals (AudioContext, AudioWorkletNode, Blob URLs) that
+  // aren't available in Node + would require ~50 lines of Web Audio shims to
+  // construct. The e2e flow only needs an object whose `playAudio` satisfies
+  // `attachConnectionToOutput`'s contract and whose handle is allocated by the
+  // dispatcher — that's it. Real graph wiring is covered by
+  // web-audio-sink.test.ts.
+  $EL_RegisterFactory("createTestOutput", () => ({
+    playAudio: vi.fn(),
+    close: vi.fn().mockResolvedValue(undefined),
+  }));
 });
 
 // ---------------------------------------------------------------------------
@@ -191,7 +200,9 @@ const CB_HANDLE = 9001;
 
 const wsConfig = { agentId: "agent-test", connectionType: "websocket" };
 const inputConfig = { format: "pcm", sampleRate: 16000 };
-const outputConfig = { format: "pcm", sampleRate: 16000 };
+// Test-only output sink config — matches the WebAudioSinkConfig shape
+// (`{ sampleRate }`) the real createWebAudioSink factory consumes.
+const outputConfig = { sampleRate: 16000 };
 
 // ---------------------------------------------------------------------------
 // Session setup helper.
@@ -225,7 +236,7 @@ async function startSession(): Promise<{
     .$ref;
 
   EL_InvokeFactoryAsync(
-    makePtr("createMediaDeviceOutput"),
+    makePtr("createTestOutput"),
     makePtr(JSON.stringify([outputConfig])),
     SHAPE_OBJECT,
     3,

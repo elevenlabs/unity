@@ -57,17 +57,11 @@ vi.mock("@elevenlabs/client/internal/unity", () => {
     close: vi.fn().mockResolvedValue(undefined),
     getVolume: vi.fn().mockReturnValue(0),
   };
-  const mockOutput = {
-    setVolume: vi.fn(),
-    close: vi.fn().mockResolvedValue(undefined),
-    getVolume: vi.fn().mockReturnValue(0),
-  };
   return {
     WebSocketConnection: { create: vi.fn().mockResolvedValue(mockWsConn) },
     WebRTCConnection: { create: vi.fn().mockResolvedValue(mockRtcConn) },
     createConnection: vi.fn().mockResolvedValue(mockWsConn),
     MediaDeviceInput: { create: vi.fn().mockResolvedValue(mockInput) },
-    MediaDeviceOutput: { create: vi.fn().mockResolvedValue(mockOutput) },
   };
 });
 
@@ -80,7 +74,6 @@ import {
   WebRTCConnection,
   createConnection,
   MediaDeviceInput,
-  MediaDeviceOutput,
 } from "@elevenlabs/client/internal/unity";
 
 // ---------------------------------------------------------------------------
@@ -183,7 +176,6 @@ const SHAPE_VOID = 3;
 const wsConfig = { agentId: "agent-123", connectionType: "websocket" };
 const rtcConfig = { agentId: "agent-123", connectionType: "webrtc" };
 const inputConfig = { format: "pcm", sampleRate: 16000 };
-const outputConfig = { format: "pcm", sampleRate: 16000 };
 
 describe("createWebSocketConnection factory", () => {
   it("calls WebSocketConnection.create with the supplied config", async () => {
@@ -426,57 +418,7 @@ describe("createMediaDeviceInput factory", () => {
   });
 });
 
-describe("createMediaDeviceOutput factory", () => {
-  it("calls MediaDeviceOutput.create with the supplied config", async () => {
-    EL_InvokeFactoryAsync(
-      makePtr("createMediaDeviceOutput"),
-      makePtr(JSON.stringify([outputConfig])),
-      SHAPE_OBJECT,
-      40,
-    );
-    await Promise.resolve();
-
-    expect(MediaDeviceOutput.create).toHaveBeenCalledWith(outputConfig);
-  });
-
-  it("settles with a JsObject handle", async () => {
-    EL_InvokeFactoryAsync(
-      makePtr("createMediaDeviceOutput"),
-      makePtr(JSON.stringify([outputConfig])),
-      SHAPE_OBJECT,
-      40,
-    );
-    await Promise.resolve();
-
-    expect(lastSettleMessage()).toMatch(/^40:ok:\{"\$ref":\d+\}$/);
-  });
-
-  it("dispatches setVolume via EL_ObjectCallAsync", async () => {
-    EL_InvokeFactoryAsync(
-      makePtr("createMediaDeviceOutput"),
-      makePtr(JSON.stringify([outputConfig])),
-      SHAPE_OBJECT,
-      40,
-    );
-    await Promise.resolve();
-    const handle = JSON.parse(lastSettleMessage().slice("40:ok:".length))
-      .$ref as number;
-
-    g.SendMessage.mockClear();
-
-    EL_ObjectCallAsync(
-      handle,
-      makePtr("setVolume"),
-      makePtr("[0.5]"),
-      SHAPE_VOID,
-      41,
-    );
-    await Promise.resolve();
-
-    expect(lastSettleMessage()).toBe("41:ok:null");
-
-    const mockOutput = await vi.mocked(MediaDeviceOutput.create).mock.results[0]
-      .value;
-    expect(mockOutput.setVolume).toHaveBeenCalledWith(0.5);
-  });
-});
+// createMediaDeviceOutput was removed when the WebSocket arm migrated to
+// createWebAudioSink (see Bridge~/src/connection/web-audio-sink.ts +
+// Runtime/WebGL/Bridged/WebAudioBackedOutput.cs). The WebGL output's
+// factory + dispatch surface is covered by web-audio-sink.test.ts now.
