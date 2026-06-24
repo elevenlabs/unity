@@ -245,18 +245,16 @@ Extend with an optional second variant that supplies a pre-built `AudioSource` a
 
 - WebRTC-on-WebGL — feeding the supplied `AudioSource` from a LiveKit `RemoteAudioTrack`. Requires the `WebRTCAudioAdapter` work described in [`initial-rfc.md`](./initial-rfc.md) §132. v0.3.
 - Microphone-side equivalent (`InputAudioSource` / route mic capture *from* a Unity `AudioSource`). Different design (Unity microphone capture already happens on the C# side), parked until there's demand.
-- Full AudioMixer parity on WebGL. Would require a Web Audio mixer-group emulation layer, scoped at multi-week effort with limited demand evidence. v0.3+ if at all.
+- Full AudioMixer parity on WebGL. Would require a Web Audio mixer-group emulation layer with limited demand evidence. v0.3+ if at all.
 - Custom rolloff `AnimationCurve` support on WebGL. Doable by sampling the curve C#-side and pushing a LUT to a custom worklet processor; deferred until a user asks.
 
 ## Execution sequencing
 
-Rough order for implementing this in one milestone (~1.5–2 weeks):
+Order matters; each step is independently committable.
 
-1. **Native first** (~2 days) — `UnityAudioSourceOutput` branch + `ConversationOptions` field + `NativeSessionLauncher` forwarding + native Edit Mode tests. Lands cleanly without touching WebGL; gives us a working API to validate the field shape against.
-2. **JS sink** (~2–3 days) — `web-audio-sink.ts` + Vitest coverage. Standalone, can be built and tested in isolation before C# wiring lands.
-3. **C# `WebAudioBackedOutput`** (~2 days) — wraps the sink, holds the `AudioSource`, owns the property-polling loop. C# Edit Mode tests using a mock `JsObject`.
-4. **`BridgedSession` integration** (~1 day) — swap `createMediaDeviceOutput` for `createWebAudioSink`; delete the now-unused factory registration; update any tests that referenced the old factory.
-5. **Integration smoke** (~1–2 days) — extend `Samples/ConversationSmokeTest/` and `IntegrationTests~/` to assert spatial properties round-trip.
-6. **Docs fix-up** (~0.5 day) — patch `ARCHITECTURE.md` and `initial-rfc.md`.
-
-Each step independently committable.
+1. **Native first** — `UnityAudioSourceOutput` branch + `ConversationOptions` field + `NativeSessionLauncher` forwarding + native Edit Mode tests. Lands cleanly without touching WebGL; gives us a working API to validate the field shape against.
+2. **JS sink** — `web-audio-sink.ts` + Vitest coverage. Standalone, can be built and tested in isolation before C# wiring lands.
+3. **C# `WebAudioBackedOutput`** — wraps the sink, holds the `AudioSource`, owns the property-polling loop. C# Edit Mode tests using a mock `JsObject`.
+4. **`BridgedSession` integration** — swap `createMediaDeviceOutput` for `createWebAudioSink`; delete the now-unused factory registration; update any tests that referenced the old factory.
+5. **Integration smoke** — extend `Samples/ConversationSmokeTest/` and `IntegrationTests~/` to assert spatial properties round-trip.
+6. **Docs fix-up** — patch `ARCHITECTURE.md` and `initial-rfc.md`.
