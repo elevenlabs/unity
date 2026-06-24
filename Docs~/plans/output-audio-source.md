@@ -123,7 +123,7 @@ AudioWorkletNode (PCM intake, ring-buffered)
 Exposes:
 
 - `playAudio(chunk: ArrayBuffer): void` — satisfies the [`attachConnectionToOutput`](../../Bridge~/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.d.ts) contract so the existing JS-side wiring in [`audio-glue.ts`](../../Bridge~/src/connection/audio-glue.ts) still works. Audio bytes flow connection → sink entirely JS-side; **the bridge does not carry PCM payloads.**
-- Property setters called from C#: `setVolume(v)`, `setPosition(x,y,z)`, `setListenerPosition(x,y,z)` + orientation, `setSpatialBlend(b)`, `setMinDistance(d)`, `setMaxDistance(d)`, `setRolloffMode(0|1)` (Linear / Logarithmic — Inverse not supported; Web Audio's `PannerNode.distanceModel` covers both), `setPanStereo(p)`, `setDopplerLevel(d)`, `interrupt(durationMs)`, `close()`.
+- Property setters called from C#: `setVolume(v)`, `setPosition(x,y,z)` (listener-local, Web Audio handedness — see "Listener model" below), `setSpatialBlend(b)`, `setMinDistance(d)`, `setMaxDistance(d)`, `setRolloffMode(0|1)` (Linear → "linear", Logarithmic/Custom → "exponential"), `setPanStereo(p)`, `setDopplerLevel(d)`, `interrupt(durationMs)`, `close()`. No `setListenerPosition` — Web Audio's own `AudioListener` stays pinned at the origin facing default; all of Unity's listener translation + rotation is folded into the source position C#-side.
 - Read-only getters: `getVolume()` (RMS over recent samples for visualisers), `getByteFrequencyData(buffer)`.
 
 The sink is constructed via the existing primitives surface (`JsBridge.InvokeFactoryAsync<JsObject>("createWebAudioSink", config)`); its handle is held by the C# wrapper. No new bridge primitives needed — property setters are invoked via `JsObject.Get<JsFunction>("setVolume").Invoke(0.5f)` and friends, all string/number args.
@@ -133,7 +133,15 @@ The sink is constructed via the existing primitives surface (`JsBridge.InvokeFac
 A new `IOutputController` implementation. Constructor takes the JS sink handle and an optional `AudioSource`. Runtime behaviour:
 
 - **`PushAudio(byte[] pcm)`**: forwards to the JS sink. Audio bytes never crossed the bridge — `attachConnectionToOutput` in `audio-glue.ts` already wired the connection directly to `sink.playAudio` JS-side. So `WebAudioBackedOutput.PushAudio` should never actually fire; if it does (e.g. tests stubbing the connection), it logs and no-ops.
-- **`UpdateProperties()`** (called from `Conversation`'s polling loop, once per Unity frame): reads relevant properties off `_audioSource` and the active `AudioListener`, computes listener-relative position, calls the JS sink's setters via the `JsObject` primitive. Changed-only — caches the last-pushed values and skips no-op updates. When `_audioSource == null`, pushes defaults (volume=1, spatialBlend=0, mono).
+- **`UpdateProperties()`** (called from `Conversation`'s polling loop, once per Unity frame): reads relevant properties off `_audioSource`, computes the source's position in the active `AudioListener`'s local frame (`listener.transform.InverseTransformPoint(source.transform.position)`), flips Z to convert Unity's left-handed +Z-forward convention to Web Audio's right-handed -Z-forward, calls the JS sink's setters via the `JsObject` primitive. Changed-only — caches the last-pushed values and skips no-op updates. When `_audioSource == null`, pushes defaults (volume=1, spatialBlend=0, mono).
+
+### Listener model
+
+The active `AudioListener` is resolved via `Object.FindObjectsByType<AudioListener>(...).FirstOrDefault(l => l.isActiveAndEnabled)` — matches Unity's own "exactly one enabled listener per scene" expectation; multiple enabled listeners already trigger Unity's warning, so the wrapper picks the first silently. Result is cached and re-resolved when the cached one becomes null or disabled (covers cinematic-camera-takeover patterns where the original listener is destroyed or temporarily disabled).
+
+No-listener fallback: pushes the source's world position with Z flipped. Spatialization is only correct when the implicit Web Audio listener (origin, default orientation) matches the dev's intent, but the source remains audible.
+
+Future escape hatch: if split-screen or third-person-spectator setups need an explicit override, add `ConversationOptions.AudioListener`. v0.1 matches Unity's own implicit-listener convention (`AudioSource` itself doesn't take an explicit listener parameter).
 - **`SetVolume`, `Interrupt`, `Close`**: forwarded to the JS sink.
 
 `Close` follows the same supplied-vs-owned distinction as native, but on WebGL there's no "owned" path — if `OutputAudioSource` is null we just don't poll properties; the sink stays mono-omnidirectional. No teardown of user GameObjects, ever.

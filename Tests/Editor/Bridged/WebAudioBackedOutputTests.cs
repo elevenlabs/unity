@@ -21,9 +21,40 @@ namespace ElevenLabs.WebGL.Bridged.Tests
     /// </remarks>
     public class WebAudioBackedOutputTests
     {
+        // Edit Mode runs against the open scene, which in Unity 6 batchmode
+        // already contains a default Main Camera carrying an AudioListener.
+        // Tests that exercise position math need to control that — either by
+        // disabling any pre-existing listeners (fallback-path tests) or by
+        // owning the listener explicitly (relative-position tests). Cached
+        // here so SetUp/TearDown can restore the enabled state per test.
+        private readonly System.Collections.Generic.List<AudioListener> _preExistingListeners =
+            new();
+
+        [SetUp]
+        public void SetUp()
+        {
+            _preExistingListeners.Clear();
+            foreach (
+                var listener in UnityEngine.Object.FindObjectsByType<AudioListener>(
+                    FindObjectsSortMode.None
+                )
+            )
+            {
+                if (listener.enabled)
+                {
+                    listener.enabled = false;
+                    _preExistingListeners.Add(listener);
+                }
+            }
+        }
+
         [TearDown]
         public void TearDown()
         {
+            foreach (var listener in _preExistingListeners)
+                if (listener != null)
+                    listener.enabled = true;
+            _preExistingListeners.Clear();
             CallbackRegistry.ResetForTests();
             PromiseRegistry.ResetForTests();
         }
@@ -83,12 +114,14 @@ namespace ElevenLabs.WebGL.Bridged.Tests
                     fake.Invocations.Any(i => i.Name == "setRolloffMode" && (int)i.Args[0] == 0),
                     "setRolloffMode(0) should be pushed for Linear."
                 );
-                // setPosition takes three positional floats.
+                // setPosition takes three positional floats. With no
+                // AudioListener in the test scene, the wrapper falls back to
+                // world position with Z flipped (Unity LH → Web Audio RH).
                 var pos = fake.Invocations.FirstOrDefault(i => i.Name == "setPosition");
                 Assert.IsNotNull(pos);
                 Assert.AreEqual(3f, (float)pos!.Args[0]);
                 Assert.AreEqual(0f, (float)pos.Args[1]);
-                Assert.AreEqual(7f, (float)pos.Args[2]);
+                Assert.AreEqual(-7f, (float)pos.Args[2]);
             }
             finally
             {
@@ -147,6 +180,7 @@ namespace ElevenLabs.WebGL.Bridged.Tests
 
                 int initialPositionCalls = fake.Invocations.Count(i => i.Name == "setPosition");
 
+                // No AudioListener → fallback path: world pos with Z flipped.
                 go.transform.position = new Vector3(10, 5, -2);
                 output.UpdateProperties();
 
@@ -157,11 +191,119 @@ namespace ElevenLabs.WebGL.Bridged.Tests
                 var pos = fake.Invocations.Last(i => i.Name == "setPosition");
                 Assert.AreEqual(10f, (float)pos.Args[0]);
                 Assert.AreEqual(5f, (float)pos.Args[1]);
-                Assert.AreEqual(-2f, (float)pos.Args[2]);
+                Assert.AreEqual(2f, (float)pos.Args[2]); // Unity LH → Web Audio RH.
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void UpdateProperties_WithActiveListener_PushesListenerRelativePosition()
+        {
+            // Listener offset + rotated 90° around Y so its local +Z (forward)
+            // points to world +X. A source at world (0, 0, 5) is then to the
+            // listener's left (local -X), regardless of the listener's
+            // translation. The Z flip (Unity LH → Web Audio RH) leaves X
+            // alone, so the expected push is (-, 0, 0) on the X axis.
+            var listenerGo = new GameObject("test-listener");
+            var sourceGo = new GameObject("test-source");
+            try
+            {
+                AudioListener listener = listenerGo.AddComponent<AudioListener>();
+                listenerGo.transform.position = new Vector3(2, 0, 0);
+                listenerGo.transform.rotation = Quaternion.Euler(0, 90, 0);
+                Assert.IsTrue(listener.isActiveAndEnabled);
+
+                AudioSource src = sourceGo.AddComponent<AudioSource>();
+                sourceGo.transform.position = new Vector3(0, 0, 5);
+
+                var fake = new FakeJsObject();
+                _ = new WebAudioBackedOutput(fake, src);
+
+                var pos = fake.Invocations.First(i => i.Name == "setPosition");
+                // Listener local: source is 5 units to the listener's left
+                // (local -X), at the listener's height (local 0), and behind
+                // the listener by 2 units (local -Z because rotated +90° around
+                // Y means +X world = +Z local, and the source's X-world delta
+                // of -2 maps to local -Z).
+                // After Z flip (Unity LH → Web Audio RH): (-5, 0, 2).
+                Assert.AreEqual(-5f, (float)pos.Args[0], 1e-5);
+                Assert.AreEqual(0f, (float)pos.Args[1], 1e-5);
+                Assert.AreEqual(2f, (float)pos.Args[2], 1e-5);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(sourceGo);
+                UnityEngine.Object.DestroyImmediate(listenerGo);
+            }
+        }
+
+        [Test]
+        public void UpdateProperties_PrefersActiveAndEnabledListener_OverDisabledOne()
+        {
+            // Multiple listeners — only the active+enabled one drives the math.
+            // Mirrors Unity's own "active listener" semantics (multiple
+            // enabled triggers Unity's warning, not ours).
+            var disabledGo = new GameObject("test-listener-disabled");
+            var activeGo = new GameObject("test-listener-active");
+            var sourceGo = new GameObject("test-source");
+            try
+            {
+                AudioListener disabled = disabledGo.AddComponent<AudioListener>();
+                disabled.enabled = false;
+                disabledGo.transform.position = new Vector3(100, 100, 100);
+
+                _ = activeGo.AddComponent<AudioListener>();
+                activeGo.transform.position = new Vector3(1, 0, 0);
+
+                AudioSource src = sourceGo.AddComponent<AudioSource>();
+                sourceGo.transform.position = new Vector3(4, 0, 0);
+
+                var fake = new FakeJsObject();
+                _ = new WebAudioBackedOutput(fake, src);
+
+                // Listener-local: source.x - listener.x = 4 - 1 = 3. Y, Z = 0.
+                // After Z flip: (3, 0, 0). Disabled listener at (100,…) ignored.
+                var pos = fake.Invocations.First(i => i.Name == "setPosition");
+                Assert.AreEqual(3f, (float)pos.Args[0], 1e-5);
+                Assert.AreEqual(0f, (float)pos.Args[1], 1e-5);
+                Assert.AreEqual(0f, (float)pos.Args[2], 1e-5);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(sourceGo);
+                UnityEngine.Object.DestroyImmediate(activeGo);
+                UnityEngine.Object.DestroyImmediate(disabledGo);
+            }
+        }
+
+        [Test]
+        public void UpdateProperties_NoListenerSetsListenerPosition_UsesWorldPositionFallbackWithZFlip()
+        {
+            // No AudioListener anywhere in the scene → wrapper falls back to
+            // raw world position with Z flipped. Spatialization is only
+            // correct if the implicit Web Audio listener (at origin, default
+            // orientation) happens to match the dev's intent, but at least
+            // the source remains audible instead of throwing.
+            var sourceGo = new GameObject("test-no-listener-source");
+            try
+            {
+                AudioSource src = sourceGo.AddComponent<AudioSource>();
+                sourceGo.transform.position = new Vector3(7, -2, 4);
+
+                var fake = new FakeJsObject();
+                _ = new WebAudioBackedOutput(fake, src);
+
+                var pos = fake.Invocations.First(i => i.Name == "setPosition");
+                Assert.AreEqual(7f, (float)pos.Args[0]);
+                Assert.AreEqual(-2f, (float)pos.Args[1]);
+                Assert.AreEqual(-4f, (float)pos.Args[2]);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(sourceGo);
             }
         }
 

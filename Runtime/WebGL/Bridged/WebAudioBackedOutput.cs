@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Linq;
 using System.Threading;
 using ElevenLabs.Agents;
 using UnityEngine;
@@ -37,9 +38,12 @@ namespace ElevenLabs.WebGL.Bridged
         private readonly CancellationTokenSource _pollCts = new();
         private bool _disposed;
 
-        // Cached AudioListener so the polling loop doesn't pay
-        // FindAnyObjectByType every frame. Re-resolved lazily when null
-        // (covers a listener that's destroyed + recreated mid-session).
+        // Cached active AudioListener so the polling loop doesn't pay a
+        // scene-wide walk every frame. Re-resolved lazily when null (destroyed
+        // or never set) OR when the cached one is no longer active+enabled
+        // (e.g., cinematic camera takes over and the original is disabled).
+        // Matches Unity's own "active listener" semantics — see
+        // FindActiveListener below.
         private AudioListener? _cachedListener;
 
         // Fallback "user volume" used only when no AudioSource was supplied.
@@ -51,14 +55,12 @@ namespace ElevenLabs.WebGL.Bridged
         private bool _destructionWarned;
         private bool _mixerGroupWarned;
         private bool _customCurveWarned;
-        private bool _inverseRolloffWarned;
 
         // Last values pushed to the sink. Used to skip no-op updates so the
         // bridge isn't flooded with redundant setVolume / setPosition calls.
         // float.NaN sentinel ensures the first push always fires.
         private float _lastVolume = float.NaN;
         private Vector3 _lastPosition = new(float.NaN, float.NaN, float.NaN);
-        private Vector3 _lastListenerPosition = new(float.NaN, float.NaN, float.NaN);
         private float _lastSpatialBlend = float.NaN;
         private float _lastMinDistance = float.NaN;
         private float _lastMaxDistance = float.NaN;
@@ -170,43 +172,72 @@ namespace ElevenLabs.WebGL.Bridged
             PushFloat("setPanStereo", _audioSource.panStereo, ref _lastPanStereo);
             PushFloat("setDopplerLevel", _audioSource.dopplerLevel, ref _lastDopplerLevel);
 
-            Vector3 pos = _audioSource.transform.position;
+            Vector3 pos = ComputeWebAudioPosition(_audioSource.transform.position);
             if (pos != _lastPosition)
             {
                 _lastPosition = pos;
                 _sink.Call("setPosition", pos.x, pos.y, pos.z);
             }
 
-            RefreshListener();
-            // Listener may legitimately be null (scene without an AudioListener);
-            // fall back to identity so the panner stays centred on the source.
-            Vector3 listenerPos =
-                _cachedListener != null ? _cachedListener.transform.position : Vector3.zero;
-            if (listenerPos != _lastListenerPosition)
-            {
-                _lastListenerPosition = listenerPos;
-                _sink.Call("setListenerPosition", listenerPos.x, listenerPos.y, listenerPos.z);
-            }
-
             PushRolloffMode(_audioSource.rolloffMode);
             CheckUnsupported(_audioSource);
         }
 
-        private void RefreshListener()
+        // Convert a Unity world-space source position into the listener-local,
+        // Web-Audio-handed coordinate the JS sink's PannerNode expects. Web
+        // Audio's AudioListener stays pinned at the origin facing default
+        // (-Z forward, +Y up), so all of Unity's listener translation +
+        // rotation is folded into the source position here.
+        //
+        // Two conversions in one:
+        //   1. InverseTransformPoint maps the source from world into the
+        //      listener's local frame (+X right, +Y up, +Z forward, Unity LH).
+        //   2. Negating Z flips Unity's left-handed +Z-forward convention to
+        //      Web Audio's right-handed -Z-forward convention. Without this
+        //      flip a source straight ahead of the camera would render as
+        //      behind the player.
+        //
+        // No-listener fallback: world position with Z flipped. Spatialization
+        // will only be correct when the implicit listener is at origin facing
+        // default, but the source stays audible — better than throwing or
+        // silencing playback.
+        private Vector3 ComputeWebAudioPosition(Vector3 sourceWorldPos)
         {
+            RefreshListener();
             if (_cachedListener == null)
-                _cachedListener = UnityEngine.Object.FindAnyObjectByType<AudioListener>();
+            {
+                return new Vector3(sourceWorldPos.x, sourceWorldPos.y, -sourceWorldPos.z);
+            }
+            Vector3 localPos = _cachedListener.transform.InverseTransformPoint(sourceWorldPos);
+            return new Vector3(localPos.x, localPos.y, -localPos.z);
         }
 
-        // Logarithmic and Custom both map to Web Audio's "exponential" model;
-        // Inverse has no analog and falls back to exponential with a warning.
+        // Find the "active" AudioListener, matching Unity's own audio engine:
+        // exactly one enabled + active-in-hierarchy listener is expected per
+        // scene; multiple already trigger Unity's own warning, so we silently
+        // pick the first. Cache invalidates when the listener is destroyed
+        // (Unity overloaded ==) or disabled (a cinematic camera takeover
+        // pattern), so the next poll picks up the swap.
+        private void RefreshListener()
+        {
+            if (_cachedListener != null && _cachedListener.isActiveAndEnabled)
+                return;
+            _cachedListener = UnityEngine
+                .Object.FindObjectsByType<AudioListener>(FindObjectsSortMode.None)
+                .FirstOrDefault(l => l.isActiveAndEnabled);
+        }
+
+        // Linear → JS "linear"; Logarithmic / Custom → JS "exponential"
+        // (Web Audio's closest analog). Custom curves carry their own
+        // AnimationCurve which Web Audio can't represent — one-time warning.
+        // (Unity's AudioRolloffMode enum is just Linear / Logarithmic /
+        // Custom; there's no Inverse variant, so no separate Inverse branch.)
         private void PushRolloffMode(AudioRolloffMode mode)
         {
             if (_rolloffPushed && mode == _lastRolloffMode)
                 return;
             _rolloffPushed = true;
             _lastRolloffMode = mode;
-            // 0 = Linear → JS "linear"; everything else → JS "exponential".
             int code = mode == AudioRolloffMode.Linear ? 0 : 1;
             _sink.Call("setRolloffMode", code);
             if (mode == AudioRolloffMode.Custom && !_customCurveWarned)

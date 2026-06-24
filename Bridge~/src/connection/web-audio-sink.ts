@@ -23,6 +23,13 @@
 // `spatialBlend`: 0 = full mono, 1 = full spatial, anything in between mixes
 // both — matching Unity's AudioSource.spatialBlend semantics on the
 // constrained subset of properties that have Web Audio analogues.
+//
+// Listener model: Web Audio's own AudioListener stays pinned at the origin
+// facing default (-Z forward, +Y up). All of Unity's listener translation +
+// rotation is folded into the source position C#-side via
+// `Transform.InverseTransformPoint` + a Z flip (Unity LH +Z forward → Web
+// Audio RH -Z forward). That keeps the JS surface small and avoids
+// re-publishing the listener orientation every frame.
 
 // AudioWorklet processors must be loaded from a separate JS module — there's
 // no inline-function constructor. We embed the processor source as a string
@@ -78,8 +85,14 @@ export interface WebAudioSink {
   /** Satisfies `attachConnectionToOutput`'s contract. Bytes are 16-bit LE PCM. */
   playAudio(chunk: ArrayBuffer): void;
   setVolume(volume: number): void;
+  /**
+   * Source position in the listener's local frame, Web Audio handedness
+   * (+X right, +Y up, -Z forward). The C# wrapper folds Unity's listener
+   * translation + rotation into this value via
+   * `Transform.InverseTransformPoint` + a Z flip, so Web Audio's own
+   * `AudioListener` stays pinned at the origin facing default.
+   */
   setPosition(x: number, y: number, z: number): void;
-  setListenerPosition(x: number, y: number, z: number): void;
   setSpatialBlend(blend: number): void;
   setMinDistance(distance: number): void;
   setMaxDistance(distance: number): void;
@@ -181,11 +194,6 @@ export async function createWebAudioSink(
       panner.positionX.value = x;
       panner.positionY.value = y;
       panner.positionZ.value = z;
-    },
-    setListenerPosition(x: number, y: number, z: number): void {
-      context.listener.positionX.value = x;
-      context.listener.positionY.value = y;
-      context.listener.positionZ.value = z;
     },
     setSpatialBlend(blend: number): void {
       const b = clamp01(blend);

@@ -302,16 +302,11 @@ describe("setPosition", () => {
   });
 });
 
-describe("setListenerPosition", () => {
-  it("updates the AudioListener position", async () => {
-    const sink = await createWebAudioSink({ sampleRate: 16000 });
-
-    sink.setListenerPosition(10, 20, 30);
-    expect(activeContext.listener.positionX.value).toBe(10);
-    expect(activeContext.listener.positionY.value).toBe(20);
-    expect(activeContext.listener.positionZ.value).toBe(30);
-  });
-});
+// Listener position isn't part of the sink's surface: Web Audio's
+// AudioListener stays pinned at origin facing default, and the C# wrapper
+// folds Unity's listener translation + rotation into the source position
+// via InverseTransformPoint before pushing. See the file header for the
+// full rationale.
 
 describe("setSpatialBlend", () => {
   it("mixes mono and spatial gains across 0, 0.5, 1", async () => {
