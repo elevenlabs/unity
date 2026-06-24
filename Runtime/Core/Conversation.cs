@@ -117,6 +117,18 @@ namespace ElevenLabs.Agents
         /// <summary>Fired on each voice-activity-detection score update.</summary>
         public event Action<VadScoreArgs>? VadScoreUpdated;
 
+        /// <summary>
+        /// Fired when the agent invokes a client tool that hasn't been
+        /// registered via <see cref="RegisterTool{TParams, TResult}(string, Func{TParams, TResult})"/>.
+        /// Mirrors the JS SDK's <c>onUnhandledClientToolCall</c>: while at
+        /// least one subscriber is attached, the SDK suppresses the
+        /// <see cref="ErrorOccurred"/> + automatic <c>client_tool_result</c>
+        /// error response that would otherwise fire and hands the raw call to
+        /// the subscriber to deal with. Detaching all subscribers restores
+        /// the default behaviour.
+        /// </summary>
+        public event Action<ClientToolCallArgs>? UnhandledClientToolCall;
+
         // State ---------------------------------------------------------------
 
         /// <summary>Server-assigned conversation identifier. Empty before <see cref="Connected"/> fires.</summary>
@@ -180,6 +192,17 @@ namespace ElevenLabs.Agents
             _dispatcher.OnPing += HandlePing;
             _dispatcher.OnClientToolCall += HandleClientToolCall;
             _dispatcher.OnAgentToolResponseFullPayload += HandleAgentToolResponseFullPayload;
+
+            // Per the v0.1-parity investigation's "Resolved gap: onDebug
+            // policy", route unknown wire events to UnityEngine.Debug.Log
+            // behind an opt-in flag instead of a public C# event — game code
+            // shouldn't bind to opaque diagnostic payloads. Flag read once at
+            // construction time; toggling on the source record after the
+            // conversation is built has no effect.
+            if (options.EnableDebugLogging)
+            {
+                _dispatcher.OnUnhandled += HandleUnhandledWireEvent;
+            }
         }
 
         // Lifecycle -----------------------------------------------------------
@@ -521,6 +544,18 @@ namespace ElevenLabs.Agents
             var args = evt.ToArgs();
             if (!_toolHandlers.TryGetValue(args.ToolName, out var dispatcher))
             {
+                // Mirrors BaseConversation.handleClientToolCall's else branch:
+                // when at least one subscriber is attached the SDK hands the
+                // raw call over and stops — no ErrorOccurred, no automatic
+                // tool_result is_error=true response. The agent will hang
+                // unless the subscriber arranges its own follow-up, matching
+                // JS-SDK semantics.
+                var unhandled = UnhandledClientToolCall;
+                if (unhandled != null)
+                {
+                    unhandled.Invoke(args);
+                    return;
+                }
                 var message = $"No client tool registered with name '{args.ToolName}'.";
                 RaiseError(message);
                 SendToolErrorIfExpected(args, message, errorType: "tool_not_found");
@@ -580,6 +615,23 @@ namespace ElevenLabs.Agents
                     ErrorType = errorType,
                 }
             );
+        }
+
+        // ConversationOptions.EnableDebugLogging opt-in route. Subscribed in
+        // the constructor; only fires for wire types the dispatcher didn't
+        // recognise (in practice an UnknownIncomingEvent from the converter's
+        // fallthrough arm, but tolerate any future routing oddity rather than
+        // pattern-match against UnknownIncomingEvent exclusively).
+        private void HandleUnhandledWireEvent(IncomingSocketEvent evt)
+        {
+            if (evt is UnknownIncomingEvent unknown)
+            {
+                Debug.Log(
+                    $"[ElevenLabs debug] Unknown wire event type='{unknown.Type ?? "(null)"}': {unknown.RawJson}"
+                );
+                return;
+            }
+            Debug.Log($"[ElevenLabs debug] Unhandled wire event {evt.GetType().Name}");
         }
 
         // Mirrors BaseConversation.handleAgentToolResponseFullPayload's

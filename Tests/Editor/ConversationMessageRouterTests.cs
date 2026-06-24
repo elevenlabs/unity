@@ -792,6 +792,80 @@ namespace ElevenLabs.WebGL.Tests
             );
         }
 
+        // UnhandledClientToolCall (parity row 10) --------------------------
+
+        [Test]
+        public void UnhandledClientToolCall_WithSubscriber_SuppressesErrorAndToolResult()
+        {
+            // Mirrors BaseConversation.handleClientToolCall's else branch:
+            // when onUnhandledClientToolCall is registered the SDK hands the
+            // raw call to the subscriber and returns, without firing onError
+            // or sending a client_tool_result is_error=true response.
+            var conversation = NewConversation(out var connection, out _, out _);
+            ClientToolCallArgs? received = null;
+            conversation.UnhandledClientToolCall += args => received = args;
+            string? errorMessage = null;
+            conversation.ErrorOccurred += msg => errorMessage = msg;
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "missing",
+                    toolCallId: "tc-99",
+                    parameters: new Dictionary<string, dynamic> { ["q"] = "weather" },
+                    eventId: 4
+                )
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreEqual("missing", received!.ToolName);
+            Assert.AreEqual("tc-99", received.ToolCallId);
+            Assert.AreEqual(4, received.EventId);
+            Assert.AreEqual("weather", (string)received.Parameters["q"]);
+            Assert.AreEqual(0, connection.Sent.Count);
+            Assert.IsNull(errorMessage);
+        }
+
+        [Test]
+        public void UnhandledClientToolCall_AfterAllSubscribersRemoved_RestoresDefault()
+        {
+            // Detaching every subscriber restores the legacy tool_not_found
+            // path — the suppression check is `event != null`, not a one-shot
+            // opt-in.
+            var conversation = NewConversation(out var connection, out _, out _);
+            Action<ClientToolCallArgs> handler = _ => { };
+            conversation.UnhandledClientToolCall += handler;
+            conversation.UnhandledClientToolCall -= handler;
+
+            connection.FireMessage(MakeToolCall(toolName: "missing"));
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsTrue(result.IsError);
+            Assert.AreEqual("tool_not_found", result.ErrorType);
+        }
+
+        [Test]
+        public void UnhandledClientToolCall_KnownTool_DoesNotFire()
+        {
+            // A registered tool shouldn't trip the unhandled fallback path.
+            var conversation = NewConversation(out var connection, out _, out _);
+            var unhandledCount = 0;
+            conversation.UnhandledClientToolCall += _ => unhandledCount++;
+            conversation.RegisterTool<GreetParams, string>("greet", p => $"Hi {p.Name}");
+
+            connection.FireMessage(
+                MakeToolCall(
+                    toolName: "greet",
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "Kræn" }
+                )
+            );
+
+            Assert.AreEqual(0, unhandledCount);
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.IsFalse(result.IsError);
+            Assert.AreEqual("Hi Kræn", result.Result);
+        }
+
         // end_call shortcut (agent_tool_response_full_payload) -------------
 
         [Test]
@@ -1539,6 +1613,65 @@ namespace ElevenLabs.WebGL.Tests
 
             Assert.IsTrue(invoked);
             Assert.AreEqual(0, connection.Sent.Count);
+        }
+
+        // EnableDebugLogging — unknown-wire-event arm of JS onDebug (parity row 25)
+
+        private static Conversation NewConversationWithOptions(
+            ConversationOptions options,
+            out MockConnection connection
+        )
+        {
+            connection = new MockConnection();
+            return new Conversation(
+                connection,
+                new MockInputController(),
+                new MockOutputController(),
+                new MockFileUploader(),
+                options
+            );
+        }
+
+        [Test]
+        public void EnableDebugLogging_True_LogsUnknownIncomingEventWithTypeAndPayload()
+        {
+            var conversation = NewConversationWithOptions(
+                new ConversationOptions { EnableDebugLogging = true },
+                out var connection
+            );
+            LogAssert.Expect(
+                LogType.Log,
+                "[ElevenLabs debug] Unknown wire event type='future_event': {\"type\":\"future_event\"}"
+            );
+
+            connection.FireMessage(
+                new UnknownIncomingEvent("future_event", "{\"type\":\"future_event\"}")
+            );
+        }
+
+        [Test]
+        public void EnableDebugLogging_True_NullTypeRendersAsPlaceholder()
+        {
+            var conversation = NewConversationWithOptions(
+                new ConversationOptions { EnableDebugLogging = true },
+                out var connection
+            );
+            LogAssert.Expect(
+                LogType.Log,
+                "[ElevenLabs debug] Unknown wire event type='(null)': {}"
+            );
+
+            connection.FireMessage(new UnknownIncomingEvent(null, "{}"));
+        }
+
+        [Test]
+        public void EnableDebugLogging_False_Default_DoesNotLog()
+        {
+            // No LogAssert.Expect — if any debug log appears, LogAssert.NoUnexpectedReceived
+            // (Unity's default at test end) will fail the test.
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            connection.FireMessage(new UnknownIncomingEvent("future_event", "{}"));
         }
     }
 }

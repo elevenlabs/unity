@@ -90,5 +90,22 @@ namespace ElevenLabs.Agents
         /// dictionary is omitted from the handshake.
         /// </remarks>
         public IReadOnlyDictionary<string, object>? CustomLlmExtraBody { get; init; }
+
+        /// <summary>
+        /// When <c>true</c>, the SDK forwards unknown wire events that arrive
+        /// ahead of an SDK refresh to <see cref="UnityEngine.Debug.Log"/> with
+        /// an <c>[ElevenLabs debug]</c> prefix. Mirrors the unknown-wire-event
+        /// arm of the JS SDK's <c>onDebug</c> callback; defaults to <c>false</c>
+        /// so production builds stay quiet.
+        /// </summary>
+        /// <remarks>
+        /// The JS SDK exposes <c>onDebug</c> as a callback because the wire
+        /// shape of these payloads is opaque diagnostic JSON; the Unity SDK
+        /// routes them through Unity's existing log pipeline instead so game
+        /// code doesn't bind to an unstable surface. Read by
+        /// <see cref="Conversation"/> at construction time — toggling after
+        /// <see cref="Conversation.StartSessionAsync"/> has no effect.
+        /// </remarks>
+        public bool EnableDebugLogging { get; init; }
     }
 }
