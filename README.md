@@ -13,6 +13,10 @@ The ElevenAgents SDK for Unity.
 
 See [COMPATIBILITY.md](./COMPATIBILITY.md) for the rationale behind each requirement and the failure modes you'll hit if a setting is wrong.
 
+## Samples
+
+The package ships an importable **QuickStart** sample — a single scene with a MonoBehaviour that opens a session, wires the lifecycle and transcript events, and tears down on scene unload. Import via the Unity Package Manager UI (ElevenAgents → Samples → QuickStart → Import), open the imported `QuickStart.unity` scene, and create a `QuickStartConfig` asset under any `Resources/` folder with your agent id. Full setup in [`Samples/QuickStart/README.md`](./Samples/QuickStart/README.md).
+
 ## Error types
 
 The SDK keeps the user-facing exception surface intentionally small. Use standard `try` / `catch` for awaitable methods that can fail, and subscribe to `Conversation.ErrorOccurred` for runtime errors that surface during an open session.

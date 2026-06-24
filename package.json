@@ -27,19 +27,21 @@
     "Tests.meta",
     "Plugins",
     "Plugins.meta",
-    "Samples~",
+    "Samples/QuickStart",
+    "Samples/QuickStart.meta",
     "COMPATIBILITY.md",
     "CONTRIBUTING.md"
   ],
   "samples": [
     {
-      "displayName": "Bridge Smoke Test",
-      "description": "Exercises every bridge primitive surface end-to-end in a WebGL build.",
-      "path": "Samples~/BridgeSmokeTest"
+      "displayName": "QuickStart",
+      "description": "Minimal scene showing how to open a Conversation session and render the live transcript.",
+      "path": "Samples/QuickStart"
     }
   ],
   "dependencies": {
     "com.unity.modules.audio": "1.0.0",
+    "com.unity.modules.imgui": "1.0.0",
     "com.unity.modules.unitywebrequest": "1.0.0",
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   }

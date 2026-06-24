@@ -1,0 +1,16 @@
+{
+    "name": "ElevenLabs.Agents.Samples.QuickStart",
+    "rootNamespace": "ElevenLabs.Agents.Samples.QuickStart",
+    "references": [
+        "ElevenLabs.Agents.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
