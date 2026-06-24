@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using ElevenLabs.Agents;
 using ElevenLabs.Protocol;
 using ElevenLabs.WebGL;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -356,6 +357,55 @@ namespace ElevenLabs.WebGL.Tests
             );
 
             Assert.AreEqual(0.42, received!.VadScore, 1e-6);
+        }
+
+        [Test]
+        public void Dispatch_McpToolCall_FiresMCPToolCallReceivedWithRawPayload()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            McpToolCallArgs? received = null;
+            conversation.MCPToolCallReceived += args => received = args;
+
+            // Payload shape varies by `state`; the args record exposes it as the
+            // raw JToken the server emitted, so this pins the forwarding (not
+            // the schema).
+            var payload = JObject.Parse(
+                "{\"service_id\":\"svc-1\",\"tool_call_id\":\"call-9\",\"tool_name\":\"search\","
+                    + "\"parameters\":{\"q\":\"hi\"},\"state\":\"awaiting_approval\","
+                    + "\"approval_timeout_secs\":30}"
+            );
+            connection.FireMessage(new McpToolCall { McpToolCallData = payload });
+
+            Assert.IsNotNull(received);
+            Assert.AreSame(payload, received!.McpToolCallData);
+        }
+
+        [Test]
+        public void Dispatch_McpConnectionStatus_FiresMCPConnectionStatusChanged()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            McpConnectionStatusArgs? received = null;
+            conversation.MCPConnectionStatusChanged += args => received = args;
+
+            var integration = new McpConnectionStatusIntegrationsItem
+            {
+                IntegrationId = "int-1",
+                IntegrationType = "linear",
+                IsConnected = true,
+                ToolCount = 4,
+            };
+            connection.FireMessage(
+                new McpConnectionStatus
+                {
+                    McpConnectionStatusData = new McpConnectionStatusEvent
+                    {
+                        Integrations = new[] { integration },
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            CollectionAssert.AreEqual(new[] { integration }, received!.Integrations);
         }
 
         // Audio: state tracking + interrupt gating ----------------------------

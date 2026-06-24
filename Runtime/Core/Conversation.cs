@@ -129,6 +129,24 @@ namespace ElevenLabs.Agents
         /// </summary>
         public event Action<ClientToolCallArgs>? UnhandledClientToolCall;
 
+        /// <summary>
+        /// Fired for each MCP (Model Context Protocol) tool call state update —
+        /// <c>loading</c>, <c>awaiting_approval</c>, <c>success</c>, or
+        /// <c>failure</c>. Mirrors the JS SDK's <c>onMCPToolCall</c>; the
+        /// payload's shape varies by <c>state</c> so it's surfaced as the raw
+        /// <see cref="JToken"/> the server emitted under <c>mcp_tool_call</c>
+        /// rather than a typed C# union.
+        /// </summary>
+        public event Action<McpToolCallArgs>? MCPToolCallReceived;
+
+        /// <summary>
+        /// Fired when the agent's MCP integration connection states change.
+        /// Mirrors the JS SDK's <c>onMCPConnectionStatus</c>; payload lists each
+        /// configured integration's <c>is_connected</c> flag plus optional
+        /// <c>tool_count</c>.
+        /// </summary>
+        public event Action<McpConnectionStatusArgs>? MCPConnectionStatusChanged;
+
         // State ---------------------------------------------------------------
 
         /// <summary>Server-assigned conversation identifier. Empty before <see cref="Connected"/> fires.</summary>
@@ -192,6 +210,8 @@ namespace ElevenLabs.Agents
             _dispatcher.OnPing += HandlePing;
             _dispatcher.OnClientToolCall += HandleClientToolCall;
             _dispatcher.OnAgentToolResponseFullPayload += HandleAgentToolResponseFullPayload;
+            _dispatcher.OnMcpToolCall += HandleMcpToolCall;
+            _dispatcher.OnMcpConnectionStatus += HandleMcpConnectionStatus;
 
             // Per the v0.1-parity investigation's "Resolved gap: onDebug
             // policy", route unknown wire events to UnityEngine.Debug.Log
@@ -633,6 +653,12 @@ namespace ElevenLabs.Agents
             }
             Debug.Log($"[ElevenLabs debug] Unhandled wire event {evt.GetType().Name}");
         }
+
+        private void HandleMcpToolCall(McpToolCall evt) =>
+            MCPToolCallReceived?.Invoke(evt.ToArgs());
+
+        private void HandleMcpConnectionStatus(McpConnectionStatus evt) =>
+            MCPConnectionStatusChanged?.Invoke(evt.ToArgs());
 
         // Mirrors BaseConversation.handleAgentToolResponseFullPayload's
         // end_call shortcut: if the agent invoked the end_call tool, drive
