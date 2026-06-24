@@ -92,7 +92,10 @@ namespace ElevenLabs.Native
             UnityAudioSourceOutput output;
             try
             {
-                output = await UnityAudioSourceOutput.CreateAsync(connection.OutputFormat);
+                output = await UnityAudioSourceOutput.CreateAsync(
+                    connection.OutputFormat,
+                    audioSource: options.OutputAudioSource
+                );
             }
             catch
             {

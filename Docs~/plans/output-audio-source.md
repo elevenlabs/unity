@@ -1,6 +1,6 @@
 # `ConversationOptions.OutputAudioSource` — bring-your-own AudioSource
 
-**Status:** Brainstorm, 2026-06-24
+**Status:** Approved, 2026-06-24
 **Driver:** The Getting-Started `TalkingBox` demo plays its voice with `spatialBlend = 0` — omnipresent (2D) playback regardless of where the box sits in the scene. A listener walking past a row of talking boxes hears every active one at full volume from nowhere in particular. The same gap will hit every consumer who wants positional voice, AudioMixer routing, or volume-curve control: the SDK owns the `AudioSource` and doesn't let go.
 **Assumes:** Native transport (`#9d` in [v0.1-parity.md](./v0.1-parity.md)) is shipped; `UnityAudioSourceOutput` is the canonical native output controller; the bridge primitives in `Bridge~/src/connection/` are stable.
 **Consumed by:** the `agentAudioSource` Inspector field in [`agent-component.md`](./agent-component.md) §5 — but this primitive stands on its own; low-level `Conversation.StartSessionAsync` users get the same benefit without adopting the component.
@@ -26,7 +26,7 @@ The earlier draft of this plan treated WebGL as "field silently ignored, deferre
 
 Two facts shape the rewrite:
 
-1. **The `@elevenlabs/client` SDK already accepts custom output sinks.** [`attachConnectionToOutput`](../../Bridge~/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.d.ts) only requires `{ playAudio(chunk: ArrayBuffer): void }` — no upstream changes are needed to intercept PCM. The "needs upstream PCM intercept hook" claim in [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) and [`initial-rfc.md`](./initial-rfc.md) §92 is stale; both should be patched as part of executing this plan.
+1. **The `@elevenlabs/client` SDK already accepts custom output sinks.** [`attachConnectionToOutput`](../../Bridge~/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.d.ts) only requires `{ playAudio(chunk: ArrayBuffer): void }` — no upstream changes are needed to intercept PCM. The "needs upstream PCM intercept hook" claim in [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) is stale and should be patched as part of executing this plan. (`initial-rfc.md` is a historical RFC and is not edited.)
 2. **`AudioClip.PCMReaderCallback` is not supported on WebGL.** [Unity's WebGL audio docs](https://docs.unity3d.com/Manual/webgl-audio.html) state that `AudioClip.Create` only works with `stream: false`; the "scriptable audio pipeline is not supported." This rules out the obvious-looking simplification of reusing `UnityAudioSourceOutput` on WebGL.
 
 The path therefore: keep `UnityAudioSourceOutput` for native, build a Web Audio-based emulation layer on WebGL that exposes the *same* `ConversationOptions.OutputAudioSource` API. Users get a coherent cross-platform contract; FMOD-specific concepts (mixer groups, reverb zones, custom rolloff curves) degrade gracefully on WebGL with a one-time warning.
@@ -239,7 +239,8 @@ Extend with an optional second variant that supplies a pre-built `AudioSource` a
 - A note in `BridgedWebRTCConnection.GetCoupledOutput()` that `OutputAudioSource` is intentionally ignored on the WebRTC arm until v0.3.
 - One-time warnings for FMOD-only properties on the WebGL path.
 - Test coverage across native Edit Mode, Bridge~ Vitest, C# Edit Mode, and `IntegrationTests~` browser harness.
-- Patch [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) and [`initial-rfc.md`](./initial-rfc.md) §92 to remove the stale "needs upstream PCM intercept hook" framing — the upstream surface always supported a custom `playAudio` sink.
+- Patch [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) to remove the stale "needs upstream PCM intercept hook" framing — the upstream surface always supported a custom `playAudio` sink. (`initial-rfc.md` left as-is — historical RFC.)
+- Document the WebGL `AudioSource` property fidelity gaps in [`COMPATIBILITY.md`](../../COMPATIBILITY.md) under a new "WebGL audio output limitations" subsection: which FMOD-only properties are silently ignored vs. warn-once, and the Inverse-rolloff → Logarithmic fallback. Cross-link from the WebGL output controller's XML docs and from `ConversationOptions.OutputAudioSource`'s `<remarks>`.
 
 ### Out of scope (deferred)
 
@@ -257,4 +258,4 @@ Order matters; each step is independently committable.
 3. **C# `WebAudioBackedOutput`** — wraps the sink, holds the `AudioSource`, owns the property-polling loop. C# Edit Mode tests using a mock `JsObject`.
 4. **`BridgedSession` integration** — swap `createMediaDeviceOutput` for `createWebAudioSink`; delete the now-unused factory registration; update any tests that referenced the old factory.
 5. **Integration smoke** — extend `Samples/ConversationSmokeTest/` and `IntegrationTests~/` to assert spatial properties round-trip.
-6. **Docs fix-up** — patch `ARCHITECTURE.md` and `initial-rfc.md`.
+6. **Docs fix-up** — patch `ARCHITECTURE.md` audio-routing section + add a "WebGL audio output limitations" subsection to `COMPATIBILITY.md` mirroring the fidelity matrix above.

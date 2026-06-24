@@ -1,9 +1,11 @@
 #nullable enable
 
 using System;
+using System.Threading.Tasks;
 using ElevenLabs.Agents;
 using ElevenLabs.Native;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace ElevenLabs.Native.Tests
 {
@@ -399,6 +401,181 @@ namespace ElevenLabs.Native.Tests
                 buffer[i] = 0xAB;
             output.GetByteFrequencyData(buffer);
             CollectionAssert.AreEqual(new byte[buffer.Length], buffer);
+        }
+
+        // Supplied OutputAudioSource --------------------------------------
+
+        [Test]
+        public async Task CreateAsync_CreatesOwnHost_WhenNoAudioSourceSupplied()
+        {
+            // Regression-lock today's owned-host path: no AudioSource supplied
+            // → controller spins up a hidden host GameObject + AudioSource.
+            // Verified indirectly via GetVolume's null-source short-circuit
+            // (returns 0 only when _audioSource is null) — non-zero proves a
+            // source was constructed.
+            var output = await UnityAudioSourceOutput.CreateAsync(new FormatConfig("pcm", 16_000));
+            try
+            {
+                AudioSource? created = FindHiddenHostAudioSource();
+                Assert.IsNotNull(created, "Owned-host path should create an AudioSource.");
+                Assert.IsTrue(created!.loop, "Owned host streaming clip needs loop=true.");
+                Assert.IsNotNull(
+                    created.clip,
+                    "Owned host source must have the streaming clip bound."
+                );
+            }
+            finally
+            {
+                await output.Close();
+            }
+        }
+
+        [Test]
+        public async Task CreateAsync_BindsToSuppliedAudioSource_WhenProvided()
+        {
+            var go = new GameObject("test-supplied-source");
+            try
+            {
+                AudioSource supplied = go.AddComponent<AudioSource>();
+                // Caller-owned settings the SDK must preserve.
+                supplied.spatialBlend = 1f;
+                supplied.minDistance = 2f;
+                supplied.maxDistance = 20f;
+                supplied.rolloffMode = AudioRolloffMode.Linear;
+                supplied.panStereo = -0.5f;
+                Transform originalParent = go.transform.parent;
+
+                var output = await UnityAudioSourceOutput.CreateAsync(
+                    new FormatConfig("pcm", 16_000),
+                    audioSource: supplied
+                );
+                try
+                {
+                    // SDK-owned overwrites took effect on the supplied source.
+                    Assert.IsNotNull(
+                        supplied.clip,
+                        "Supplied source should be bound to the streaming clip."
+                    );
+                    Assert.IsTrue(
+                        supplied.loop,
+                        "Supplied source must be looping for PCMReaderCallback."
+                    );
+                    Assert.AreEqual(
+                        1f,
+                        supplied.volume,
+                        1e-6,
+                        "Default user volume should be applied."
+                    );
+
+                    // User-owned settings preserved verbatim.
+                    Assert.AreEqual(1f, supplied.spatialBlend, 1e-6);
+                    Assert.AreEqual(2f, supplied.minDistance, 1e-6);
+                    Assert.AreEqual(20f, supplied.maxDistance, 1e-6);
+                    Assert.AreEqual(AudioRolloffMode.Linear, supplied.rolloffMode);
+                    Assert.AreEqual(-0.5f, supplied.panStereo, 1e-6);
+                    Assert.AreSame(
+                        originalParent,
+                        go.transform.parent,
+                        "SDK must not reparent the supplied source."
+                    );
+                }
+                finally
+                {
+                    await output.Close();
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public async Task CreateAsync_RestoresVolumeAndLoop_OnClose_WhenSourceSupplied()
+        {
+            var go = new GameObject("test-restore-source");
+            try
+            {
+                AudioSource supplied = go.AddComponent<AudioSource>();
+                // Non-default snapshot the SDK must capture + restore.
+                supplied.volume = 0.42f;
+                supplied.loop = false;
+                AudioClip? originalClip = supplied.clip; // null is fine — captured + restored.
+
+                var output = await UnityAudioSourceOutput.CreateAsync(
+                    new FormatConfig("pcm", 16_000),
+                    audioSource: supplied
+                );
+                // Mid-session: SDK overwrote everything per the binding contract.
+                Assert.AreEqual(1f, supplied.volume, 1e-6);
+                Assert.IsTrue(supplied.loop);
+                Assert.IsNotNull(supplied.clip);
+
+                await output.Close();
+
+                // Post-close: original caller-visible state restored symmetrically.
+                Assert.AreEqual(0.42f, supplied.volume, 1e-6, "volume must be restored on Close.");
+                Assert.IsFalse(supplied.loop, "loop must be restored on Close.");
+                Assert.AreSame(originalClip, supplied.clip, "clip must be restored on Close.");
+                Assert.IsNotNull(supplied, "AudioSource itself must not be destroyed.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public async Task PushAudio_LogsAndNoOps_WhenSuppliedSourceDestroyedMidSession()
+        {
+            var go = new GameObject("test-destroy-source");
+            AudioSource supplied = go.AddComponent<AudioSource>();
+            var output = await UnityAudioSourceOutput.CreateAsync(
+                new FormatConfig("pcm", 16_000),
+                audioSource: supplied
+            );
+            try
+            {
+                // First push: source alive → samples queued normally.
+                output.PushAudio(LittleEndian(1, 2, 3));
+                Assert.AreEqual(3, output.Test_AvailableSamples);
+
+                // Destroy the supplied source out from under us.
+                UnityEngine.Object.DestroyImmediate(go);
+
+                UnityEngine.TestTools.LogAssert.Expect(
+                    UnityEngine.LogType.Warning,
+                    new System.Text.RegularExpressions.Regex(
+                        ".*OutputAudioSource was destroyed mid-session.*"
+                    )
+                );
+
+                // Second push: gate fires, no-op, no exception.
+                Assert.DoesNotThrow(() => output.PushAudio(LittleEndian(4, 5, 6)));
+
+                // Third push: warning must not fire again (warn-once semantics).
+                Assert.DoesNotThrow(() => output.PushAudio(LittleEndian(7, 8, 9)));
+            }
+            finally
+            {
+                await output.Close();
+            }
+        }
+
+        // Reach into the scene to find the hidden owned-host AudioSource. The
+        // owned-host path stamps a deterministic GameObject name so tests
+        // don't need a back-door inspector for production-private state.
+        // FindObjectsByType (even with FindObjectsInactive.Include) skips
+        // HideAndDontSave objects; Resources.FindObjectsOfTypeAll returns
+        // every loaded object regardless of hide flags.
+        private static AudioSource? FindHiddenHostAudioSource()
+        {
+            foreach (AudioSource src in Resources.FindObjectsOfTypeAll<AudioSource>())
+            {
+                if (src.gameObject.name == "ElevenLabs.UnityAudioSourceOutput")
+                    return src;
+            }
+            return null;
         }
 
         // Helpers ----------------------------------------------------------

@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using ElevenLabs.Protocol;
+using UnityEngine;
 
 namespace ElevenLabs.Agents
 {
@@ -32,6 +33,35 @@ namespace ElevenLabs.Agents
 
         /// <summary>Initial speaker / sink device selection. <c>null</c> picks the platform default.</summary>
         public OutputDeviceConfig? Output { get; init; }
+
+        /// <summary>
+        /// Optional <see cref="AudioSource"/> to play agent audio through.
+        /// When set, the platform output controller binds to this source instead
+        /// of creating its own hidden host GameObject — letting the caller
+        /// control spatialisation, mixer routing, rolloff curves, and lifetime.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Honored on native (WebSocket transport). WebGL support lands in a
+        /// follow-up step of <c>Docs~/plans/output-audio-source.md</c> via a
+        /// Web Audio emulation layer (WebSocket transport only — WebRTC's audio
+        /// path goes through LiveKit and ignores the field until the v0.3
+        /// <c>WebRTCAudioAdapter</c> lands).
+        /// </para>
+        /// <para>
+        /// SDK-owned overwrites on the supplied source: <c>clip</c>, <c>loop</c>,
+        /// and <c>volume</c> are captured at session start and restored on
+        /// <see cref="Conversation.EndSessionAsync"/>. Everything else
+        /// (<c>spatialBlend</c>, <c>outputAudioMixerGroup</c>, rolloff curves,
+        /// transform position) is preserved untouched.
+        /// </para>
+        /// <para>
+        /// If the supplied source is destroyed mid-session (scene unload,
+        /// prefab swap), the SDK logs a single warning and suppresses further
+        /// playback for the rest of the session; the connection stays open.
+        /// </para>
+        /// </remarks>
+        public AudioSource? OutputAudioSource { get; init; }
 
         /// <summary>
         /// Per-session variables substituted into the agent's templated system

@@ -74,6 +74,24 @@ namespace ElevenLabs.Native
         private AudioClip? _outputClip;
         private int _disposed;
 
+        // True when _audioSource was supplied via ConversationOptions.OutputAudioSource
+        // rather than created on a hidden host. Drives Close() behaviour
+        // (restore vs destroy) and the mid-session destruction warning.
+        private bool _suppliedSource;
+
+        // Pre-session snapshot of SDK-owned overwrites on a supplied source,
+        // restored on Close. Captured at StartAudioSource time so a session
+        // that's torn down before any audio plays still rolls cleanly back.
+        private float _savedVolume;
+        private bool _savedLoop;
+        private AudioClip? _savedClip;
+
+        // Latches once the supplied source is observed as null (destroyed) by
+        // PushAudio / Interrupt so the warning fires exactly once per session.
+        // Doesn't apply to the owned-host path: HideAndDontSave + DontDestroyOnLoad
+        // means external code can't destroy it.
+        private bool _destructionWarned;
+
         // Exposed for tests — the launcher takes the factory route which
         // creates the AudioSource + AudioClip; unit tests bypass both by
         // constructing the controller directly to exercise the decode +
@@ -106,26 +124,29 @@ namespace ElevenLabs.Native
         /// returned instance is ready to accept <see cref="PushAudio(byte[])"/>
         /// calls immediately.
         /// </summary>
+        /// <param name="format">Negotiated agent-output format.</param>
+        /// <param name="device">Optional output device override (logged + ignored).</param>
+        /// <param name="audioSource">
+        /// Optional user-supplied <see cref="AudioSource"/> to play through.
+        /// When non-null, the controller binds to it instead of creating a
+        /// hidden host — preserving spatialisation, mixer routing, and
+        /// transform parenting. Pre-session <c>volume</c>, <c>loop</c>, and
+        /// <c>clip</c> are captured and restored on <see cref="Close"/>.
+        /// </param>
         internal static async Awaitable<UnityAudioSourceOutput> CreateAsync(
             FormatConfig format,
-            OutputDeviceConfig? device = null
+            OutputDeviceConfig? device = null,
+            AudioSource? audioSource = null
         )
         {
             await Awaitable.MainThreadAsync();
             var output = new UnityAudioSourceOutput(format);
-            output.StartAudioSource(device);
+            output.StartAudioSource(device, audioSource);
             return output;
         }
 
-        private void StartAudioSource(OutputDeviceConfig? device)
+        private void StartAudioSource(OutputDeviceConfig? device, AudioSource? suppliedSource)
         {
-            _hostObject = new GameObject("ElevenLabs.UnityAudioSourceOutput")
-            {
-                hideFlags = HideFlags.HideAndDontSave,
-            };
-            if (Application.isPlaying)
-                UnityEngine.Object.DontDestroyOnLoad(_hostObject);
-            _audioSource = _hostObject.AddComponent<AudioSource>();
             // AudioClip length only governs the looping cadence (Unity drives
             // PCMReaderCallback in chunks aligned to its DSP buffer, not the
             // clip length). 100 ms is a safe lower bound that keeps the clip
@@ -139,7 +160,33 @@ namespace ElevenLabs.Native
                 stream: true,
                 pcmreadercallback: PCMReaderCallback
             );
+
+            if (suppliedSource != null)
+            {
+                _suppliedSource = true;
+                _audioSource = suppliedSource;
+                // Capture every SDK-owned overwrite so Close can put the
+                // source back exactly the way the caller handed it over.
+                _savedVolume = suppliedSource.volume;
+                _savedLoop = suppliedSource.loop;
+                _savedClip = suppliedSource.clip;
+            }
+            else
+            {
+                _hostObject = new GameObject("ElevenLabs.UnityAudioSourceOutput")
+                {
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+                if (Application.isPlaying)
+                    UnityEngine.Object.DontDestroyOnLoad(_hostObject);
+                _audioSource = _hostObject.AddComponent<AudioSource>();
+            }
+
             _audioSource.clip = _outputClip;
+            // loop = true is required by PCMReaderCallback semantics; the ring
+            // is what stops, not the clip. Even on a supplied source we have
+            // to override the caller's choice — there's no way to keep
+            // streaming PCM through a non-looping clip.
             _audioSource.loop = true;
             _audioSource.volume = _userVolume;
             _audioSource.Play();
@@ -155,9 +202,36 @@ namespace ElevenLabs.Native
             }
         }
 
+        // True the first time we observe a supplied source as destroyed mid-session.
+        // Logs a single warning, then suppresses further audio-related side effects
+        // for the rest of the session. Uses Unity's overloaded == null, which
+        // returns true for destroyed UnityEngine.Object references.
+        private bool SuppliedSourceLost()
+        {
+            if (!_suppliedSource || _audioSource != null)
+                return false;
+            if (_disposed != 0)
+                return true; // Post-Close: silently no-op (expected).
+            if (!_destructionWarned)
+            {
+                _destructionWarned = true;
+                Debug.LogWarning(
+                    "[ElevenLabs] OutputAudioSource was destroyed mid-session; "
+                        + "audio output disabled for the remainder of the session."
+                );
+            }
+            return true;
+        }
+
         public void PushAudio(byte[] pcm)
         {
             if (pcm == null || pcm.Length < 2)
+                return;
+            // Surface mid-session destruction of a supplied source through a
+            // one-time warning; subsequent pushes silently drain into the ring
+            // (where they'll cycle through overrun without ever reaching the
+            // audio thread, since there's no AudioSource left to drive it).
+            if (SuppliedSourceLost())
                 return;
             int samples = pcm.Length / 2;
             // New agent audio arrives → cancel any in-flight interrupt fade
@@ -240,6 +314,10 @@ namespace ElevenLabs.Native
 
         public void Interrupt(int? resetDurationMs = null)
         {
+            // Same warn-once gate as PushAudio so a destroyed supplied source
+            // surfaces on whichever entry point fires first.
+            if (SuppliedSourceLost())
+                return;
             int duration = resetDurationMs ?? DefaultInterruptDurationMs;
             CancelFade();
             if (_audioSource == null || duration <= 0 || !Application.isPlaying)
@@ -423,6 +501,24 @@ namespace ElevenLabs.Native
                 {
                     Debug.LogException(ex);
                 }
+                if (_suppliedSource)
+                {
+                    // Restore every SDK-owned overwrite (volume, loop, clip)
+                    // symmetrically so a subsequent session — or non-agent use
+                    // of the same source — starts from the caller's original
+                    // configuration. The AudioSource and its GameObject are
+                    // left intact for the user to reuse.
+                    try
+                    {
+                        _audioSource.clip = _savedClip;
+                        _audioSource.loop = _savedLoop;
+                        _audioSource.volume = _savedVolume;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogException(ex);
+                    }
+                }
             }
             if (_outputClip != null)
             {
@@ -434,6 +530,7 @@ namespace ElevenLabs.Native
                 DestroyObject(_hostObject);
                 _hostObject = null;
             }
+            _savedClip = null;
             _audioSource = null;
         }
 
