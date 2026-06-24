@@ -117,7 +117,7 @@ One row per JS-SDK callback (`kind: callback`) or method (`kind: method`).
 |---|---|---|---|---|---|---|---|
 | 1 | callback | `onConnect` | `BaseConversation.markConnected` → `updateStatus("connected")` (and the bridged session's explicit `RaiseConnected` after the handshake) | `derived` | `event Action<string>? Connected` | ✅ shipped | none |
 | 2 | callback | `onDisconnect` | `BaseConversation.endSessionWithDetails`, fired from transport `disconnect()` or user `endSession()` | `derived` | `event Action<DisconnectionDetails>? Disconnected` | ✅ shipped | none |
-| 3 | callback | `onError` | `BaseConversation.onError`; called by client-tool dispatch, by `handleErrorEvent` (server `error` frame), and by `max_duration_exceeded` end-of-session shortcut | `hybrid` | `event Action<string>? ErrorOccurred` (transport / client-tool only — see [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)) | Keep `event Action<string>? ErrorOccurred` for the transport / client-tool paths; widen to `event Action<ErrorArgs>? ErrorOccurred` once we surface the wire frame (per [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)). | ✅ Unblocked by xi#38788 (now `ClientError` DTO; spec names it `client_error`, JS still uses `error` — confirm which the server emits) |
+| 3 | callback | `onError` | `BaseConversation.onError`; called by client-tool dispatch, by `handleErrorEvent` (server `error` frame), and by `max_duration_exceeded` end-of-session shortcut | `hybrid` | `event Action<string>? ErrorOccurred` (transport / client-tool only — see [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)) | Keep `event Action<string>? ErrorOccurred` for the transport / client-tool paths; widen to `event Action<ErrorArgs>? ErrorOccurred` once the wire frame stabilises (per [Resolved gap: error type hierarchy](#resolved-gap-error-type-hierarchy)). | xi#39128 — vendored `ClientError` (discriminator `client_error`, inner fields `code` + `error_name` + `message`) doesn't match deployed shape (JS SDK + `@elevenlabs/types@0.15.0` describe an `error` frame with `error_type` / `reason` / `debug_message` / `details`); blocked on spec resolution + re-vendor |
 | 4 | callback | `onMessage` (user) | `BaseConversation.handleUserTranscript` → `onMessage({ role: "user", ... })` | `wire-existing` | `event Action<UserTranscriptArgs>? UserTranscriptReceived` | ✅ shipped (kept C#-idiomatic `UserTranscriptReceived` + `AgentResponded` split rather than mirroring JS's combined `onMessage`) | none |
 | 5 | callback | `onMessage` (agent) | `BaseConversation.handleAgentResponse` → `onMessage({ role: "agent", ... })` | `wire-existing` | `event Action<AgentResponseArgs>? AgentResponded` | ✅ shipped | none |
 | 6 | callback | `onAudio` | `BaseConversation.handleAudio` (no-op in base; `WebSocketConnection.handleMessage` and `WebRTCConnection.setupAudioCapture` emit the actual `audio` frames) | `wire-existing` | `event Action<AudioResponseArgs>? AudioReceived` | ✅ shipped | none |
@@ -210,7 +210,7 @@ the right WebRTC handshake payload. No new public surface required.
 (transport) + [`ClientToolException`](../../Runtime/Core/ClientTools.cs)
 (user-code) as the only public exception types. Server-side `error`
 frames raise `ErrorOccurred` with a structured args record (next
-paragraph) once the upstream spec PR lands.
+paragraph) once the upstream spec PR (xi#39128) lands and re-vendors.
 
 **Why**: the JS SDK's `errors.ts` defines four classes —
 `ConversationError`, `SessionConnectionError`,
@@ -353,10 +353,9 @@ pass; the remaining four still need their own upstream PRs.
 
 #11c (events)
   ── ready (post-#38788):
-  ├─ ErrorOccurred widening to ErrorArgs            ── from `ClientError` DTO
   ├─ AgentToolResponded (unifies both variants)     ── from `AgentToolResponse` + existing `AgentToolResponseFullPayload`
-  ├─ MCPToolCallReceived                            ── from `McpToolCall`
-  ├─ MCPConnectionStatusChanged                     ── from `McpConnectionStatus`
+  ├─ MCPToolCallReceived                            ✅ shipped
+  ├─ MCPConnectionStatusChanged                     ✅ shipped
   ├─ AgentToolRequested                             ── from `AgentToolRequest`
   ├─ AgentChatResponsePartReceived                  ── from `AgentChatResponsePart`
   └─ GuardrailTriggered                             ── from `GuardrailTriggered`
@@ -364,7 +363,8 @@ pass; the remaining four still need their own upstream PRs.
   ── still upstream-blocked (xi issues filed):
   ├─ AsrInitiationMetadataReceived                  ── xi#39099
   ├─ AgentTyping                                    ── xi#39100
-  └─ ExternalAgentConnected                         ── xi#39101
+  ├─ ExternalAgentConnected                         ── xi#39101
+  └─ ErrorOccurred widening to ErrorArgs            ── xi#39128 (vendored `ClientError` shape diverges from deployed `error` frame)
 
   ── ready (sub-field of existing `audio` event):
   └─ AudioAlignment via AudioResponseArgs.Alignment ── alignment is already in the spec
