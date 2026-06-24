@@ -30,10 +30,21 @@ export interface RunWebGLSmokeOptions {
   matcher: SmokeMatcher;
   /**
    * Hook invoked after the page is created but BEFORE navigation. Use this
-   * to register `page.on('websocket')` listeners — registered after
-   * `page.goto(...)` they miss the SDK's handshake frames entirely.
+   * to register `page.on('websocket')` listeners (registered after
+   * `page.goto(...)` they miss the SDK's handshake frames entirely) or to
+   * install `page.addInitScript(...)` instrumentation. May return a promise
+   * — the harness awaits it before navigating.
    */
-  onBeforeNavigate?: (page: Page) => void;
+  onBeforeNavigate?: (page: Page) => void | Promise<void>;
+  /**
+   * Hook invoked after the smoke outcome resolves but BEFORE the page +
+   * browser are torn down. Use this to `page.evaluate(...)` and assert on
+   * page-context state captured during the run — once the harness's
+   * `finally` runs, the page is closed and `page.evaluate` rejects. The
+   * hook's promise is awaited; throwing here surfaces as a test failure
+   * (no separate fail-state from the smoke's pass/fail/skip).
+   */
+  onResolved?: (page: Page, outcome: SmokeOutcome) => void | Promise<void>;
 }
 
 /**
@@ -99,10 +110,14 @@ export async function runWebGLSmoke(
       resolveOutcome({ status: "fail", message: "Page crashed" });
     });
 
-    opts.onBeforeNavigate?.(page);
+    await opts.onBeforeNavigate?.(page);
 
     await page.goto(server.url);
-    return await outcome;
+    const resolved = await outcome;
+    if (opts.onResolved) {
+      await opts.onResolved(page, resolved);
+    }
+    return resolved;
   } finally {
     await page.close();
     await browser.close();

@@ -38,6 +38,22 @@ namespace ElevenLabs.WebGL.Editor
         }
 
         /// <summary>
+        /// Entry point for the spatial-output variant of the conversation
+        /// smoke (<c>-executeMethod ElevenLabs.WebGL.Editor.HostBuild.BuildConversationSpatial</c>).
+        /// Drives the same JS bridge but with an
+        /// <see cref="ConversationOptions.OutputAudioSource"/> wired up so the
+        /// integration test can introspect the Web Audio graph.
+        /// </summary>
+        public static void BuildConversationSpatial()
+        {
+            BuildSceneAndExit(
+                "ElevenLabs.WebGL.Samples.ConversationSmokeTest.ConversationSpatialSmokeTest, ElevenLabs.WebGL.Samples.ConversationSmokeTest",
+                "WebGLConversationSpatialSmoke",
+                BuildTarget.WebGL
+            );
+        }
+
+        /// <summary>
         /// Entry point for headless desktop standalone smoke builds with
         /// IL2CPP + managed stripping enabled
         /// (<c>-executeMethod ElevenLabs.WebGL.Editor.HostBuild.BuildStandalone</c>).

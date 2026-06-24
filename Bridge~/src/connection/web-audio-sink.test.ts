@@ -88,6 +88,7 @@ interface StubAudioContext {
   createAnalyser: ReturnType<typeof vi.fn>;
   createStereoPanner: ReturnType<typeof vi.fn>;
   createPanner: ReturnType<typeof vi.fn>;
+  resume: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   __constructed: { sampleRate: number };
   __gains: StubGainNode[];
@@ -112,6 +113,7 @@ function buildContext(options?: { sampleRate?: number }): StubAudioContext {
     createAnalyser: vi.fn(),
     createStereoPanner: vi.fn(),
     createPanner: vi.fn(),
+    resume: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     __constructed: { sampleRate: options?.sampleRate ?? 48000 },
     __gains: [],
@@ -235,6 +237,15 @@ function littleEndianBuffer(...samples: number[]): ArrayBuffer {
 // ---------------------------------------------------------------------------
 
 describe("createWebAudioSink — graph construction", () => {
+  it("resumes the AudioContext so it can leave the autoplay-suspended state", async () => {
+    // Browsers auto-suspend freshly-created AudioContexts; without the
+    // explicit resume the analyser tap returns zeros (silent voice, dead
+    // GetOutputVolume reading). Regression-locking this is the cheapest
+    // way to surface the issue if a future refactor drops the resume.
+    await createWebAudioSink({ sampleRate: 16000 });
+    expect(activeContext.resume).toHaveBeenCalledTimes(1);
+  });
+
   it("builds the expected node graph with the worklet, master gain, analyser, mono/spatial gains, and panners", async () => {
     await createWebAudioSink({ sampleRate: 16000 });
 

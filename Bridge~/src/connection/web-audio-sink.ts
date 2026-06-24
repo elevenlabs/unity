@@ -143,6 +143,17 @@ export async function createWebAudioSink(
   stereoPanner.connect(context.destination);
   panner.connect(context.destination);
 
+  // Browsers auto-suspend freshly-created AudioContexts until a user gesture
+  // has occurred on the page. Without an explicit resume the AnalyserNode
+  // never samples audio (returning all zeros from getByteFrequencyData) and
+  // the worklet's queued PCM never plays — manifesting as silent agent voice
+  // and a flatlined GetOutputVolume reading driving any AudioSource-bound
+  // visualiser. Unity's WebGL loader unlocks its own AudioContext on the
+  // initial click; ours is a separate instance and must be resumed
+  // independently. The SDK's MediaDeviceOutput does the same — mirroring
+  // here keeps GetOutputVolume parity with the pre-step-4 behaviour.
+  await context.resume();
+
   // Defaults match Unity's AudioSource: full mono (spatialBlend = 0), unit
   // volume, listener + source at origin. C# pushes deltas at the start of the
   // session, but a defensive default keeps the graph audible if those updates
@@ -150,6 +161,37 @@ export async function createWebAudioSink(
   masterGain.gain.value = 1;
   monoGain.gain.value = 1;
   spatialGain.gain.value = 0;
+
+  // Test instrumentation hook (consumed by IntegrationTests~). If a function
+  // is registered at globalThis.__elevenLabsWebAudioSinkHook__ before the
+  // sink is created, it receives the key graph nodes so a Playwright test
+  // can introspect the running graph from outside without sinks exposing
+  // themselves through window globals by default. Production callers don't
+  // define the hook, so this is a no-op at runtime.
+  const testHook = (
+    globalThis as {
+      __elevenLabsWebAudioSinkHook__?: (info: {
+        context: AudioContext;
+        panner: PannerNode;
+        stereoPanner: StereoPannerNode;
+        masterGain: GainNode;
+        monoGain: GainNode;
+        spatialGain: GainNode;
+        analyser: AnalyserNode;
+      }) => void;
+    }
+  ).__elevenLabsWebAudioSinkHook__;
+  if (typeof testHook === "function") {
+    testHook({
+      context,
+      panner,
+      stereoPanner,
+      masterGain,
+      monoGain,
+      spatialGain,
+      analyser,
+    });
+  }
 
   let userVolume = 1;
 
@@ -244,12 +286,18 @@ export async function createWebAudioSink(
       await context.close();
     },
     getVolume(): number {
+      // Mean of all frequency bins, normalised to [0, 1] — matches the
+      // SDK's @elevenlabs/client `calculateVolume` helper so the value
+      // returned through GetOutputVolume stays consistent with the previous
+      // BridgedOutputController behaviour. RMS would overweight transient
+      // peaks and produce visibly different readings on the same audio.
       const data = new Uint8Array(analyser.frequencyBinCount);
       analyser.getByteFrequencyData(data);
-      let sumSquares = 0;
-      for (let i = 0; i < data.length; i++) sumSquares += data[i] * data[i];
       if (data.length === 0) return 0;
-      return Math.sqrt(sumSquares / data.length) / 255;
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i];
+      const volume = sum / data.length / 255;
+      return volume < 0 ? 0 : volume > 1 ? 1 : volume;
     },
     getByteFrequencyData(buffer: Uint8Array<ArrayBuffer>): void {
       analyser.getByteFrequencyData(buffer);
