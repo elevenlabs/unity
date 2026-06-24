@@ -21,17 +21,28 @@ namespace ElevenLabs.WebGL.Bridged
     /// Edit Mode tests that exercise the static entry point.
     /// </para>
     /// <para>
-    /// Phase 7's native asmdef will register its own factory the same way;
-    /// last-write-wins is fine because each platform asmdef ships under an
-    /// <c>includePlatforms</c> that picks at most one launcher per build.
+    /// The <c>#if UNITY_WEBGL</c> guard around <see cref="Register"/> is
+    /// load-bearing and mirrors <c>NativeSessionLauncher</c>'s
+    /// <c>#if !UNITY_WEBGL</c>: the WebGL asmdef ships with
+    /// <c>includePlatforms: ["Editor", "WebGL"]</c> so this launcher and
+    /// <c>NativeSessionLauncher</c> are both loaded in the Editor when the
+    /// active build target is non-WebGL. Without the guard, both would race
+    /// to assign <see cref="Conversation.SessionFactory"/> and the
+    /// last-write-wins outcome is non-deterministic — leaving Editor Play
+    /// Mode on a Standalone target with the WebGL factory and the
+    /// "WebGL bridge is not available outside WebGL builds" runtime error.
+    /// The guard makes sure only the platform-appropriate launcher
+    /// registers.
     /// </para>
     /// </remarks>
     internal static class BridgedSessionLauncher
     {
+#if UNITY_WEBGL
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void RuntimeInit() => Register();
+#endif
 
-#if UNITY_EDITOR
+#if UNITY_EDITOR && UNITY_WEBGL
         // Mirrors RuntimeInit for the Editor / Edit Mode test domain, where
         // RuntimeInitializeOnLoadMethod is not invoked unless Play Mode is
         // entered. UnityEditor.dll is only available when the asmdef compiles
