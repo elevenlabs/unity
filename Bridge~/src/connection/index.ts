@@ -24,6 +24,7 @@ import {
 } from "@elevenlabs/client/internal/unity";
 import { connectionFactories } from "./factories.js";
 import { audioGlueFactories } from "./audio-glue.js";
+import { webAudioSinkFactories } from "./web-audio-sink.js";
 
 // Side-effects that the SDK's `platform/web/index.js` entrypoint would
 // normally fire at module-init time. We invoke them explicitly so the bridge
@@ -52,5 +53,8 @@ for (const [name, fn] of Object.entries(connectionFactories)) {
   EL_RegisterFactory(name, fn);
 }
 for (const [name, fn] of Object.entries(audioGlueFactories)) {
+  EL_RegisterFactory(name, fn);
+}
+for (const [name, fn] of Object.entries(webAudioSinkFactories)) {
   EL_RegisterFactory(name, fn);
 }
