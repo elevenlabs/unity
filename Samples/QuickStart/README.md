@@ -11,9 +11,13 @@ needed to bring an agent into your game.
   (gitignored so secrets stay on your machine).
 - Opening a session with `Conversation.StartSessionAsync(...)` using the
   default WebSocket transport.
-- Wiring the four most useful events: `Connected`, `Disconnected`,
-  `ErrorOccurred`, plus `UserTranscriptReceived` and `AgentResponded` for the
-  live transcript.
+- Wiring the most useful session events: `Disconnected`, `ErrorOccurred`,
+  plus `UserTranscriptReceived` and `AgentResponded` for the live transcript.
+  Initial connection state is read directly from
+  `Conversation.ConversationId` and `Conversation.Status` once
+  `StartSessionAsync` returns (the `Connected` event fires synchronously
+  inside the factory before the handle is handed back, so it can't be
+  caught from a `StartSessionAsync` caller).
 - Tearing the session down deterministically on `OnDestroy` (which fires on
   scene unload and when leaving Play mode in the Editor).
 

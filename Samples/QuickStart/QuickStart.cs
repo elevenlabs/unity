@@ -97,19 +97,21 @@ namespace ElevenLabs.Agents.Samples.QuickStart
                 throw;
             }
 
-            // Subscribe after StartSessionAsync returns so the handlers don't
-            // capture a stale reference if the awaited factory throws.
-            _conversation.Connected += OnConnected;
+            // StartSessionAsync returns once the handshake + audio setup are
+            // complete, so by this line the session is already connected and
+            // the conversation id is known. The Conversation.Connected event
+            // fires synchronously inside the factory, before we get the
+            // handle back — subscribing to it here would never catch it.
+            Debug.Log($"[QuickStart] Connected — conversation id: {_conversation.ConversationId}");
+            _status = "Connected";
+
+            // Subscribe to the events that fire later in the session. We do
+            // this after the await so the handlers don't capture a stale
+            // reference if the awaited factory throws.
             _conversation.Disconnected += OnDisconnected;
             _conversation.ErrorOccurred += OnErrorOccurred;
             _conversation.UserTranscriptReceived += OnUserTranscriptReceived;
             _conversation.AgentResponded += OnAgentResponded;
-        }
-
-        private void OnConnected(string conversationId)
-        {
-            Debug.Log($"[QuickStart] Connected — conversation id: {conversationId}");
-            _status = "Connected";
         }
 
         private void OnDisconnected(DisconnectionDetails details)
