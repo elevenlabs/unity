@@ -187,8 +187,6 @@ namespace ElevenLabs.Native
                         // keeping up, not that the agent is too fast.
                         _readPos = (_readPos + 1) % _ringCapacity;
                     }
-                    _analysisBuffer[_analysisWritePos] = f;
-                    _analysisWritePos = (_analysisWritePos + 1) % _analysisBuffer.Length;
                 }
             }
         }
@@ -209,15 +207,34 @@ namespace ElevenLabs.Native
                 int n = Math.Min(dest.Length, _available);
                 for (int i = 0; i < n; i++)
                 {
-                    dest[i] = _ring[_readPos];
+                    float f = _ring[_readPos];
+                    dest[i] = f;
                     _readPos = (_readPos + 1) % _ringCapacity;
+                    // Feed the analysis buffer here (audio-thread drain) rather
+                    // than at PushAudio time so GetVolume / GetByteFrequencyData
+                    // reflect what's *playing right now*, not what was last
+                    // received over the network. Without this, visualisers
+                    // freeze on the last received chunk while the ring drains
+                    // for the next few seconds of playback.
+                    _analysisBuffer[_analysisWritePos] = f;
+                    _analysisWritePos = (_analysisWritePos + 1) % _analysisBuffer.Length;
                 }
                 _available -= n;
                 // Underrun — fill the remainder with silence. PCMReaderCallback's
                 // contract is "fill the entire buffer"; leaving the tail
-                // unwritten plays whatever the buffer previously held.
+                // unwritten plays whatever the buffer previously held. Feed the
+                // silence into the analysis buffer too so RMS decays naturally
+                // after the agent stops talking, instead of holding the last
+                // non-silent value forever.
                 if (n < dest.Length)
+                {
                     Array.Clear(dest, n, dest.Length - n);
+                    for (int i = n; i < dest.Length; i++)
+                    {
+                        _analysisBuffer[_analysisWritePos] = 0f;
+                        _analysisWritePos = (_analysisWritePos + 1) % _analysisBuffer.Length;
+                    }
+                }
             }
         }
 
@@ -490,6 +507,20 @@ namespace ElevenLabs.Native
             {
                 lock (_bufferLock)
                     return _available;
+            }
+        }
+        internal float Test_AnalysisBufferRms
+        {
+            get
+            {
+                lock (_bufferLock)
+                {
+                    double sumSquares = 0.0;
+                    int count = _analysisBuffer.Length;
+                    for (int i = 0; i < count; i++)
+                        sumSquares += _analysisBuffer[i] * _analysisBuffer[i];
+                    return count == 0 ? 0f : (float)Math.Sqrt(sumSquares / count);
+                }
             }
         }
 

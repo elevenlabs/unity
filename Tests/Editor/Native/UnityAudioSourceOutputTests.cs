@@ -294,6 +294,43 @@ namespace ElevenLabs.Native.Tests
             Assert.AreEqual(0, output.Test_AvailableSamples);
         }
 
+        // Analysis buffer is fed at drain time (audio thread), not push time
+        // (network thread). Regression test for visualisers freezing on the
+        // last received chunk while the ring drains for the remainder of
+        // playback — GetVolume / GetByteFrequencyData must reflect what's
+        // playing right now, not what was last received.
+        [Test]
+        public void PushAudio_DoesNotPopulateAnalysisBuffer_UntilDrained()
+        {
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000));
+            output.PushAudio(LittleEndian(short.MaxValue, short.MaxValue, short.MaxValue));
+
+            // Push alone leaves the analysis buffer untouched.
+            Assert.AreEqual(0f, output.Test_AnalysisBufferRms, 1e-6);
+
+            // Draining the ring feeds the analysis buffer with the played samples.
+            output.ReadFromRing(new float[3]);
+            Assert.Greater(output.Test_AnalysisBufferRms, 0f);
+        }
+
+        [Test]
+        public void ReadFromRing_Underrun_FeedsSilenceIntoAnalysisBuffer()
+        {
+            // After the ring drains completely, continued PCMReaderCallback
+            // invocations write silence into the analysis buffer, letting
+            // RMS-driven visualisers decay back to rest.
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000));
+            output.PushAudio(LittleEndian(short.MaxValue, short.MaxValue));
+            output.ReadFromRing(new float[2]);
+            Assert.Greater(output.Test_AnalysisBufferRms, 0f);
+
+            // Drain a window-sized chunk of pure underrun → analysis buffer
+            // fills with zeros → RMS returns to 0.
+            int windowSamples = 16_000 * UnityAudioSourceOutput.AnalysisWindowMs / 1000;
+            output.ReadFromRing(new float[windowSamples]);
+            Assert.AreEqual(0f, output.Test_AnalysisBufferRms, 1e-6);
+        }
+
         [Test]
         public void ClearRing_ResetsBothRingAndAnalysisBuffer()
         {
