@@ -408,6 +408,113 @@ namespace ElevenLabs.WebGL.Tests
             CollectionAssert.AreEqual(new[] { integration }, received!.Integrations);
         }
 
+        [Test]
+        public void Dispatch_AgentToolRequest_FiresAgentToolRequestedWithArgs()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            AgentToolRequestArgs? received = null;
+            conversation.AgentToolRequested += args => received = args;
+
+            connection.FireMessage(
+                new AgentToolRequest
+                {
+                    AgentToolRequestData = new AgentToolRequestEvent
+                    {
+                        ToolName = "lookup_user",
+                        ToolCallId = "tc-1",
+                        ToolType = "function",
+                        EventId = 7,
+                        ExpectsResponse = true,
+                        DisableInterruptions = false,
+                        ResponseTimeoutSecs = 30,
+                        ExecutionMode = "sync",
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreEqual("lookup_user", received!.ToolName);
+            Assert.AreEqual("tc-1", received.ToolCallId);
+            Assert.AreEqual("function", received.ToolType);
+            Assert.AreEqual(7, received.EventId);
+            Assert.IsTrue(received.ExpectsResponse);
+            Assert.IsFalse(received.DisableInterruptions);
+            Assert.AreEqual(30, received.ResponseTimeoutSecs);
+            Assert.AreEqual("sync", received.ExecutionMode);
+        }
+
+        [Test]
+        public void Dispatch_AgentToolResponse_FiresAgentToolRespondedWithSlimArgs()
+        {
+            // Slim wire variant — FullToolResult / Truncated come back null in
+            // the unified args record, mirroring the JS SDK union shape.
+            var conversation = NewConversation(out var connection, out _, out _);
+            AgentToolRespondedArgs? received = null;
+            conversation.AgentToolResponded += args => received = args;
+
+            connection.FireMessage(
+                new AgentToolResponse
+                {
+                    AgentToolResponseData = new AgentToolResponseEvent
+                    {
+                        ToolName = "lookup_user",
+                        ToolCallId = "tc-1",
+                        ToolType = "function",
+                        IsError = false,
+                        IsBlocked = false,
+                        EventId = 7,
+                        IsCalled = true,
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreEqual("lookup_user", received!.ToolName);
+            Assert.AreEqual("tc-1", received.ToolCallId);
+            Assert.AreEqual("function", received.ToolType);
+            Assert.IsFalse(received.IsError);
+            Assert.AreEqual(false, received.IsBlocked);
+            Assert.AreEqual(7, received.EventId);
+            Assert.IsTrue(received.IsCalled);
+            Assert.IsNull(received.FullToolResult);
+            Assert.IsNull(received.Truncated);
+        }
+
+        [Test]
+        public void Dispatch_AgentToolResponseFullPayload_FiresAgentToolRespondedWithFullArgs()
+        {
+            // Full-payload variant feeds the same public event but populates
+            // FullToolResult / Truncated.
+            var conversation = NewConversation(out var connection, out _, out _);
+            AgentToolRespondedArgs? received = null;
+            conversation.AgentToolResponded += args => received = args;
+
+            connection.FireMessage(
+                new AgentToolResponseFullPayload
+                {
+                    AgentToolResponseFullPayloadData = new AgentToolResponseFullPayloadEvent
+                    {
+                        ToolName = "lookup_user",
+                        ToolCallId = "tc-2",
+                        ToolType = "function",
+                        IsError = false,
+                        IsBlocked = false,
+                        EventId = 9,
+                        IsCalled = true,
+                        FullToolResult = "{\"name\":\"Kræn\"}",
+                        Truncated = false,
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreEqual("lookup_user", received!.ToolName);
+            Assert.AreEqual("tc-2", received.ToolCallId);
+            Assert.AreEqual(9, received.EventId);
+            Assert.AreEqual("{\"name\":\"Kræn\"}", received.FullToolResult);
+            Assert.AreEqual(false, received.Truncated);
+        }
+
         // Audio: state tracking + interrupt gating ----------------------------
 
         [Test]
@@ -926,6 +1033,11 @@ namespace ElevenLabs.WebGL.Tests
             conversation.UpdateStatus(Status.Connected);
             DisconnectionDetails? details = null;
             conversation.Disconnected += d => details = d;
+            // The public event fires *before* the end_call shortcut runs the
+            // teardown, so a subscriber sees the call that caused the
+            // disconnect.
+            AgentToolRespondedArgs? respondedArgs = null;
+            conversation.AgentToolResponded += args => respondedArgs = args;
 
             connection.FireMessage(
                 new AgentToolResponseFullPayload
@@ -949,6 +1061,46 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual(1, connection.CloseCallCount);
             Assert.AreEqual(1, input.CloseCallCount);
             Assert.AreEqual(1, output.CloseCallCount);
+            Assert.IsNotNull(respondedArgs);
+            Assert.AreEqual("end_call", respondedArgs!.ToolName);
+        }
+
+        [Test]
+        public void Dispatch_AgentToolResponse_EndCall_TriggersDisconnect()
+        {
+            // JS SDK's handleAgentToolResponse runs the same end_call shortcut
+            // the full-payload arm does. Mirror that here so a slim wire frame
+            // with tool_name=end_call also drives teardown.
+            var conversation = NewConversation(out var connection, out var input, out var output);
+            conversation.UpdateStatus(Status.Connected);
+            DisconnectionDetails? details = null;
+            conversation.Disconnected += d => details = d;
+            AgentToolRespondedArgs? respondedArgs = null;
+            conversation.AgentToolResponded += args => respondedArgs = args;
+
+            connection.FireMessage(
+                new AgentToolResponse
+                {
+                    AgentToolResponseData = new AgentToolResponseEvent
+                    {
+                        ToolName = "end_call",
+                        ToolCallId = "tc-end",
+                        ToolType = "system",
+                        EventId = 1,
+                        IsError = false,
+                        IsCalled = true,
+                    },
+                }
+            );
+
+            Assert.IsNotNull(details);
+            Assert.AreEqual(DisconnectionReason.Agent, details!.Reason);
+            Assert.AreEqual("end_call", details.Context?.Type);
+            Assert.AreEqual(1, connection.CloseCallCount);
+            Assert.AreEqual(1, input.CloseCallCount);
+            Assert.AreEqual(1, output.CloseCallCount);
+            Assert.IsNotNull(respondedArgs);
+            Assert.AreEqual("end_call", respondedArgs!.ToolName);
         }
 
         [Test]

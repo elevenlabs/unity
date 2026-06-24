@@ -147,6 +147,28 @@ namespace ElevenLabs.Agents
         /// </summary>
         public event Action<McpConnectionStatusArgs>? MCPConnectionStatusChanged;
 
+        /// <summary>
+        /// Fired when the agent requests a tool be executed. Mirrors the JS
+        /// SDK's <c>onAgentToolRequest</c>; the args record carries the
+        /// request metadata (<c>ToolName</c>, <c>ToolCallId</c>, execution
+        /// mode, response-timeout, etc.) — tool execution itself happens
+        /// agent-side for server tools, or via the
+        /// <see cref="RegisterTool{TParams, TResult}(string, Func{TParams, TResult})"/>
+        /// path for client tools.
+        /// </summary>
+        public event Action<AgentToolRequestArgs>? AgentToolRequested;
+
+        /// <summary>
+        /// Fired when the agent reports an executed tool's result. Mirrors the
+        /// JS SDK's <c>onAgentToolResponse</c>: the same event fires for the
+        /// slim <c>agent_tool_response</c> wire frame and the
+        /// <c>agent_tool_response_full_payload</c> variant (which adds the
+        /// stringified <c>FullToolResult</c> and a <c>Truncated</c> flag).
+        /// The end-call shortcut is wired separately on the full-payload
+        /// handler and is unaffected by event subscriptions.
+        /// </summary>
+        public event Action<AgentToolRespondedArgs>? AgentToolResponded;
+
         // State ---------------------------------------------------------------
 
         /// <summary>Server-assigned conversation identifier. Empty before <see cref="Connected"/> fires.</summary>
@@ -209,6 +231,8 @@ namespace ElevenLabs.Agents
             _dispatcher.OnVadScore += HandleVadScore;
             _dispatcher.OnPing += HandlePing;
             _dispatcher.OnClientToolCall += HandleClientToolCall;
+            _dispatcher.OnAgentToolRequest += HandleAgentToolRequest;
+            _dispatcher.OnAgentToolResponse += HandleAgentToolResponse;
             _dispatcher.OnAgentToolResponseFullPayload += HandleAgentToolResponseFullPayload;
             _dispatcher.OnMcpToolCall += HandleMcpToolCall;
             _dispatcher.OnMcpConnectionStatus += HandleMcpConnectionStatus;
@@ -660,20 +684,44 @@ namespace ElevenLabs.Agents
         private void HandleMcpConnectionStatus(McpConnectionStatus evt) =>
             MCPConnectionStatusChanged?.Invoke(evt.ToArgs());
 
-        // Mirrors BaseConversation.handleAgentToolResponseFullPayload's
-        // end_call shortcut: if the agent invoked the end_call tool, drive
-        // teardown with reason=Agent.
+        private void HandleAgentToolRequest(AgentToolRequest evt) =>
+            AgentToolRequested?.Invoke(evt.ToArgs());
+
+        // Mirrors BaseConversation.handleAgentToolResponse: fire the public
+        // event on the unified args record, then run the end_call shortcut
+        // when the agent invoked the end_call tool. The JS SDK runs the
+        // shortcut on both wire variants (slim + full-payload), so the C#
+        // path mirrors that via RunEndCallShortcutIfNeeded.
+        private void HandleAgentToolResponse(AgentToolResponse evt)
+        {
+            AgentToolResponded?.Invoke(evt.ToRespondedArgs());
+            RunEndCallShortcutIfNeeded(evt.AgentToolResponseData.ToolName);
+        }
+
+        // Same as the slim variant — the JS SDK's handleAgentToolResponseFullPayload
+        // performs the identical end_call check + teardown.
         private void HandleAgentToolResponseFullPayload(AgentToolResponseFullPayload evt)
         {
-            if (evt.AgentToolResponseFullPayloadData.ToolName == "end_call")
+            AgentToolResponded?.Invoke(evt.ToRespondedArgs());
+            RunEndCallShortcutIfNeeded(evt.AgentToolResponseFullPayloadData.ToolName);
+        }
+
+        // Shared between HandleAgentToolResponse and
+        // HandleAgentToolResponseFullPayload. Drives teardown with reason=Agent
+        // and a synthetic DisconnectionContext so subscribers can distinguish
+        // an agent-initiated end_call from an ordinary disconnect.
+        private void RunEndCallShortcutIfNeeded(string toolName)
+        {
+            if (toolName != "end_call")
             {
-                _ = EndSessionWithDetails(
-                    new DisconnectionDetails(
-                        DisconnectionReason.Agent,
-                        Context: new DisconnectionContext("end_call", "Agent ended the call")
-                    )
-                );
+                return;
             }
+            _ = EndSessionWithDetails(
+                new DisconnectionDetails(
+                    DisconnectionReason.Agent,
+                    Context: new DisconnectionContext("end_call", "Agent ended the call")
+                )
+            );
         }
 
         // Client tool registration -------------------------------------------
