@@ -144,7 +144,7 @@ namespace ElevenLabs.Agents.Samples.QuickStart
 
         private void OnGUI()
         {
-            _labelStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 24, wordWrap = true };
+            _labelStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 42, wordWrap = true };
 
             const int padding = 16;
             int rowHeight = _labelStyle.fontSize + 8;
