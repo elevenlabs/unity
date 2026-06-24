@@ -1404,6 +1404,35 @@ namespace ElevenLabs.WebGL.Tests
             Assert.IsNull(msg.File);
         }
 
+        [Test]
+        public void SendMCPToolApprovalResult_Approved_SendsWireEvent()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMCPToolApprovalResult("call_abc123", isApproved: true);
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as McpToolApprovalResult;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("mcp_tool_approval_result", msg!.Type);
+            Assert.AreEqual("call_abc123", msg.ToolCallId);
+            Assert.IsTrue(msg.IsApproved);
+        }
+
+        [Test]
+        public void SendMCPToolApprovalResult_Rejected_SendsWireEvent()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+
+            conversation.SendMCPToolApprovalResult("call_xyz", isApproved: false);
+
+            Assert.AreEqual(1, connection.Sent.Count);
+            var msg = connection.Sent[0] as McpToolApprovalResult;
+            Assert.IsNotNull(msg);
+            Assert.AreEqual("call_xyz", msg!.ToolCallId);
+            Assert.IsFalse(msg.IsApproved);
+        }
+
         // Audio device control (public Conversation API) ---------------------
 
         [Test]

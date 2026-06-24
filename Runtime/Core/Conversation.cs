@@ -369,6 +369,22 @@ namespace ElevenLabs.Agents
         }
 
         /// <summary>
+        /// Approve or reject an MCP (Model Context Protocol) tool call the
+        /// agent is awaiting confirmation on. Mirrors the JS SDK's
+        /// <c>sendMCPToolApprovalResult</c>. <paramref name="toolCallId"/>
+        /// comes from the <see cref="MCPToolCallReceived"/> event's args
+        /// (specifically the <c>awaiting_approval</c> state); pass
+        /// <paramref name="isApproved"/> <c>true</c> to let the tool execute
+        /// or <c>false</c> to deny it.
+        /// </summary>
+        public void SendMCPToolApprovalResult(string toolCallId, bool isApproved)
+        {
+            _connection.Send(
+                new McpToolApprovalResult { ToolCallId = toolCallId, IsApproved = isApproved }
+            );
+        }
+
+        /// <summary>
         /// Upload a file (image, document, …) for the agent to reference in
         /// its next response. Returns the server-assigned <c>file_id</c>; pass
         /// it to <see cref="SendMultimodalMessage"/> to attach the file to a
