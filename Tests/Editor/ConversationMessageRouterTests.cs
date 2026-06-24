@@ -501,7 +501,7 @@ namespace ElevenLabs.WebGL.Tests
                         IsBlocked = false,
                         EventId = 9,
                         IsCalled = true,
-                        FullToolResult = "{\"name\":\"Kræn\"}",
+                        FullToolResult = "{\"name\":\"Alice\"}",
                         Truncated = false,
                     },
                 }
@@ -511,7 +511,7 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual("lookup_user", received!.ToolName);
             Assert.AreEqual("tc-2", received.ToolCallId);
             Assert.AreEqual(9, received.EventId);
-            Assert.AreEqual("{\"name\":\"Kræn\"}", received.FullToolResult);
+            Assert.AreEqual("{\"name\":\"Alice\"}", received.FullToolResult);
             Assert.AreEqual(false, received.Truncated);
         }
 
@@ -782,7 +782,7 @@ namespace ElevenLabs.WebGL.Tests
             connection.FireMessage(
                 MakeToolCall(
                     toolName: "greet",
-                    parameters: new Dictionary<string, dynamic> { ["name"] = "Kræn" }
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "Alice" }
                 )
             );
 
@@ -790,7 +790,7 @@ namespace ElevenLabs.WebGL.Tests
             var result = connection.Sent[0] as ClientToolResult;
             Assert.IsNotNull(result);
             Assert.AreEqual("tc-1", result!.ToolCallId);
-            Assert.AreEqual("Hello, Kræn!", result.Result);
+            Assert.AreEqual("Hello, Alice!", result.Result);
             Assert.IsFalse(result.IsError);
             Assert.IsNull(result.ErrorType);
         }
@@ -1095,14 +1095,14 @@ namespace ElevenLabs.WebGL.Tests
             connection.FireMessage(
                 MakeToolCall(
                     toolName: "greet",
-                    parameters: new Dictionary<string, dynamic> { ["name"] = "Kræn" }
+                    parameters: new Dictionary<string, dynamic> { ["name"] = "Bob" }
                 )
             );
 
             Assert.AreEqual(0, unhandledCount);
             var result = (ClientToolResult)connection.Sent[0];
             Assert.IsFalse(result.IsError);
-            Assert.AreEqual("Hi Kræn", result.Result);
+            Assert.AreEqual("Hi Bob", result.Result);
         }
 
         // end_call shortcut (agent_tool_response_full_payload) -------------
