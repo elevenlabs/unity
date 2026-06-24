@@ -211,6 +211,8 @@ Native (#9d) plays through `UnityAudioSourceOutput`'s internal `AudioSource`. Th
 
 Microphone: a `microphoneDeviceName` field (empty → default). Less commonly customised; expose the field but expect most consumers to ignore it.
 
+The `agentAudioSource` field is the *consumer* of a Core SDK primitive — `ConversationOptions.OutputAudioSource` — that low-level `Conversation.StartSessionAsync` users get the benefit of too without adopting the component. See [`output-audio-source.md`](./output-audio-source.md) for the API surface, the `UnityAudioSourceOutput` implementation, lifecycle, and test plan.
+
 ### 6. UnityEvents — the designer's API
 
 The C# `Conversation` exposes typed `event Action<TArgs>` events. The component bridges each useful one to a `UnityEvent<simpler-shape>`:
