@@ -9,12 +9,12 @@ isn't gated on a JS SDK release whenever the protocol changes.
 
 Wire protocol for the Conversational AI WebSocket.
 
-| Field         | Value                                                                            |
-| ------------- | -------------------------------------------------------------------------------- |
-| Upstream repo | ElevenLabs internal monorepo (private)                                           |
-| Upstream path | `docs/convai-asyncapi.yml`                                                       |
-| Pinned commit | `87a762f38086ea67286dc549701c075702742444`                                       |
-| Commit date   | 2026-06-22                                                                       |
+| Field         | Value                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------- |
+| Upstream repo | ElevenLabs internal monorepo (private)                                                            |
+| Upstream path | `docs/convai-asyncapi.yml`                                                                        |
+| Pinned commit | `87a762f38086ea67286dc549701c075702742444`                                                        |
+| Commit date   | 2026-06-22                                                                                        |
 | Source branch | `main` (internal PR #38788 — "register public AsyncAPI events and reduce unregistered allowlist") |
 
 Verify the vendored content matches the pin:

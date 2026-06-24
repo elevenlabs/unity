@@ -237,9 +237,7 @@ export function makeProtocolPreset(
         // the preset stateless; the cost is one extra using line in files
         // that happen not to reference JToken — negligible vs branching
         // logic that would have to walk every property's csType.
-        renderer.dependencyManager.addDependency(
-          "using Newtonsoft.Json.Linq;",
-        );
+        renderer.dependencyManager.addDependency("using Newtonsoft.Json.Linq;");
         return renderProtocolClassHeader({
           content,
           modelName: model.name,
