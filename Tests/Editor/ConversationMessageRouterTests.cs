@@ -515,6 +515,55 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual(false, received.Truncated);
         }
 
+        [Test]
+        public void Dispatch_AgentChatResponsePart_FiresAgentChatResponsePartReceivedWithArgs()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            AgentChatResponsePartArgs? received = null;
+            conversation.AgentChatResponsePartReceived += args => received = args;
+
+            connection.FireMessage(
+                new AgentChatResponsePart
+                {
+                    TextResponsePart = new TextResponsePart
+                    {
+                        Text = "Hello, ",
+                        Type = "delta",
+                        EventId = 4,
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreEqual("Hello, ", received!.Text);
+            Assert.AreEqual("delta", received.Type);
+            Assert.AreEqual(4, received.EventId);
+        }
+
+        [Test]
+        public void Dispatch_GuardrailTriggered_FiresGuardrailTriggeredWithArgs()
+        {
+            // JS SDK's onGuardrailTriggered is parameterless; we surface the
+            // typed args record so subscribers can branch on which guardrail
+            // fired without rebuilding the routing themselves.
+            var conversation = NewConversation(out var connection, out _, out _);
+            GuardrailTriggeredArgs? received = null;
+            conversation.GuardrailTriggered += args => received = args;
+
+            connection.FireMessage(
+                new GuardrailTriggered
+                {
+                    GuardrailTriggeredEvent = new GuardrailTriggeredEvent
+                    {
+                        GuardrailName = "profanity_filter",
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreEqual("profanity_filter", received!.GuardrailName);
+        }
+
         // Audio: state tracking + interrupt gating ----------------------------
 
         [Test]
@@ -534,6 +583,39 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual(12, received.EventId);
             Assert.AreEqual(Mode.Speaking, conversation.Mode);
             CollectionAssert.AreEqual(new[] { Mode.Speaking }, modeChanges);
+        }
+
+        [Test]
+        public void Dispatch_Audio_PropagatesAlignmentOnArgs()
+        {
+            // Lip-sync subscribers read AudioResponseArgs.Alignment without
+            // needing a parallel onAudioAlignment event. Pin that the
+            // generated alignment payload reaches the public args record
+            // unchanged.
+            var conversation = NewConversation(out var connection, out _, out _);
+            AudioResponseArgs? received = null;
+            conversation.AudioReceived += args => received = args;
+
+            var alignment = new AudioEventAlignment
+            {
+                Chars = new[] { "H", "i" },
+                CharStartTimesMs = new[] { 0, 80 },
+                CharDurationsMs = new[] { 80, 90 },
+            };
+            connection.FireMessage(
+                new AudioResponse
+                {
+                    AudioEvent = new AudioEvent
+                    {
+                        AudioBase64 = "YWJj",
+                        EventId = 14,
+                        Alignment = alignment,
+                    },
+                }
+            );
+
+            Assert.IsNotNull(received);
+            Assert.AreSame(alignment, received!.Alignment);
         }
 
         [Test]

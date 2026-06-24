@@ -169,6 +169,22 @@ namespace ElevenLabs.Agents
         /// </summary>
         public event Action<AgentToolRespondedArgs>? AgentToolResponded;
 
+        /// <summary>
+        /// Fired for each streaming text chunk of an agent chat response.
+        /// Mirrors the JS SDK's <c>onAgentChatResponsePart</c>. Args carry
+        /// the chunk <c>Text</c>, its <c>Type</c> tag, and the originating
+        /// <c>EventId</c>.
+        /// </summary>
+        public event Action<AgentChatResponsePartArgs>? AgentChatResponsePartReceived;
+
+        /// <summary>
+        /// Fired when the agent triggers a guardrail (e.g. a moderation rule).
+        /// Mirrors the JS SDK's <c>onGuardrailTriggered</c>; the JS callback
+        /// is parameterless, but the wire frame carries a <c>guardrail_name</c>
+        /// so we surface the typed args record instead of discarding it.
+        /// </summary>
+        public event Action<GuardrailTriggeredArgs>? GuardrailTriggered;
+
         // State ---------------------------------------------------------------
 
         /// <summary>Server-assigned conversation identifier. Empty before <see cref="Connected"/> fires.</summary>
@@ -236,6 +252,8 @@ namespace ElevenLabs.Agents
             _dispatcher.OnAgentToolResponseFullPayload += HandleAgentToolResponseFullPayload;
             _dispatcher.OnMcpToolCall += HandleMcpToolCall;
             _dispatcher.OnMcpConnectionStatus += HandleMcpConnectionStatus;
+            _dispatcher.OnAgentChatResponsePart += HandleAgentChatResponsePart;
+            _dispatcher.OnGuardrailTriggered += HandleGuardrailTriggered;
 
             // Per the v0.1-parity investigation's "Resolved gap: onDebug
             // policy", route unknown wire events to UnityEngine.Debug.Log
@@ -683,6 +701,12 @@ namespace ElevenLabs.Agents
 
         private void HandleMcpConnectionStatus(McpConnectionStatus evt) =>
             MCPConnectionStatusChanged?.Invoke(evt.ToArgs());
+
+        private void HandleAgentChatResponsePart(AgentChatResponsePart evt) =>
+            AgentChatResponsePartReceived?.Invoke(evt.ToArgs());
+
+        private void HandleGuardrailTriggered(GuardrailTriggered evt) =>
+            GuardrailTriggered?.Invoke(evt.ToArgs());
 
         private void HandleAgentToolRequest(AgentToolRequest evt) =>
             AgentToolRequested?.Invoke(evt.ToArgs());
