@@ -349,6 +349,202 @@ namespace ElevenLabs.Native.Tests
                 Assert.AreEqual(0f, dest[i], 1e-6);
         }
 
+        // Wall-clock-driven GetVolume ------------------------------------
+        //
+        // The native analysis buffer used to be the sole RMS source, which
+        // tied GetVolume's refresh rate to PCMReaderCallback cadence
+        // (empirically ~3 Hz on streaming clips, regardless of DSP buffer
+        // size). The new path interpolates the playback position from a
+        // wall-clock stamp captured at the last drain, sweeping the RMS
+        // window forward through the ring at the caller's poll rate — same
+        // semantics as WebGL's AnalyserNode.getByteTimeDomainData. These
+        // tests drive the TimestampProvider seam so we can advance the
+        // virtual clock between RMS reads without spinning an audio thread.
+
+        [Test]
+        public void GetVolume_BeforeFirstDrain_ReturnsZero()
+        {
+            // Pre-drain: stamp is 0, ring may or may not have data, but no
+            // playback has happened yet — visualiser should rest at zero.
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000));
+            output.PushAudio(LittleEndian(short.MaxValue, short.MaxValue));
+            Assert.AreEqual(0f, output.Test_ComputeWallClockRms(), 1e-6);
+        }
+
+        [Test]
+        public void GetVolume_SweepsForwardBetweenDrains_AsWallClockAdvances()
+        {
+            // Push two chunks with distinct amplitude profiles, drain once
+            // (which stamps the clock), then advance the fake clock in steps
+            // and confirm the RMS reflects a forward sweep into the queued
+            // (not yet drained) chunk, even though no further drain happens.
+            int sampleRate = 16_000;
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
+            // Pin the output-latency comp to 0 so this test measures pure
+            // wall-clock sweep; latency compensation has its own coverage.
+            output.OutputLatencySamples = 0;
+            long fakeNow = 1_000_000L; // arbitrary non-zero baseline
+            output.TimestampProvider = () => fakeNow;
+
+            // First chunk: 160 samples of silence (10 ms). Second chunk: 160
+            // samples at near-full amplitude. Drain just the silent half so
+            // the loud half is queued ahead and the stamp is anchored at the
+            // boundary.
+            int chunkSamples = sampleRate * 10 / 1000; // 160
+            output.PushAudio(LittleEndianSilence(chunkSamples));
+            output.PushAudio(LittleEndianConstant(chunkSamples, short.MaxValue));
+            output.ReadFromRing(new float[chunkSamples]); // drains the silent half
+
+            // Right at the drain stamp: virtual head is at _readPos (start of
+            // loud chunk minus windowSamples), so RMS reads back into the
+            // just-played silent samples → near zero.
+            float rmsAtBoundary = output.Test_ComputeWallClockRms();
+
+            // Advance the fake clock by 10 ms → virtual head sweeps fully
+            // into the loud chunk → RMS rises to near 1.
+            fakeNow += (long)(0.010 * (double)StopwatchFrequency);
+            float rmsInsideLoudChunk = output.Test_ComputeWallClockRms();
+
+            Assert.Less(
+                rmsAtBoundary,
+                0.1f,
+                $"At drain boundary, RMS should reflect just-played silence ({rmsAtBoundary})."
+            );
+            Assert.Greater(
+                rmsInsideLoudChunk,
+                0.9f,
+                $"After advancing 10 ms, RMS should reflect the loud chunk ({rmsInsideLoudChunk})."
+            );
+        }
+
+        [Test]
+        public void GetVolume_OutputLatencyOffset_ShiftsTheRmsWindowBackward()
+        {
+            // Push silence followed by a long loud chunk; drain just the
+            // silent half so the stamp anchors at the boundary. With a
+            // non-zero latency offset, advancing the wall clock by exactly
+            // the latency duration should keep the *audible* head pinned at
+            // the silence boundary (consumed head − latency = 0) and RMS
+            // should still read silence — that's the comp doing its job.
+            // Advancing further sweeps the audible head into the loud chunk.
+            int sampleRate = 16_000;
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
+            int latencyMs = 10;
+            output.OutputLatencySamples = sampleRate * latencyMs / 1000; // 160 samples
+            long fakeNow = 1_500_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            int silentMs = 10;
+            int loudMs = 60; // long enough that the audible head can sweep into the loud region
+            int silentSamples = sampleRate * silentMs / 1000;
+            int loudSamples = sampleRate * loudMs / 1000;
+            output.PushAudio(LittleEndianSilence(silentSamples));
+            output.PushAudio(LittleEndianConstant(loudSamples, short.MaxValue));
+            output.ReadFromRing(new float[silentSamples]); // drains silent half
+
+            // Wall clock advances by exactly the latency offset → consumed
+            // head has crossed into the loud chunk, but the *audible* head
+            // (consumed − latency) is still at the boundary → RMS still reads
+            // just-played silence.
+            fakeNow += (long)((latencyMs / 1000.0) * (double)StopwatchFrequency);
+            float rmsAtAudibleBoundary = output.Test_ComputeWallClockRms();
+            Assert.Less(
+                rmsAtAudibleBoundary,
+                0.1f,
+                $"With {latencyMs} ms latency comp, the audible head should still be at the boundary ({rmsAtAudibleBoundary})."
+            );
+
+            // Advance another 20 ms (well past the latency offset) → audible
+            // head sweeps fully into the loud region → RMS jumps to ~1.
+            fakeNow += (long)(0.020 * (double)StopwatchFrequency);
+            float rmsInsideLoudChunk = output.Test_ComputeWallClockRms();
+            Assert.Greater(
+                rmsInsideLoudChunk,
+                0.9f,
+                $"After audible head crosses past the latency offset, RMS should reflect the loud chunk ({rmsInsideLoudChunk})."
+            );
+        }
+
+        [Test]
+        public void GetVolume_CapsVirtualOffsetAtAvailable_HoldsRmsAtTailDuringUnderrun()
+        {
+            // Once the wall clock has elapsed more samples than are queued,
+            // virtualOffset should clamp at _available — the RMS window
+            // pins to the tail of buffered audio (the last samples that
+            // would have played) until a new chunk arrives. Without the
+            // clamp we'd sweep into stale/freed slots and report garbage.
+            int sampleRate = 16_000;
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
+            output.OutputLatencySamples = 0; // isolate from latency comp
+            long fakeNow = 2_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            int chunkSamples = sampleRate * 20 / 1000; // 20 ms = 320
+            output.PushAudio(LittleEndianConstant(chunkSamples, short.MaxValue));
+            output.ReadFromRing(new float[1]); // tiny drain to stamp the clock
+
+            // Advance the fake clock by 10 seconds — far past whatever the
+            // ring has queued. Without clamping, virtualOffset would walk
+            // off the end of the queued region.
+            fakeNow += (long)(10.0 * StopwatchFrequency);
+            float rms = output.Test_ComputeWallClockRms();
+
+            // Should land at the tail of the loud chunk → near 1, not 0 or
+            // garbage.
+            Assert.Greater(
+                rms,
+                0.9f,
+                $"Clamped RMS at queue tail should reflect the loud chunk ({rms})."
+            );
+        }
+
+        [Test]
+        public void GetVolume_AfterClearRing_ReturnsZero_EvenIfWallClockAdvanced()
+        {
+            // Interrupt → ClearRing resets the stamp to 0 so a subsequent
+            // GetVolume short-circuits to 0 instead of sweeping into the
+            // freshly-zeroed ring with a stale wall-clock offset (which
+            // would still read 0 here, but the short-circuit is the cheaper
+            // and more honest path).
+            int sampleRate = 16_000;
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
+            long fakeNow = 3_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            int chunkSamples = sampleRate * 20 / 1000;
+            output.PushAudio(LittleEndianConstant(chunkSamples, short.MaxValue));
+            output.ReadFromRing(new float[1]);
+            output.ClearRing();
+            fakeNow += (long)(0.5 * StopwatchFrequency);
+
+            Assert.AreEqual(0f, output.Test_ComputeWallClockRms(), 1e-6);
+        }
+
+        // Stopwatch.Frequency shorthand for the fake-clock arithmetic
+        // above; cached as a double to match the production conversion.
+        private static readonly double StopwatchFrequency = (double)
+            System.Diagnostics.Stopwatch.Frequency;
+
+        // Helpers: build raw little-endian PCM byte arrays of the requested
+        // shape for the wall-clock tests above. (LittleEndian(...) in the
+        // existing tests takes varargs, which gets noisy for hundreds of
+        // identical samples.)
+        private static byte[] LittleEndianSilence(int sampleCount)
+        {
+            return new byte[sampleCount * 2];
+        }
+
+        private static byte[] LittleEndianConstant(int sampleCount, short value)
+        {
+            var bytes = new byte[sampleCount * 2];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                bytes[i * 2] = (byte)(value & 0xFF);
+                bytes[i * 2 + 1] = (byte)((value >> 8) & 0xFF);
+            }
+            return bytes;
+        }
+
         // SetDevice format-change rejection --------------------------------
 
         [Test]
@@ -410,18 +606,32 @@ namespace ElevenLabs.Native.Tests
         {
             // Regression-lock today's owned-host path: no AudioSource supplied
             // → controller spins up a hidden host GameObject + AudioSource.
-            // Verified indirectly via GetVolume's null-source short-circuit
-            // (returns 0 only when _audioSource is null) — non-zero proves a
-            // source was constructed.
-            var output = await UnityAudioSourceOutput.CreateAsync(new FormatConfig("pcm", 16_000));
+            // Clip assignment is deferred until the first PushAudio (to avoid
+            // Unity's synchronous AudioClip.Create pre-fill silence-filling
+            // an empty ring — see Docs~/plans/audio-output-testability.md),
+            // so we push a ring-threshold's worth of audio to trigger it.
+            int sampleRate = 16_000;
+            var output = await UnityAudioSourceOutput.CreateAsync(
+                new FormatConfig("pcm", sampleRate)
+            );
             try
             {
                 AudioSource? created = FindHiddenHostAudioSource();
                 Assert.IsNotNull(created, "Owned-host path should create an AudioSource.");
                 Assert.IsTrue(created!.loop, "Owned host streaming clip needs loop=true.");
+                Assert.IsNull(
+                    created.clip,
+                    "Streaming clip is deferred to first PushAudio; should be null at CreateAsync."
+                );
+
+                // Push enough audio to clear the prefill threshold.
+                int triggerSamples =
+                    sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+                output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
+
                 Assert.IsNotNull(
                     created.clip,
-                    "Owned host source must have the streaming clip bound."
+                    "After first PushAudio crosses the prefill threshold, the clip should be bound."
                 );
             }
             finally
@@ -445,17 +655,16 @@ namespace ElevenLabs.Native.Tests
                 supplied.panStereo = -0.5f;
                 Transform originalParent = go.transform.parent;
 
+                int sampleRate = 16_000;
                 var output = await UnityAudioSourceOutput.CreateAsync(
-                    new FormatConfig("pcm", 16_000),
+                    new FormatConfig("pcm", sampleRate),
                     audioSource: supplied
                 );
                 try
                 {
-                    // SDK-owned overwrites took effect on the supplied source.
-                    Assert.IsNotNull(
-                        supplied.clip,
-                        "Supplied source should be bound to the streaming clip."
-                    );
+                    // SDK-owned overwrites that fire at CreateAsync time
+                    // (clip assignment itself is deferred to first PushAudio
+                    // — see Docs~/plans/audio-output-testability.md).
                     Assert.IsTrue(
                         supplied.loop,
                         "Supplied source must be looping for PCMReaderCallback."
@@ -465,6 +674,17 @@ namespace ElevenLabs.Native.Tests
                         supplied.volume,
                         1e-6,
                         "Default user volume should be applied."
+                    );
+
+                    // Drive a chunk past the prefill threshold so the clip
+                    // gets bound; this is the point where Unity's pre-fill
+                    // would otherwise silence-fill an empty ring.
+                    int triggerSamples =
+                        sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+                    output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
+                    Assert.IsNotNull(
+                        supplied.clip,
+                        "Supplied source should be bound to the streaming clip after first PushAudio."
                     );
 
                     // User-owned settings preserved verbatim.
@@ -502,13 +722,21 @@ namespace ElevenLabs.Native.Tests
                 supplied.loop = false;
                 AudioClip? originalClip = supplied.clip; // null is fine — captured + restored.
 
+                int sampleRate = 16_000;
                 var output = await UnityAudioSourceOutput.CreateAsync(
-                    new FormatConfig("pcm", 16_000),
+                    new FormatConfig("pcm", sampleRate),
                     audioSource: supplied
                 );
-                // Mid-session: SDK overwrote everything per the binding contract.
+                // Mid-session: SDK overwrote volume + loop per the binding
+                // contract. Clip is deferred to first PushAudio.
                 Assert.AreEqual(1f, supplied.volume, 1e-6);
                 Assert.IsTrue(supplied.loop);
+
+                // Trigger the deferred clip bind so we can verify Close
+                // unbinds it again below.
+                int triggerSamples =
+                    sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+                output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
                 Assert.IsNotNull(supplied.clip);
 
                 await output.Close();
