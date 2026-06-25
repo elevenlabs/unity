@@ -104,25 +104,40 @@ export interface WebAudioSink {
   /** Fade master gain to 0 over `durationMs`, then flush the queued PCM. */
   interrupt(durationMs: number): void;
   close(): Promise<void>;
-  /** RMS-ish scalar derived from the analyser node. */
+  /**
+   * RMS over the analyser's most recent time-domain samples, normalised to
+   * `[0, 1]`. Pre-step-6 this was `mean(getByteFrequencyData)/255`, which is
+   * a spectral-magnitude average not an audible-envelope reading and
+   * produced values on a different scale than the native backend's RMS
+   * over the playback ring. Time-domain RMS matches the native semantics
+   * (`Mathf.Sqrt(mean(sample^2))`) so the same `volumeSensitivity` constant
+   * works on both backends. See "Cross-platform volume-reading consistency"
+   * in Docs~/plans/output-audio-source.md.
+   */
   getVolume(): number;
-  getByteFrequencyData(buffer: Uint8Array<ArrayBuffer>): void;
+  /**
+   * Returns the analyser's byte-frequency bins as an array of length
+   * `length`. The bridge call site passes the desired length; the JS sink
+   * allocates a Uint8Array, fills it from the analyser, and returns
+   * `Array.from(buffer)` so the bridge marshalling pipeline (Newtonsoft on
+   * the C# side) can deserialise it as `byte[]`. Returning the Uint8Array
+   * directly serialises as `{"0":..,"1":..}` which Newtonsoft does NOT
+   * decode as a byte array — the array-of-numbers shape is the one that
+   * round-trips cleanly.
+   */
+  getByteFrequencyData(length: number): number[];
 }
 
-// Debug logger. Defaults to ON during the current investigation into why
-// AudioSource-bound visualisers aren't bouncing on WebGL — keeps the
-// browser console populated with `[WebAudioSink]` lines without anyone
-// needing to flip a flag first. The opt-out path stays available via
-// `globalThis.__elevenLabsWebAudioDebug__ = false` for anyone who wants
-// to silence them.
-//
-// TODO(output-audio-source): flip the default back to off (and the
-// comparison to `=== true`) once the bouncing-boxes regression is
-// resolved.
+// Debug logger. Defaults to OFF so production builds don't spam the browser
+// console; flip on per-page via `globalThis.__elevenLabsWebAudioDebug__ = true`
+// (the Playwright debug driver at IntegrationTests~/src/debug-driver.ts does
+// exactly that via page.addInitScript so cross-checking C# Debug.Log against
+// JS console.log lines stays trivial). Strict `=== true` comparison so any
+// other truthy value (e.g. accidental string) doesn't accidentally enable it.
 function debugEnabled(): boolean {
   return (
     (globalThis as { __elevenLabsWebAudioDebug__?: boolean })
-      .__elevenLabsWebAudioDebug__ !== false
+      .__elevenLabsWebAudioDebug__ === true
   );
 }
 function debugLog(...args: unknown[]): void {
@@ -159,6 +174,13 @@ export async function createWebAudioSink(
   });
   const masterGain = context.createGain();
   const analyser = context.createAnalyser();
+  // 256-sample FFT window (frequencyBinCount = 128, fftSize = 256 time-domain
+  // samples). At a 48 kHz AudioContext this is ~5 ms — the same envelope
+  // resolution as `UnityAudioSourceOutput`'s native analysis buffer post-step-6.
+  // getByteTimeDomainData's RMS over this window is what `getVolume` returns,
+  // giving cross-platform parity for the `Conversation.GetOutputVolume()`
+  // scalar without changing the public surface.
+  analyser.fftSize = 256;
   const monoGain = context.createGain();
   const spatialGain = context.createGain();
   const stereoPanner = context.createStereoPanner();
@@ -363,44 +385,48 @@ export async function createWebAudioSink(
       await context.close();
     },
     getVolume(): number {
-      // Mean of all frequency bins, normalised to [0, 1] — matches the
-      // SDK's @elevenlabs/client `calculateVolume` helper so the value
-      // returned through GetOutputVolume stays consistent with the previous
-      // BridgedOutputController behaviour. RMS would overweight transient
-      // peaks and produce visibly different readings on the same audio.
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      analyser.getByteFrequencyData(data);
+      // RMS over the analyser's most recent time-domain samples. Each byte
+      // is a sample in [0, 255] where 128 represents silence; (b - 128) / 128
+      // recovers a Float32 in [-1, 1]. Square-mean-sqrt of those values is
+      // the audible envelope amplitude, matching native's
+      // `Mathf.Sqrt(mean(_analysisBuffer^2))` so the two backends return
+      // comparable scalars for the same audio. Pre-step-6 this computed
+      // `mean(getByteFrequencyData)/255`, a spectral-magnitude average
+      // that read on a different scale from native and made the shipped
+      // TalkingBox sample's `volumeSensitivity` constant platform-dependent.
+      const data = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(data);
       getVolumeCallCount++;
       if (data.length === 0) return 0;
-      let sum = 0;
-      let maxBin = 0;
-      let nonZeroBins = 0;
+      let sumSquares = 0;
+      let minByte = 255;
+      let maxByte = 0;
       for (let i = 0; i < data.length; i++) {
-        sum += data[i];
-        if (data[i] > maxBin) maxBin = data[i];
-        if (data[i] > 0) nonZeroBins++;
+        const b = data[i];
+        if (b < minByte) minByte = b;
+        if (b > maxByte) maxByte = b;
+        const s = (b - 128) / 128;
+        sumSquares += s * s;
       }
-      const volume = sum / data.length / 255;
-      const clamped = volume < 0 ? 0 : volume > 1 ? 1 : volume;
+      const rms = Math.sqrt(sumSquares / data.length);
+      const clamped = rms < 0 ? 0 : rms > 1 ? 1 : rms;
       // Log the first 5 calls unconditionally so we can tell "getVolume is
-      // never called" apart from "getVolume is called but bins are silent".
-      // After that, rate-limit to ~once per second so a 60Hz polling loop
-      // doesn't drown the console.
+      // never called" apart from "getVolume is called but the analyser is
+      // silent". After that, rate-limit to ~once per second so a 60Hz
+      // polling loop doesn't drown the console.
       if (debugEnabled()) {
         const now = Date.now();
         const verbose = getVolumeCallCount <= 5;
         if (verbose || now - lastGetVolumeLogTime > 1000) {
           lastGetVolumeLogTime = now;
           debugLog(
-            `getVolume #${getVolumeCallCount}: bins =`,
+            `getVolume #${getVolumeCallCount}: samples =`,
             data.length,
-            "nonZero =",
-            nonZeroBins,
+            "min =",
+            minByte,
             "max =",
-            maxBin,
-            "mean =",
-            (sum / data.length).toFixed(2),
-            "→ volume =",
+            maxByte,
+            "→ rms =",
             clamped.toFixed(4),
             "context.state =",
             context.state,
@@ -409,7 +435,13 @@ export async function createWebAudioSink(
       }
       return clamped;
     },
-    getByteFrequencyData(buffer: Uint8Array<ArrayBuffer>): void {
+    getByteFrequencyData(length: number): number[] {
+      // Allocate JS-side and return Array.from(buffer) so the bridge's
+      // Newtonsoft-based decoder on the C# end can deserialise it as
+      // `byte[]`. Passing a Uint8Array through `JSON.stringify` yields
+      // `{"0":..,"1":..}` (an object keyed by index) which Newtonsoft does
+      // NOT decode as a byte array. See the WebAudioSink interface docs.
+      const buffer = new Uint8Array(length);
       analyser.getByteFrequencyData(buffer);
       getByteFrequencyDataCallCount++;
       if (debugEnabled()) {
@@ -427,8 +459,8 @@ export async function createWebAudioSink(
             sum += v;
           }
           debugLog(
-            `getByteFrequencyData #${getByteFrequencyDataCallCount}: buffer.length =`,
-            buffer.length,
+            `getByteFrequencyData #${getByteFrequencyDataCallCount}: length =`,
+            length,
             "nonZero =",
             nonZero,
             "max =",
@@ -440,6 +472,7 @@ export async function createWebAudioSink(
           );
         }
       }
+      return Array.from(buffer);
     },
   };
 }

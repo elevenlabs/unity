@@ -341,6 +341,13 @@ namespace ElevenLabs.WebGL.Bridged
         {
             if (_disposed || buffer == null || buffer.Length == 0)
                 return;
+            // JS sink contract (Bridge~/src/connection/web-audio-sink.ts):
+            // `getByteFrequencyData(length: number): number[]` — allocates a
+            // Uint8Array of `length` bytes, fills it from the analyser, and
+            // returns `Array.from(buffer)`. The number-array shape is the one
+            // Newtonsoft decodes as `byte[]`; returning the Uint8Array
+            // directly serialises as `{"0":..,"1":..}` (object keyed by
+            // index) which Newtonsoft does NOT decode as a byte array.
             byte[]? remote = _sink.Call<byte[]>("getByteFrequencyData", buffer.Length);
             if (remote == null)
                 return;

@@ -44,10 +44,14 @@ namespace ElevenLabs.Native
         // @elevenlabs/client.
         internal const int DefaultInterruptDurationMs = 2000;
 
-        // Most-recent samples kept for RMS / FFT visualisers. 25 ms matches
-        // UnityMicrophoneInput's analysis window so visualisers can render
-        // input and output with identical band semantics.
-        internal const int AnalysisWindowMs = 25;
+        // Most-recent samples kept for RMS / FFT visualisers. 5 ms (~240 samples
+        // at 48 kHz) tracks syllable-level envelope tightly enough that a
+        // GetVolume-driven scale pulse matches the audible cadence of
+        // `audioSource.GetOutputData(buffer:256, channel:0)` — the pre-step-6
+        // pattern devs were using directly. The previous 25 ms window dragged
+        // the bob behind the agent's voice by enough to look sluggish on the
+        // shipped TalkingBox sample.
+        internal const int AnalysisWindowMs = 5;
 
         private readonly FormatConfig _format;
         private readonly int _ringCapacity;

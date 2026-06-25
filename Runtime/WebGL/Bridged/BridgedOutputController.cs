@@ -79,6 +79,18 @@ namespace ElevenLabs.WebGL.Bridged
 
         public void GetByteFrequencyData(byte[] buffer)
         {
+            // Known broken on the WebRTC arm: the SDK's MediaDeviceOutput
+            // exposes `getByteFrequencyData(buffer: Uint8Array): void` (the
+            // upstream `OutputController` contract), not length-in/array-out.
+            // Calling it with a number throws JS-side and Newtonsoft decodes
+            // the error string as default(byte[]) → null → no-op + zero-fill.
+            // The WebSocket arm uses `WebAudioBackedOutput` which talks to
+            // our own JS sink and DOES honour the length-in/array-out shape.
+            // The fix for WebRTC needs a JS-side adapter that allocates a
+            // Uint8Array, calls the SDK's setter, and returns Array.from(buf);
+            // deferred until the WebRTC arm itself ships (see v0.3 in
+            // Docs~/plans/v0.1-parity.md and the step 6 notes in
+            // Docs~/plans/output-audio-source.md).
             byte[]? remote = _output.Call<byte[]>("getByteFrequencyData", buffer.Length);
             if (remote == null)
                 return;

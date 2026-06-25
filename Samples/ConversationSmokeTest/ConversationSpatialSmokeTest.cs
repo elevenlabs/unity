@@ -119,11 +119,14 @@ namespace ElevenLabs.WebGL.Samples.ConversationSmokeTest
                 Debug.Log("[SpatialSmoke] first audio chunk arrived ✓");
 
                 // Poll GetOutputVolume across a window of frames while audio
-                // is actively playing. Logs the C#-side reading so cross-
-                // checking against the JS-side [WebAudioSink] getVolume log
-                // shows whether values survive the bridge round-trip.
-                // 60 frames at ~60Hz = ~1s of sampling, enough to see at
-                // least one non-silent reading if the analyser is alive.
+                // is actively playing. This is the cross-platform sample-read
+                // API devs should use (post-step-6 of output-audio-source.md);
+                // raw `audioSource.GetOutputData(...)` on the bound AudioSource
+                // returns silent buffers on WebGL because the SDK plays through
+                // a parallel Web Audio graph — the AudioSource is a property
+                // carrier, never actually playing scripted PCM. 60 frames at
+                // ~60 Hz = ~1 s, enough to see at least one non-silent reading
+                // if the analyser tap is alive on this backend.
                 float maxVolume = 0f;
                 for (int i = 0; i < 60; i++)
                 {
@@ -137,6 +140,25 @@ namespace ElevenLabs.WebGL.Samples.ConversationSmokeTest
                 Debug.Log(
                     $"[SpatialSmoke] GetOutputVolume sampled across 60 frames; max = {maxVolume:F4}"
                 );
+                // Step-6 regression gate: if the JS sink's getVolume contract
+                // drifts (e.g. someone flips `getByteTimeDomainData` back to
+                // `getByteFrequencyData`, or the analyser stays at silence
+                // because the AudioContext never resumed), maxVolume will pin
+                // at 0 and this assertion catches it. 0.005 is a very small
+                // floor — quiet speech RMS routinely exceeds 0.05, so anything
+                // below this threshold is almost certainly broken plumbing,
+                // not a quiet line of dialogue.
+                const float MinExpectedMaxVolume = 0.005f;
+                if (maxVolume < MinExpectedMaxVolume)
+                {
+                    throw new InvalidOperationException(
+                        $"GetOutputVolume max ({maxVolume:F4}) stayed below "
+                            + $"{MinExpectedMaxVolume:F4} across 60 frames — the JS sink's "
+                            + "analyser tap appears silent. Check that "
+                            + "createWebAudioSink resumed the AudioContext and that "
+                            + "getVolume reads getByteTimeDomainData."
+                    );
+                }
 
                 var disconnectTask = AwaitEvent<DisconnectionDetails>(
                     handler => conversation.Disconnected += handler,

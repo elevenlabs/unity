@@ -50,7 +50,9 @@ interface StubGainNode extends StubAudioNode {
 
 interface StubAnalyserNode extends StubAudioNode {
   frequencyBinCount: number;
+  fftSize: number;
   getByteFrequencyData: ReturnType<typeof vi.fn>;
+  getByteTimeDomainData: ReturnType<typeof vi.fn>;
 }
 
 interface StubStereoPannerNode extends StubAudioNode {
@@ -130,8 +132,14 @@ function buildContext(options?: { sampleRate?: number }): StubAudioContext {
   ctx.createAnalyser.mockImplementation(() => {
     const node: StubAnalyserNode = {
       ...makeNode(),
+      // Defaults match the real AnalyserNode — fftSize 2048, half that for the
+      // frequency bin count. The sink overrides fftSize to 256 at construction
+      // so getVolume reads a 5 ms time-domain window; tests can assert on the
+      // overridden value via `activeContext.__analysers[0].fftSize`.
+      fftSize: 2048,
       frequencyBinCount: 32,
       getByteFrequencyData: vi.fn(),
+      getByteTimeDomainData: vi.fn(),
     };
     ctx.__analysers.push(node);
     return node;
@@ -450,14 +458,64 @@ describe("close", () => {
 });
 
 describe("getByteFrequencyData", () => {
-  it("forwards into the analyser node", async () => {
+  it("allocates a length-sized Uint8Array, fills it from the analyser, and returns an array", async () => {
     const sink = await createWebAudioSink({ sampleRate: 16000 });
-    const buffer = new Uint8Array(8);
+    // Stub analyser to populate the buffer it's handed with deterministic
+    // bytes so we can assert on the returned array shape AND the underlying
+    // analyser call passed a Uint8Array (not a number — the broken pre-step-6
+    // pattern). The bridge can't marshal a Uint8Array straight back to C#;
+    // Array.from converts to a JSON array of numbers that Newtonsoft decodes
+    // as `byte[]`.
+    activeContext.__analysers[0].getByteFrequencyData.mockImplementation(
+      (buf: Uint8Array) => {
+        for (let i = 0; i < buf.length; i++) buf[i] = (i + 1) * 10;
+      },
+    );
 
-    sink.getByteFrequencyData(buffer);
+    const result = sink.getByteFrequencyData(4);
 
     expect(
       activeContext.__analysers[0].getByteFrequencyData,
-    ).toHaveBeenCalledWith(buffer);
+    ).toHaveBeenCalledTimes(1);
+    const passed = activeContext.__analysers[0].getByteFrequencyData.mock
+      .calls[0][0] as Uint8Array;
+    expect(passed).toBeInstanceOf(Uint8Array);
+    expect(passed.length).toBe(4);
+    expect(result).toEqual([10, 20, 30, 40]);
+  });
+});
+
+describe("getVolume", () => {
+  it("computes RMS over time-domain samples normalised via (b - 128) / 128", async () => {
+    const sink = await createWebAudioSink({ sampleRate: 16000 });
+    // A constant deviation of 64 from the silence midpoint (128) → recovered
+    // float of 0.5 → RMS of exactly 0.5. Exercises the (b - 128) / 128 path
+    // without depending on a noisy synthetic waveform.
+    activeContext.__analysers[0].getByteTimeDomainData.mockImplementation(
+      (buf: Uint8Array) => {
+        for (let i = 0; i < buf.length; i++) buf[i] = 192;
+      },
+    );
+
+    expect(sink.getVolume()).toBeCloseTo(0.5, 5);
+  });
+
+  it("returns 0 for an analyser that's at silence midpoint (128 everywhere)", async () => {
+    const sink = await createWebAudioSink({ sampleRate: 16000 });
+    activeContext.__analysers[0].getByteTimeDomainData.mockImplementation(
+      (buf: Uint8Array) => {
+        for (let i = 0; i < buf.length; i++) buf[i] = 128;
+      },
+    );
+
+    expect(sink.getVolume()).toBe(0);
+  });
+
+  it("pins analyser.fftSize to 256 so the window is ~5 ms at 48 kHz", async () => {
+    // Native UnityAudioSourceOutput.AnalysisWindowMs is 5 ms after step 6;
+    // 256 / 48000 ≈ 5.3 ms keeps the two backends in lockstep so the same
+    // `volumeSensitivity` constant works on both platforms.
+    await createWebAudioSink({ sampleRate: 48000 });
+    expect(activeContext.__analysers[0].fftSize).toBe(256);
   });
 });

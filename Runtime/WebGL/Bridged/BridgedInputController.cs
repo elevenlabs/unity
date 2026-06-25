@@ -63,8 +63,16 @@ namespace ElevenLabs.WebGL.Bridged
 
         public void GetByteFrequencyData(byte[] buffer)
         {
-            // For v0.1 the JS side returns a fresh Uint8Array per call, marshalled
-            // as a JSON number array. The buffer length determines the band count.
+            // Known broken: the SDK's MediaDeviceInput exposes
+            // `getByteFrequencyData(buffer: Uint8Array): void`, not the
+            // length-in/array-out shape this wrapper calls with. The JS side
+            // throws and Newtonsoft decodes the error string as
+            // default(byte[]) → null → no-op + zero-fill. Same pre-existing
+            // gap as `BridgedOutputController.GetByteFrequencyData`; fixing
+            // it cleanly needs a JS-side adapter that allocates a Uint8Array,
+            // calls the SDK's setter, and returns Array.from(buf). Deferred
+            // alongside the WebRTC-arm work — see the step 6 notes in
+            // Docs~/plans/output-audio-source.md.
             byte[]? remote = _input.Call<byte[]>("getByteFrequencyData", buffer.Length);
             if (remote == null)
                 return;
