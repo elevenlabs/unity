@@ -118,12 +118,25 @@ namespace ElevenLabs.WebGL.Samples.ConversationSmokeTest
                 await firstAudioTask;
                 Debug.Log("[SpatialSmoke] first audio chunk arrived ✓");
 
-                // Give the property poll loop at least one frame to push the
-                // current source position to the JS sink. UpdateProperties
-                // fires from a per-frame Awaitable.NextFrameAsync, so a
-                // handful of explicit yields is plenty of slack.
-                for (int i = 0; i < 5; i++)
+                // Poll GetOutputVolume across a window of frames while audio
+                // is actively playing. Logs the C#-side reading so cross-
+                // checking against the JS-side [WebAudioSink] getVolume log
+                // shows whether values survive the bridge round-trip.
+                // 60 frames at ~60Hz = ~1s of sampling, enough to see at
+                // least one non-silent reading if the analyser is alive.
+                float maxVolume = 0f;
+                for (int i = 0; i < 60; i++)
+                {
+                    float v = conversation.GetOutputVolume();
+                    if (v > maxVolume)
+                        maxVolume = v;
+                    if (i % 10 == 0)
+                        Debug.Log($"[SpatialSmoke] frame {i} GetOutputVolume = {v:F4}");
                     await Awaitable.NextFrameAsync();
+                }
+                Debug.Log(
+                    $"[SpatialSmoke] GetOutputVolume sampled across 60 frames; max = {maxVolume:F4}"
+                );
 
                 var disconnectTask = AwaitEvent<DisconnectionDetails>(
                     handler => conversation.Disconnected += handler,

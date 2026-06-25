@@ -6,7 +6,14 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // allowImportingTsExtensions lets `debug-driver.ts` (invoked via plain
+    // `node`, not vitest) import `./serve-webgl.ts` with the explicit `.ts`
+    // suffix. Node 23+ type-strips on the fly, so the .ts import resolves
+    // without a transpile step. Vitest accepts both .js and .ts forms so
+    // sibling test files using `.js` aliases continue to work.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "vitest.config.ts"]
 }

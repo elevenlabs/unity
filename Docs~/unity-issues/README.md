@@ -27,3 +27,9 @@ See the "Reporting Unity issues" section of
   — UnityLinker silently drops package-internal `link.xml` files when
   the package is referenced as a local file-path package whose root is
   the embedded host project's parent.
+- [`webgl-scriptable-audio-pipeline.md`](./webgl-scriptable-audio-pipeline.md)
+  — WebGL has no scriptable audio pipeline: `AudioClip.Create(stream=true,
+  pcmreadercallback=…)`, `OnAudioFilterRead`, `AudioRenderer`, and
+  `AudioListener.GetOutputData` are all unavailable. Forces every audio
+  SDK to ship a parallel Web Audio graph; explains why
+  `audioSource.GetOutputData` returns silence on WebGL.

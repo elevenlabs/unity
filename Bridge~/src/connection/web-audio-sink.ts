@@ -109,10 +109,40 @@ export interface WebAudioSink {
   getByteFrequencyData(buffer: Uint8Array<ArrayBuffer>): void;
 }
 
+// Debug logger. Defaults to ON during the current investigation into why
+// AudioSource-bound visualisers aren't bouncing on WebGL — keeps the
+// browser console populated with `[WebAudioSink]` lines without anyone
+// needing to flip a flag first. The opt-out path stays available via
+// `globalThis.__elevenLabsWebAudioDebug__ = false` for anyone who wants
+// to silence them.
+//
+// TODO(output-audio-source): flip the default back to off (and the
+// comparison to `=== true`) once the bouncing-boxes regression is
+// resolved.
+function debugEnabled(): boolean {
+  return (
+    (globalThis as { __elevenLabsWebAudioDebug__?: boolean })
+      .__elevenLabsWebAudioDebug__ !== false
+  );
+}
+function debugLog(...args: unknown[]): void {
+  if (debugEnabled()) {
+    // eslint-disable-next-line no-console
+    console.log("[WebAudioSink]", ...args);
+  }
+}
+
 export async function createWebAudioSink(
   config: WebAudioSinkConfig,
 ): Promise<WebAudioSink> {
+  debugLog("createWebAudioSink: requested sampleRate =", config.sampleRate);
   const context = new AudioContext({ sampleRate: config.sampleRate });
+  debugLog(
+    "AudioContext constructed: state =",
+    context.state,
+    "actual sampleRate =",
+    context.sampleRate,
+  );
   // Blob URL keeps the worklet source self-contained in the bundle and avoids
   // shipping a sidecar .js file under Plugins/WebGL/.
   const blob = new Blob([WORKLET_SOURCE], { type: "application/javascript" });
@@ -153,6 +183,7 @@ export async function createWebAudioSink(
   // independently. The SDK's MediaDeviceOutput does the same — mirroring
   // here keeps GetOutputVolume parity with the pre-step-4 behaviour.
   await context.resume();
+  debugLog("AudioContext after resume: state =", context.state);
 
   // Defaults match Unity's AudioSource: full mono (spatialBlend = 0), unit
   // volume, listener + source at origin. C# pushes deltas at the start of the
@@ -161,6 +192,12 @@ export async function createWebAudioSink(
   masterGain.gain.value = 1;
   monoGain.gain.value = 1;
   spatialGain.gain.value = 0;
+  debugLog(
+    "graph wired; analyser.fftSize =",
+    analyser.fftSize,
+    "frequencyBinCount =",
+    analyser.frequencyBinCount,
+  );
 
   // Test instrumentation hook (consumed by IntegrationTests~). If a function
   // is registered at globalThis.__elevenLabsWebAudioSinkHook__ before the
@@ -194,6 +231,11 @@ export async function createWebAudioSink(
   }
 
   let userVolume = 1;
+  let playAudioCallCount = 0;
+  let getVolumeCallCount = 0;
+  let lastGetVolumeLogTime = 0;
+  let getByteFrequencyDataCallCount = 0;
+  let lastGetByteFrequencyDataLogTime = 0;
 
   // Mirrors MediaDeviceOutput.playAudio's cancelScheduledValues + volume snap
   // before queueing a chunk. Without this, a chunk that arrives mid-interrupt
@@ -211,17 +253,52 @@ export async function createWebAudioSink(
 
   return {
     playAudio(chunk: ArrayBuffer): void {
-      if (chunk.byteLength < 2) return;
+      const inputByteLength = chunk.byteLength;
+      if (inputByteLength < 2) {
+        if (debugEnabled()) {
+          debugLog(
+            "playAudio: dropping undersized chunk (byteLength =",
+            inputByteLength,
+            ")",
+          );
+        }
+        return;
+      }
       // int16-LE → Float32, matching UnityAudioSourceOutput.DecodePcm16's
       // asymmetric scale (32768 for negatives, 32767 for positives) so a
       // silent buffer round-trips through Web Audio with no DC offset.
       const view = new Int16Array(chunk);
-      const samples = new Float32Array(view.length);
-      for (let i = 0; i < view.length; i++) {
+      const sampleCount = view.length;
+      const samples = new Float32Array(sampleCount);
+      let peak = 0;
+      for (let i = 0; i < sampleCount; i++) {
         const s = view[i];
-        samples[i] = s < 0 ? s / 32768 : s / 32767;
+        const f = s < 0 ? s / 32768 : s / 32767;
+        samples[i] = f;
+        const a = f < 0 ? -f : f;
+        if (a > peak) peak = a;
       }
       resetGainForPlayback();
+      playAudioCallCount++;
+      // Log BEFORE the postMessage transfers ownership. Reading samples.length
+      // after the transfer returns 0 (buffer is detached), which was the
+      // initial red-herring that made every chunk look empty. Captured into
+      // sampleCount + peak above before the transfer so the log is honest.
+      if (
+        debugEnabled() &&
+        (playAudioCallCount <= 5 || playAudioCallCount % 25 === 0)
+      ) {
+        debugLog(
+          `playAudio #${playAudioCallCount}: inputByteLength =`,
+          inputByteLength,
+          "samples =",
+          sampleCount,
+          "peak =",
+          peak.toFixed(4),
+          "context.state =",
+          context.state,
+        );
+      }
       // Transfer ownership of the underlying buffer to the worklet — avoids
       // copying the chunk across the main → audio thread boundary.
       worklet.port.postMessage({ type: "pcm", data: samples }, [
@@ -293,14 +370,76 @@ export async function createWebAudioSink(
       // peaks and produce visibly different readings on the same audio.
       const data = new Uint8Array(analyser.frequencyBinCount);
       analyser.getByteFrequencyData(data);
+      getVolumeCallCount++;
       if (data.length === 0) return 0;
       let sum = 0;
-      for (let i = 0; i < data.length; i++) sum += data[i];
+      let maxBin = 0;
+      let nonZeroBins = 0;
+      for (let i = 0; i < data.length; i++) {
+        sum += data[i];
+        if (data[i] > maxBin) maxBin = data[i];
+        if (data[i] > 0) nonZeroBins++;
+      }
       const volume = sum / data.length / 255;
-      return volume < 0 ? 0 : volume > 1 ? 1 : volume;
+      const clamped = volume < 0 ? 0 : volume > 1 ? 1 : volume;
+      // Log the first 5 calls unconditionally so we can tell "getVolume is
+      // never called" apart from "getVolume is called but bins are silent".
+      // After that, rate-limit to ~once per second so a 60Hz polling loop
+      // doesn't drown the console.
+      if (debugEnabled()) {
+        const now = Date.now();
+        const verbose = getVolumeCallCount <= 5;
+        if (verbose || now - lastGetVolumeLogTime > 1000) {
+          lastGetVolumeLogTime = now;
+          debugLog(
+            `getVolume #${getVolumeCallCount}: bins =`,
+            data.length,
+            "nonZero =",
+            nonZeroBins,
+            "max =",
+            maxBin,
+            "mean =",
+            (sum / data.length).toFixed(2),
+            "→ volume =",
+            clamped.toFixed(4),
+            "context.state =",
+            context.state,
+          );
+        }
+      }
+      return clamped;
     },
     getByteFrequencyData(buffer: Uint8Array<ArrayBuffer>): void {
       analyser.getByteFrequencyData(buffer);
+      getByteFrequencyDataCallCount++;
+      if (debugEnabled()) {
+        const verbose = getByteFrequencyDataCallCount <= 5;
+        const now = Date.now();
+        if (verbose || now - lastGetByteFrequencyDataLogTime > 1000) {
+          lastGetByteFrequencyDataLogTime = now;
+          let max = 0;
+          let nonZero = 0;
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) {
+            const v = buffer[i];
+            if (v > max) max = v;
+            if (v > 0) nonZero++;
+            sum += v;
+          }
+          debugLog(
+            `getByteFrequencyData #${getByteFrequencyDataCallCount}: buffer.length =`,
+            buffer.length,
+            "nonZero =",
+            nonZero,
+            "max =",
+            max,
+            "mean =",
+            (sum / Math.max(1, buffer.length)).toFixed(2),
+            "context.state =",
+            context.state,
+          );
+        }
+      }
     },
   };
 }

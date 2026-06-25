@@ -24,14 +24,83 @@ The component layer ([`agent-component.md`](./agent-component.md) §5) names the
 
 The earlier draft of this plan treated WebGL as "field silently ignored, deferred to v0.3" on the basis that the JS SDK kept audio entirely JS-side. That was a footgun: a Unity dev wires a 3D `AudioSource` on an NPC, ships a WebGL build, and discovers in QA that spatialisation silently doesn't work.
 
+The principle, stated positively: **a Unity dev should never have to pick a different API depending on whether they're targeting native or WebGL.** Every cross-platform property of the SDK (audio routing, volume reading, sample reading, event subscriptions, …) must be reachable from a single SDK method that the dev calls verbatim on both. The SDK's job is to route to whatever backend works on the active platform.
+
 Two facts shape the rewrite:
 
 1. **The `@elevenlabs/client` SDK already accepts custom output sinks.** [`attachConnectionToOutput`](../../Bridge~/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.d.ts) only requires `{ playAudio(chunk: ArrayBuffer): void }` — no upstream changes are needed to intercept PCM. The "needs upstream PCM intercept hook" claim in [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) is stale and should be patched as part of executing this plan. (`initial-rfc.md` is a historical RFC and is not edited.)
-2. **`AudioClip.PCMReaderCallback` is not supported on WebGL.** [Unity's WebGL audio docs](https://docs.unity3d.com/Manual/webgl-audio.html) state that `AudioClip.Create` only works with `stream: false`; the "scriptable audio pipeline is not supported." This rules out the obvious-looking simplification of reusing `UnityAudioSourceOutput` on WebGL.
+2. **`AudioClip.PCMReaderCallback` is not supported on WebGL.** Per [Unity's WebGL audio docs](https://docs.unity3d.com/Manual/webgl-audio.html) the "scriptable audio pipeline is not supported"; `OnAudioFilterRead` is explicitly unsupported too; `AudioRenderer` is similarly absent. This rules out the obvious-looking simplification of reusing `UnityAudioSourceOutput` on WebGL, and means that **any Unity audio API that reads or emits scripted samples (`AudioSource.GetOutputData`, `AudioListener.GetOutputData`, `PCMReaderCallback`, `OnAudioFilterRead`) silently returns nothing on WebGL when applied to an SDK-supplied source.** The platform-level constraint is captured in [`Docs~/unity-issues/webgl-scriptable-audio-pipeline.md`](../unity-issues/webgl-scriptable-audio-pipeline.md) so the next dev who hits it doesn't have to retrace.
 
 The path therefore: keep `UnityAudioSourceOutput` for native, build a Web Audio-based emulation layer on WebGL that exposes the *same* `ConversationOptions.OutputAudioSource` API. Users get a coherent cross-platform contract; FMOD-specific concepts (mixer groups, reverb zones, custom rolloff curves) degrade gracefully on WebGL with a one-time warning.
 
 WebRTC-on-WebGL remains v0.3 work (LiveKit owns the audio pipeline via remote `AudioTrack` rather than `audio` events — a `WebRTCAudioAdapter` is genuinely needed there; see [`initial-rfc.md`](./initial-rfc.md) §132).
+
+### Corollary: don't use raw Unity audio APIs against the supplied `AudioSource`
+
+A Unity dev who wires `OutputAudioSource = npc.audioSource` and then writes `npc.audioSource.GetOutputData(buffer, 0)` to drive a volume meter will get a working bob on native and silent boxes on WebGL — because on WebGL the SDK plays through a parallel Web Audio graph and the `AudioSource` is a property carrier, never actually playing scripted PCM. This is **not** a fixable WebGL bug (see the `webgl-scriptable-audio-pipeline.md` writeup); it's a platform constraint.
+
+The SDK answers with a parallel set of cross-platform reading APIs on `Conversation` itself:
+
+| What the dev wants | Native-only API (silently broken on WebGL) | Cross-platform SDK API |
+|---|---|---|
+| Scalar volume scalar `[0, 1]` | `audioSource.GetOutputData(buf); rms(buf);` | `conversation.GetOutputVolume()` |
+| Frequency-domain magnitudes | `AudioSource.GetSpectrumData(...)` | `conversation.GetByteFrequencyData(buf)` |
+| Time-domain samples around playback head | `audioSource.GetOutputData(buf, 0)` | **`conversation.GetOutputSamples(buf)`** *(new — see "Cross-platform sample-reading API" below)* |
+
+Sample-shipped consumers (`Samples/`) must use the cross-platform API — they're the patterns devs copy.
+
+## Cross-platform sample-reading API
+
+The existing `Conversation.GetOutputVolume()` already routes to a backend-appropriate analyser (native: RMS over a 25 ms analysis window populated inside `PCMReaderCallback`; WebGL: mean of `getByteFrequencyData` from the JS sink's `AnalyserNode`). But the value scale, smoothing window, and update cadence differ enough between backends that a dev tuning a snappy game-feel meter sees one consistent value on native and a different one on WebGL.
+
+The fix is a thinner, more direct API: **`Conversation.GetOutputSamples(float[] buffer)`** — fill `buffer` with the most recent time-domain samples (in `[-1, 1]`) being played right now. The dev computes their own RMS / envelope / FFT off the buffer; both backends sample at the same logical location ("the playback head"), with the same numeric scale.
+
+### Backend implementations
+
+- **Native (`UnityAudioSourceOutput`)** — the analysis buffer is already a ring of recent post-decode samples (fed in `ReadFromRing` on the audio thread). Expose a new method that copies the most recent `buffer.Length` samples backwards from `_analysisWritePos` into the caller's buffer. The ring is much shorter (25 ms) than the playback ring (5 s); expand `_analysisBuffer` to match the caller's largest expected window once if needed, or document the upper bound.
+- **WebGL (`WebAudioBackedOutput` + JS sink)** — add `getOutputSamples(length: number): Uint8Array | Float32Array` (decision below) on the JS sink. Implementation calls `analyser.getByteTimeDomainData(buf)` with `analyser.fftSize` sized to the requested window (default 256), normalises to `[-1, 1]` via `(byte - 128) / 128`, and returns. C# wrapper receives the array over the bridge and copies into the caller's buffer.
+
+### Bridge return-shape decision
+
+Tradeoff between two shapes:
+
+- **`byte[]` (uint8, centered around 128, like the raw `getByteTimeDomainData`)** — minimal bridge traffic (1 byte/sample), 8-bit precision is plenty for any visualiser. C# does the `(byte - 128) / 128` conversion. Mirrors the existing `getByteFrequencyData` round-trip shape.
+- **`float[]` (IEEE float, `[-1, 1]`, decoded JS-side)** — saves the dev from learning the byte-domain encoding; matches what the native API returns directly. Costs 4× bridge bytes.
+
+Recommend **`float[]`** for the C#-side API, with the JS↔C# bridge carrying `byte[]` under the hood and the C# wrapper doing the `(byte - 128) / 128` decode + scale before copying into the caller's `float[]`. Best of both: minimal bridge cost, dev sees a familiar Unity-style float buffer that matches the native shape.
+
+### TalkingBox patch
+
+The shipped sample becomes:
+
+```csharp
+private float SampleOutputRms()
+{
+    if (activeConversation == null) return 0f;
+    activeConversation.GetOutputSamples(sampleBuffer);
+    double sumSquares = 0.0;
+    for (int i = 0; i < sampleBuffer.Length; i++)
+        sumSquares += sampleBuffer[i] * sampleBuffer[i];
+    return (float)Math.Sqrt(sumSquares / sampleBuffer.Length);
+}
+```
+
+The `audioSource` field shrinks back to its true role: spatial-config carrier (transform/spatialBlend/min/max/rolloff). No more `audioSource.GetOutputData`, no more `isPlaying` short-circuit, no more native-vs-WebGL drift in the bob.
+
+### Known issues surfaced while debugging (clean up as part of step 6)
+
+- **`web-audio-sink.ts` debug logging is currently default-ON.** During the WebGL bob-regression investigation the gate was inverted so the JS sink prints `[WebAudioSink] …` lines unconditionally. Re-gate to default-OFF (`__elevenLabsWebAudioDebug__ === true`) before the step-6 commit. Search for the `TODO(output-audio-source)` comment in `Bridge~/src/connection/web-audio-sink.ts`.
+- **C# `WebAudioBackedOutput.GetByteFrequencyData` API mismatch with JS sink.** [`WebAudioBackedOutput.cs:340`](../../Runtime/WebGL/Bridged/WebAudioBackedOutput.cs#L340) calls `_sink.Call<byte[]>("getByteFrequencyData", buffer.Length)` (length-in, `byte[]`-out), but the JS sink follows the SDK contract `(buffer: Uint8Array) => void` (buffer-in, void-out). Result: the C# call no-ops and `Conversation.GetByteFrequencyData` always returns zeros on WebGL. Pre-existing on [`BridgedOutputController.cs:81`](../../Runtime/WebGL/Bridged/BridgedOutputController.cs#L81) too — same broken pattern was copied. Fix as part of step 6: change the JS sink's `getByteFrequencyData` to take a length and return a `Uint8Array`; update both C# wrappers' call sites.
+- **Logging-bug confession in step-5 debug-driver.** The first round of `playAudio` instrumentation logged `samples.length` after `worklet.port.postMessage(..., [samples.buffer])` had already transferred ownership — `samples.length` reads 0 on a detached buffer. Already fixed in the bundle; mentioning so the pattern doesn't recur.
+
+### Verification gates
+
+This refactor must verify both backends explicitly before landing:
+
+1. **Native standalone build** (or Editor Play Mode) of the `Getting Started` scene — TalkingBoxes bob with the agent's voice, with sensitivity tuned so normal speech reaches near-peak. If the native bob is sluggish vs. the previous `audioSource.GetOutputData` reading, dig into the analysis buffer's window size — don't paper over with sensitivity-tuning alone.
+2. **WebGL build** of the same scene — TalkingBoxes bob identically. Same `volumeSensitivity` constant should work on both. If it doesn't, that's a real cross-backend value-scale drift that needs reconciling before shipping.
+
+Both verifications use the Playwright debug driver at [`IntegrationTests~/src/debug-driver.ts`](../../IntegrationTests~/src/debug-driver.ts) (already wired with `__elevenLabsWebAudioDebug__ = true` for in-browser introspection of the JS sink's per-call `[WebAudioSink]` lines).
 
 ## API surface
 
@@ -266,4 +335,5 @@ Order matters; each step is independently committable.
 3. **C# `WebAudioBackedOutput`** — wraps the sink, holds the `AudioSource`, owns the property-polling loop. C# Edit Mode tests using a mock `JsObject`.
 4. **`BridgedSession` integration** — swap `createMediaDeviceOutput` for `createWebAudioSink`; delete the now-unused factory registration; update any tests that referenced the old factory.
 5. **Integration smoke** — extend `Samples/ConversationSmokeTest/` and `IntegrationTests~/` to assert spatial properties round-trip.
-6. **Docs fix-up** — patch `ARCHITECTURE.md` audio-routing section + add a "WebGL audio output limitations" subsection to `COMPATIBILITY.md` mirroring the fidelity matrix above.
+6. **Cross-platform sample-reading API** *(added after step 5 surfaced the TalkingBox bob regression on WebGL)* — add `Conversation.GetOutputSamples(float[] buffer)`, implement on both backends, patch the shipped TalkingBox sample to use it, verify on both platforms via the Playwright debug driver. Detail in the "Cross-platform sample-reading API" section above.
+7. **Docs fix-up** — patch `ARCHITECTURE.md` audio-routing section + add a "WebGL audio output limitations" subsection to `COMPATIBILITY.md` mirroring the fidelity matrix above, cross-linking [`Docs~/unity-issues/webgl-scriptable-audio-pipeline.md`](../unity-issues/webgl-scriptable-audio-pipeline.md).
