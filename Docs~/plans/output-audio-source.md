@@ -97,6 +97,15 @@ Both verifications use the Playwright debug driver at [`IntegrationTests~/src/de
 - ✅ Unit tests: Bridge~ Vitest (172 tests, includes the new `getByteTimeDomainData`-RMS + length-in/array-out coverage); Unity Edit Mode tests run through Getting Started via batchmode (395/395 passed). Test discovery from Getting Started required adding `"testables": ["io.elevenlabs.agents"]` to its `Packages/manifest.json` — a one-line, persistent change that lets the SDK's gated test assemblies (`UNITY_INCLUDE_TESTS`) compile inside the user's project so we can drive batchmode without fighting the editor lock on a separately-opened TestProject.
 - ⚠️ End-to-end WebGL volume parity (running the spatial smoke build against a real ElevenLabs agent through the rebuilt JS sink) was **not** verified this session: every conversation smoke under `IntegrationTests~/` logs `CONFIG MISSING` and the harness treats that as a clean-skip, so the live `GetOutputVolume` numbers never get exercised. The behaviour reproduces on the untouched `WebGLConversationSmoke` build too, so it's pre-existing — not introduced by step 6 — and orthogonal to the sub-items above. The added regression assertion in [`ConversationSpatialSmokeTest.cs`](../../Samples/ConversationSmokeTest/ConversationSpatialSmokeTest.cs) (peak `GetOutputVolume` ≥ `0.005` over 60 frames) is the gate that will fire once the CONFIG MISSING blocker is unwound; tracking that as a step-6 follow-up rather than a blocker.
 
+### Step-6 follow-up: unwind the WebGL `CONFIG MISSING` skip
+
+Open investigation. The agent ID in `TestProject/Assets/Resources/ConversationSmokeConfig.asset` isn't reaching the WebGL runtime — both `WebGLConversationSmoke` and `WebGLConversationSpatialSmoke` builds log `CONFIG MISSING` at startup. The asset, its `.meta`, and the script GUID match correctly; Edit Mode tests load the config fine. Suspect candidates for the WebGL-only failure (not yet bisected):
+
+1. **IL2CPP managed stripping** drops the `ConversationSmokeConfig` type from the WebGL build because nothing statically references it from a non-stripped entry point. Symptom would be `Resources.Load<ConversationSmokeConfig>(...)` returning `null` because the runtime type is gone. Fix: add a `[Preserve]` attribute on the class, or add a `link.xml` entry, or reference it from a non-stripped code path.
+2. **`Resources/` subfolder pruning** — the Unity WebGL build pipeline strips empty/near-empty `Resources/` subfolders or specific asset types it considers unused. Symptom would be the asset just not being in the built `Build/WebGL*/Build/*.data` payload. Verify by listing the embedded files in the data archive after a fresh build.
+
+Bisect order: (1) is cheaper to disprove — add `[Preserve]`, rebuild, see if CONFIG MISSING goes away. If not, dig into (2) with the data-archive inspection. Once unwound, the spatial smoke's `MinExpectedMaxVolume` assertion in [`ConversationSpatialSmokeTest.cs`](../../Samples/ConversationSmokeTest/ConversationSpatialSmokeTest.cs) fires automatically and gates the end-to-end step-6 verification.
+
 ## API surface
 
 A new nullable field on `ConversationOptions`.
