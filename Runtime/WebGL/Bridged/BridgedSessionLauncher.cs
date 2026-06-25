@@ -65,6 +65,25 @@ namespace ElevenLabs.WebGL.Bridged
             Conversation.SessionFactory = StartAsync;
         }
 
+        // Test seam: lets the Editor Play Mode rejection be exercised from Edit
+        // Mode tests without actually entering Play Mode. Default reads
+        // Application.isPlaying at call time on Editor builds and is hardcoded
+        // false in built players, so production behaviour is unchanged.
+        internal static Func<bool> EditorPlayModeProbe { get; set; } =
+            static () =>
+#if UNITY_EDITOR
+                UnityEngine.Application.isPlaying;
+#else
+                false;
+#endif
+
+        internal const string EditorPlayModeRejectionMessage =
+            "ElevenLabs Agents cannot run in the Unity Editor when WebGL is the active build target — "
+            + "the WebGL bridge only resolves inside a built WebGL output (browser). To test in the "
+            + "Editor, switch the active build target to Mac / Windows / Linux via Build Profiles; the "
+            + "native transport runs in Play Mode and supports the same Conversation API. Re-select "
+            + "WebGL when you're ready to build for the browser.";
+
         // Drives BridgedSession.StartAsync, then constructs the cross-platform
         // Conversation around the (connection, input, output) triple and marks
         // it Connected. Status.Connecting is skipped on purpose: callers learn
@@ -72,6 +91,17 @@ namespace ElevenLabs.WebGL.Bridged
         // state on a Conversation reference they don't yet hold.
         internal static async Awaitable<Conversation> StartAsync(ConversationOptions options)
         {
+            // Editor Play Mode under a WebGL active target reaches this factory
+            // (the Native asmdef is excluded from WebGL targets, so only the
+            // bridged launcher registers), but the JS bridge's `__Internal`
+            // DllImports never resolve in the Editor process — the call would
+            // otherwise surface as the cryptic "WebGL bridge is not available
+            // outside WebGL builds" from the synthetic Native stub. Reject up
+            // front with an actionable hint about switching active build target.
+            if (EditorPlayModeProbe())
+            {
+                throw new InvalidOperationException(EditorPlayModeRejectionMessage);
+            }
             ValidateOptions(options);
             BridgedSession session = await BridgedSession.StartAsync(options);
             // HttpFileUploader is platform-neutral: on WebGL it runs through

@@ -143,5 +143,40 @@ namespace ElevenLabs.WebGL.Bridged.Tests
             var ex = Assert.Throws<ArgumentException>(() => task.GetAwaiter().GetResult());
             StringAssert.Contains("WebRTC transport requires ConversationToken", ex!.Message);
         }
+
+        [Test]
+        public void StartSessionAsync_RejectsEditorPlayMode_WithActionableMessage()
+        {
+            // Editor Play Mode under WebGL active target would otherwise reach
+            // the `__Internal` DllImport stub and surface a cryptic
+            // "WebGL bridge is not available outside WebGL builds". The
+            // launcher catches this up front. Edit Mode tests can't enter Play
+            // Mode without major scaffolding, so the launcher exposes
+            // EditorPlayModeProbe as a swappable predicate that defaults to
+            // Application.isPlaying; this test flips it to true and asserts the
+            // actionable error surfaces in place of the bridge propagation.
+            var previousProbe = BridgedSessionLauncher.EditorPlayModeProbe;
+            BridgedSessionLauncher.EditorPlayModeProbe = () => true;
+            try
+            {
+                var task = Conversation.StartSessionAsync(
+                    new ConversationOptions
+                    {
+                        AgentId = "agent-test",
+                        ConnectionType = ConnectionType.WebSocket,
+                    }
+                );
+                var ex = Assert.Throws<InvalidOperationException>(() =>
+                    task.GetAwaiter().GetResult()
+                );
+                StringAssert.Contains("Editor", ex!.Message);
+                StringAssert.Contains("Build Profiles", ex.Message);
+                StringAssert.Contains("native transport", ex.Message);
+            }
+            finally
+            {
+                BridgedSessionLauncher.EditorPlayModeProbe = previousProbe;
+            }
+        }
     }
 }
