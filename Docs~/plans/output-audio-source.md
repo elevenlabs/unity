@@ -39,53 +39,42 @@ WebRTC-on-WebGL remains v0.3 work (LiveKit owns the audio pipeline via remote `A
 
 A Unity dev who wires `OutputAudioSource = npc.audioSource` and then writes `npc.audioSource.GetOutputData(buffer, 0)` to drive a volume meter will get a working bob on native and silent boxes on WebGL — because on WebGL the SDK plays through a parallel Web Audio graph and the `AudioSource` is a property carrier, never actually playing scripted PCM. This is **not** a fixable WebGL bug (see the `webgl-scriptable-audio-pipeline.md` writeup); it's a platform constraint.
 
-The SDK answers with a parallel set of cross-platform reading APIs on `Conversation` itself:
+The SDK answers with cross-platform reading APIs on `Conversation`, deliberately mirroring the public surface of the upstream `@elevenlabs/client` SDK:
 
 | What the dev wants | Native-only API (silently broken on WebGL) | Cross-platform SDK API |
 |---|---|---|
-| Scalar volume scalar `[0, 1]` | `audioSource.GetOutputData(buf); rms(buf);` | `conversation.GetOutputVolume()` |
+| Scalar volume `[0, 1]` for an envelope/meter/bob | `audioSource.GetOutputData(buf); rms(buf);` | `conversation.GetOutputVolume()` |
 | Frequency-domain magnitudes | `AudioSource.GetSpectrumData(...)` | `conversation.GetByteFrequencyData(buf)` |
-| Time-domain samples around playback head | `audioSource.GetOutputData(buf, 0)` | **`conversation.GetOutputSamples(buf)`** *(new — see "Cross-platform sample-reading API" below)* |
 
 Sample-shipped consumers (`Samples/`) must use the cross-platform API — they're the patterns devs copy.
 
-## Cross-platform sample-reading API
+## Cross-platform volume-reading consistency
 
-The existing `Conversation.GetOutputVolume()` already routes to a backend-appropriate analyser (native: RMS over a 25 ms analysis window populated inside `PCMReaderCallback`; WebGL: mean of `getByteFrequencyData` from the JS sink's `AnalyserNode`). But the value scale, smoothing window, and update cadence differ enough between backends that a dev tuning a snappy game-feel meter sees one consistent value on native and a different one on WebGL.
+The plan does **not** add a new public sample-reading API. The JS SDK's [`OutputController` interface](../../Bridge~/node_modules/@elevenlabs/client/dist/OutputController.d.ts) only exposes `getVolume()` and `getByteFrequencyData(buffer)` publicly, and the Unity SDK matches that surface — adding `Conversation.GetOutputSamples(float[])` would commit us to a Unity-only public method with no upstream counterpart, increasing the maintenance surface every time the SDK ships a new audio path.
 
-The fix is a thinner, more direct API: **`Conversation.GetOutputSamples(float[] buffer)`** — fill `buffer` with the most recent time-domain samples (in `[-1, 1]`) being played right now. The dev computes their own RMS / envelope / FFT off the buffer; both backends sample at the same logical location ("the playback head"), with the same numeric scale.
+Instead the existing `Conversation.GetOutputVolume()` becomes the single cross-platform read API, with both backends tuned to return comparable values:
 
-### Backend implementations
+- **Native (`UnityAudioSourceOutput.GetVolume`)** — currently RMS over a 25 ms analysis window. Shrink the analysis window so the bob tracks the audible envelope at the same cadence `audioSource.GetOutputData(buffer:256, channel:0)` previously did (~5 ms at 48 kHz). The window size is a constant on the controller; either reduce `AnalysisWindowMs` from 25 → 5, or expose a second tighter ring fed by the same `ReadFromRing` drain so visualisers and existing meters can co-exist.
+- **WebGL (`WebAudioBackedOutput.GetVolume` → JS sink `getVolume`)** — currently mean of `analyser.getByteFrequencyData` (FFT bins) / 255. Switch to RMS of `analyser.getByteTimeDomainData` over a small window (`analyser.fftSize = 256`), normalised via `(byte - 128) / 128`. That matches the native shape semantically — both compute "RMS of the most recent time-domain samples at the playback head" — and produces directly comparable scalar values.
 
-- **Native (`UnityAudioSourceOutput`)** — the analysis buffer is already a ring of recent post-decode samples (fed in `ReadFromRing` on the audio thread). Expose a new method that copies the most recent `buffer.Length` samples backwards from `_analysisWritePos` into the caller's buffer. The ring is much shorter (25 ms) than the playback ring (5 s); expand `_analysisBuffer` to match the caller's largest expected window once if needed, or document the upper bound.
-- **WebGL (`WebAudioBackedOutput` + JS sink)** — add `getOutputSamples(length: number): Uint8Array | Float32Array` (decision below) on the JS sink. Implementation calls `analyser.getByteTimeDomainData(buf)` with `analyser.fftSize` sized to the requested window (default 256), normalises to `[-1, 1]` via `(byte - 128) / 128`, and returns. C# wrapper receives the array over the bridge and copies into the caller's buffer.
-
-### Bridge return-shape decision
-
-Tradeoff between two shapes:
-
-- **`byte[]` (uint8, centered around 128, like the raw `getByteTimeDomainData`)** — minimal bridge traffic (1 byte/sample), 8-bit precision is plenty for any visualiser. C# does the `(byte - 128) / 128` conversion. Mirrors the existing `getByteFrequencyData` round-trip shape.
-- **`float[]` (IEEE float, `[-1, 1]`, decoded JS-side)** — saves the dev from learning the byte-domain encoding; matches what the native API returns directly. Costs 4× bridge bytes.
-
-Recommend **`float[]`** for the C#-side API, with the JS↔C# bridge carrying `byte[]` under the hood and the C# wrapper doing the `(byte - 128) / 128` decode + scale before copying into the caller's `float[]`. Best of both: minimal bridge cost, dev sees a familiar Unity-style float buffer that matches the native shape.
+If an internal SDK consumer ever needs raw post-DSP samples (not a public dev affordance), keep that as `internal` on `IOutputController` / `Conversation` so we can extract it without committing to a public contract. v0.1 does not need this.
 
 ### TalkingBox patch
 
-The shipped sample becomes:
+The shipped sample drops `SampleOutputRms` + `sampleBuffer` entirely and reads the SDK's scalar directly:
 
 ```csharp
-private float SampleOutputRms()
+private void Update()
 {
-    if (activeConversation == null) return 0f;
-    activeConversation.GetOutputSamples(sampleBuffer);
-    double sumSquares = 0.0;
-    for (int i = 0; i < sampleBuffer.Length; i++)
-        sumSquares += sampleBuffer[i] * sampleBuffer[i];
-    return (float)Math.Sqrt(sumSquares / sampleBuffer.Length);
+    float rms = activeConversation?.GetOutputVolume() ?? 0f;
+    float target = Mathf.Clamp01(rms * volumeSensitivity);
+    float alpha = 1f - Mathf.Exp(-Time.deltaTime / Mathf.Max(0.001f, smoothingTau));
+    smoothedVolume = Mathf.Lerp(smoothedVolume, target, alpha);
+    transform.localPosition = baselinePosition + Vector3.up * (smoothedVolume * peakOffsetY);
 }
 ```
 
-The `audioSource` field shrinks back to its true role: spatial-config carrier (transform/spatialBlend/min/max/rolloff). No more `audioSource.GetOutputData`, no more `isPlaying` short-circuit, no more native-vs-WebGL drift in the bob.
+The `audioSource` field shrinks back to its true role: spatial-config carrier (transform/spatialBlend/min/max/rolloff). No more `audioSource.GetOutputData`, no more `isPlaying` short-circuit, no more native-vs-WebGL drift in the bob. `volumeSensitivity` may need re-tuning post-swap since the SDK's RMS window differs from the previous 256-sample `GetOutputData` read — that's a single inspector value, not a code change.
 
 ### Known issues surfaced while debugging (clean up as part of step 6)
 
@@ -335,5 +324,5 @@ Order matters; each step is independently committable.
 3. **C# `WebAudioBackedOutput`** — wraps the sink, holds the `AudioSource`, owns the property-polling loop. C# Edit Mode tests using a mock `JsObject`.
 4. **`BridgedSession` integration** — swap `createMediaDeviceOutput` for `createWebAudioSink`; delete the now-unused factory registration; update any tests that referenced the old factory.
 5. **Integration smoke** — extend `Samples/ConversationSmokeTest/` and `IntegrationTests~/` to assert spatial properties round-trip.
-6. **Cross-platform sample-reading API** *(added after step 5 surfaced the TalkingBox bob regression on WebGL)* — add `Conversation.GetOutputSamples(float[] buffer)`, implement on both backends, patch the shipped TalkingBox sample to use it, verify on both platforms via the Playwright debug driver. Detail in the "Cross-platform sample-reading API" section above.
+6. **Cross-platform volume-reading consistency** *(added after step 5 surfaced the TalkingBox bob regression on WebGL)* — no new public API surface; tune both backends so `Conversation.GetOutputVolume()` returns comparable scalars (native: shrink analysis window from 25 ms → ~5 ms; WebGL: switch JS sink's `getVolume` from `getByteFrequencyData`-mean to `getByteTimeDomainData`-RMS), patch the shipped TalkingBox sample to use the SDK API, verify on both platforms via the Playwright debug driver. Detail in the "Cross-platform volume-reading consistency" section above.
 7. **Docs fix-up** — patch `ARCHITECTURE.md` audio-routing section + add a "WebGL audio output limitations" subsection to `COMPATIBILITY.md` mirroring the fidelity matrix above, cross-linking [`Docs~/unity-issues/webgl-scriptable-audio-pipeline.md`](../unity-issues/webgl-scriptable-audio-pipeline.md).
