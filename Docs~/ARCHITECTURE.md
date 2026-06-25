@@ -145,23 +145,59 @@ the existing `JsObject` primitive.
 
 ## Audio routing
 
-Two modes, exposed via an `AudioSink` choice on `ConversationOptions`. The
-choice affects only where audio physically plays — the Conversation, events,
-and protocol surface are identical.
+Identical from the consumer's perspective — same `Conversation`, same events,
+same `ConversationOptions.OutputAudioSource` — but each platform reaches the
+speakers differently.
 
-### Default mode (v0.1)
+### Native (desktop / mobile / XR)
 
-- **Native:** input controller emits PCM frames → C# Conversation wraps as `user_audio_chunk` → connection sends. Connection emits audio events → C# Conversation routes the chunk into the output controller → `AudioSource` plays.
-- **WebGL:** input ↔ connection ↔ output are wired *inside JavaScript* using `@elevenlabs/client`'s existing [`attachInputToConnection`](https://github.com/elevenlabs/packages/blob/main/packages/client/src/utils/attachInputToConnection.ts) and [`attachConnectionToOutput`](https://github.com/elevenlabs/packages/blob/main/packages/client/src/utils/attachConnectionToOutput.ts) helpers. **Audio bytes never cross the bridge.** C# Conversation still receives audio events from the connection (for `event_id` tracking, interruption, mode/feedback), but with the `audio_base_64` payload stripped on the JS side.
+Input controller emits PCM frames → C# Conversation wraps them as
+`user_audio_chunk` → connection sends. Connection emits audio events → C#
+Conversation routes the chunk into the output controller →
+[`UnityAudioSourceOutput`](../Runtime/Native/UnityAudioSourceOutput.cs) feeds
+an `AudioClip` via `PCMReaderCallback` and plays it through the `AudioSource`
+(either a hidden host GameObject or the user-supplied
+`ConversationOptions.OutputAudioSource`). FMOD owns spatialisation, mixer
+routing, rolloff curves, and effects.
 
-### Unity-routed mode (v0.3)
+### WebGL
 
-- **Native:** unchanged — that's how it already works.
-- **WebGL:** audio bytes *do* cross the bridge so the C# Conversation can hand them to a user-supplied `AudioSource` for spatial 3D playback. WebSocket transports send base64 PCM via the existing string-channel; WebRTC transports require a Unity-specific `WebRTCAudioAdapter` that exposes decoded PCM frames through the bridge. Binary payload via heap pointer + dynCall comes in at this milestone if profiling warrants it.
+Audio bytes **never cross the bridge** in either direction. Input ↔ connection
+↔ output are wired *inside JavaScript* using `@elevenlabs/client`'s existing
+[`attachInputToConnection`](https://github.com/elevenlabs/packages/blob/main/packages/client/src/utils/attachInputToConnection.ts)
+and [`attachConnectionToOutput`](https://github.com/elevenlabs/packages/blob/main/packages/client/src/utils/attachConnectionToOutput.ts)
+helpers — both compose against arbitrary sinks/sources, so no upstream changes
+are needed to swap in a Unity-specific output. The C# Conversation still
+receives audio events from the connection (for `event_id` tracking,
+interruption, mode/feedback), but with the `audio_base_64` payload stripped
+on the JS side.
 
-Latency cost of default mode on WebGL: zero on the audio path, ~1 Unity frame
-on control-plane operations (acceptable — network round-trips dominate).
-Latency cost of Unity-routed mode: ~1 frame on the audio path.
+Spatial playback on the WebSocket arm goes through a parallel Web Audio graph
+([`Bridge~/src/connection/web-audio-sink.ts`](../Bridge~/src/connection/web-audio-sink.ts)
+→ `AudioWorkletNode` → `GainNode` → `PannerNode` / `StereoPannerNode` →
+`AudioContext.destination`). When `ConversationOptions.OutputAudioSource` is
+set, [`WebAudioBackedOutput`](../Runtime/WebGL/Bridged/WebAudioBackedOutput.cs)
+mirrors a curated subset of the `AudioSource`'s properties (transform position
+in the active `AudioListener`'s local frame, `spatialBlend`, `minDistance`,
+`maxDistance`, `rolloffMode`, `panStereo`, `dopplerLevel`) onto the JS sink
+once per Unity frame. The `AudioSource` itself is *decorative* on WebGL — Unity
+never streams audio through it because Unity *can't* (no scriptable audio
+pipeline on WebGL — see
+[`unity-issues/webgl-scriptable-audio-pipeline.md`](./unity-issues/webgl-scriptable-audio-pipeline.md)).
+The fidelity matrix (which `AudioSource` properties round-trip vs. degrade vs.
+warn-once) lives in [`COMPATIBILITY.md`](../COMPATIBILITY.md#webgl-audio-output-limitations);
+the full design and rationale live in
+[`plans/output-audio-source.md`](./plans/output-audio-source.md).
+
+WebRTC-on-WebGL is the one path still outstanding: LiveKit owns the audio
+pipeline via a remote `AudioTrack`, so feeding the supplied `AudioSource`
+needs a Unity-specific `WebRTCAudioAdapter` that exposes decoded PCM frames
+to the same Web Audio sink. Tracked under v0.3 in
+[`plans/initial-rfc.md`](./plans/initial-rfc.md) §132.
+
+Latency cost on WebGL: zero on the audio path, ~1 Unity frame on
+control-plane operations and property mirroring (acceptable — network
+round-trips dominate).
 
 ## Protocol DTOs
 

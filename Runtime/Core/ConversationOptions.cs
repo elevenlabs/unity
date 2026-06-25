@@ -42,18 +42,31 @@ namespace ElevenLabs.Agents
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Honored on native (WebSocket transport). WebGL support lands in a
-        /// follow-up step of <c>Docs~/plans/output-audio-source.md</c> via a
-        /// Web Audio emulation layer (WebSocket transport only — WebRTC's audio
-        /// path goes through LiveKit and ignores the field until the v0.3
-        /// <c>WebRTCAudioAdapter</c> lands).
+        /// Honored on native (WebSocket transport) and on WebGL (WebSocket
+        /// transport only — WebRTC's audio path goes through LiveKit and ignores
+        /// the field until the v0.3 <c>WebRTCAudioAdapter</c> lands).
         /// </para>
         /// <para>
-        /// SDK-owned overwrites on the supplied source: <c>clip</c>, <c>loop</c>,
-        /// and <c>volume</c> are captured at session start and restored on
-        /// <see cref="Conversation.EndSessionAsync"/>. Everything else
-        /// (<c>spatialBlend</c>, <c>outputAudioMixerGroup</c>, rolloff curves,
-        /// transform position) is preserved untouched.
+        /// On native, audio plays through the supplied <see cref="AudioSource"/>
+        /// with full FMOD fidelity. SDK-owned overwrites: <c>clip</c>,
+        /// <c>loop</c>, and <c>volume</c> are captured at session start and
+        /// restored on <see cref="Conversation.EndSessionAsync"/>. Everything
+        /// else (<c>spatialBlend</c>, <c>outputAudioMixerGroup</c>, rolloff
+        /// curves, transform position) is preserved untouched.
+        /// </para>
+        /// <para>
+        /// On WebGL the binding goes through a parallel Web Audio graph
+        /// (<c>WebAudioBackedOutput</c>) — Unity has no scriptable audio
+        /// pipeline on WebGL, so the supplied <see cref="AudioSource"/> is
+        /// decorative: the SDK mirrors a curated subset of its properties
+        /// (volume, listener-local position, spatial blend, min/max distance,
+        /// rolloff mode, panStereo, dopplerLevel) onto the Web Audio graph once
+        /// per Unity frame, but never streams samples through the source itself.
+        /// FMOD-only concepts (<see cref="AudioMixerGroup"/>, reverb zones,
+        /// custom rolloff <see cref="AnimationCurve"/>s, effect bypass) emit a
+        /// one-time warning and degrade to the nearest Web Audio approximation.
+        /// See <c>COMPATIBILITY.md</c>'s "WebGL audio output limitations"
+        /// section for the full fidelity matrix and rationale.
         /// </para>
         /// <para>
         /// If the supplied source is destroyed mid-session (scene unload,
