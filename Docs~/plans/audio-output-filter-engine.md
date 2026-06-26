@@ -1,6 +1,6 @@
 # Audio output filter engine — bypass Unity's streaming-buffer pre-fill via `OnAudioFilterRead`
 
-**Status:** Stub, 2026-06-26 — captured as a deferred follow-up to [`bob-alignment-redesign.md`](bob-alignment-redesign.md). Not scheduled for v0.1.
+**Status:** Stub, 2026-06-26 — captured as a deferred follow-up to [`bob-alignment-redesign.md`](bob-alignment-redesign.md). PlayMode confirmation of the redesign on 2026-06-26 found residual turn-2+ artifacts (the bob leads the speaker by Unity's internal streaming-buffer silence depth, ~800 ms — a structural property of the streaming-`AudioClip` pre-fill, see the redesign's Empirical findings). The patched redesign is acceptable for v0.1 ship; this plan is now the next-session priority to eliminate the residual drift structurally.
 **Driver:** [`bob-alignment-redesign.md`](bob-alignment-redesign.md) compensates for Unity's structural 800 ms streaming-buffer pre-fill by tracking the audible playback head separately from the drain head. This plan would *eliminate* that pre-fill instead by routing samples through a `MonoBehaviour.OnAudioFilterRead` callback rather than `AudioClip.PCMReaderCallback` — bringing the engine's queued-ahead latency from ~800 ms down to ~5 ms (one DSP buffer at default Unity 6 audio config).
 **Assumes:** Bob-alignment redesign has shipped (and is the v0.1 audio output path).
 

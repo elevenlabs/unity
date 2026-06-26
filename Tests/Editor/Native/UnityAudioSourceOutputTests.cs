@@ -1203,6 +1203,91 @@ namespace ElevenLabs.Native.Tests
             );
         }
 
+        [Test]
+        public void GetVolume_AfterClearRingThenNewChunk_OnlyReStampsOnFirstRealDrain()
+        {
+            // After ClearRing resets the anchor to 0, the audio thread keeps
+            // firing drain callbacks during the silence gap between turns
+            // (Unity's streaming buffer demands samples even when the ring
+            // is empty). Those drains return n=0 and silence-fill Unity's
+            // buffer. They MUST NOT re-stamp the audible-head anchor —
+            // doing so would anchor the wall-clock model at the silence-gap
+            // start, and by the time the next turn's real samples land the
+            // audible head has already swept forward past them, making
+            // GetVolume jump to the chunk's tail instead of starting at the
+            // chunk's head.
+            //
+            // Pinned in production code at
+            // [`UnityAudioSourceOutput.ReadFromRing`](../../Runtime/Native/UnityAudioSourceOutput.cs)
+            // via the `_playbackStartStampTicks == 0 && n > 0` gate. Without
+            // the `n > 0` clause this test would fail: the first empty
+            // drain after ClearRing stamps, and the assertion below would
+            // see audibleRingPos already swept past the new chunk.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine
+            {
+                SyncPrefillCallbackCount = 0,
+                OngoingCallbackBatchSize = 160, // 10 ms at 16 kHz
+                OngoingCallbackPeriodSeconds = 0.333,
+            };
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+            long fakeNow = 5_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            // Turn 1: push enough to trip the threshold + drain once to
+            // stamp the anchor + advance into LOUD content.
+            int triggerSamples =
+                sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+            output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
+            fake.Tick(0.333); // first real drain → stamps anchor at preDrainPos=0, t=fakeNow.
+
+            // Interrupt synchronously to clear the ring and reset the
+            // anchor (resetDurationMs=0 skips the fade path).
+            output.Interrupt(resetDurationMs: 0);
+            Assert.AreEqual(0, output.Test_AvailableSamples, "Interrupt should clear the ring.");
+
+            // Simulate the silence gap between turns: 1 s of wall-clock,
+            // three Tick fires that each return n=0 (ring is empty after
+            // ClearRing). With the n>0 gate, none of these stamp the
+            // anchor.
+            fakeNow += (long)(0.333 * StopwatchFrequency);
+            fake.Tick(0.333);
+            fakeNow += (long)(0.333 * StopwatchFrequency);
+            fake.Tick(0.333);
+            fakeNow += (long)(0.333 * StopwatchFrequency);
+            fake.Tick(0.333);
+
+            // Pre-PushAudio: still no real drains since ClearRing → anchor
+            // remains 0 → GetVolume short-circuits to 0.
+            Assert.AreEqual(
+                0f,
+                output.Test_ComputeWallClockRms(),
+                1e-6,
+                "Silence-only drains between turns must not re-stamp the anchor; "
+                    + "GetVolume should stay at 0 via the stampTicks==0 guard."
+            );
+
+            // Turn 2: push a LOUD chunk and fire the next ongoing drain. THIS
+            // drain returns n>0 and re-stamps the anchor at the current
+            // wall-clock — so audibleRingPos starts at 0 again and sweeps
+            // forward from this moment, not from the silence-gap start.
+            int turn2LoudSamples = sampleRate * 100 / 1000; // 100 ms = 1,600
+            output.PushAudio(LittleEndianConstant(turn2LoudSamples, short.MaxValue));
+            fake.Tick(0.333); // first REAL drain after ClearRing → re-stamps.
+
+            // Advance 10 ms past the new stamp → audibleRingPos ≈ 160 →
+            // window [80, 160) → inside the LOUD turn-2 chunk → bob lights up.
+            fakeNow += (long)(0.010 * StopwatchFrequency);
+            float rmsEarlyInTurn2 = output.Test_ComputeWallClockRms();
+            Assert.Greater(
+                rmsEarlyInTurn2,
+                0.9f,
+                $"After the re-stamp on turn 2's first real drain, the audible head "
+                    + $"should be ~160 samples into the LOUD chunk, not jumped to its tail "
+                    + $"or stuck at silence ({rmsEarlyInTurn2})."
+            );
+        }
+
         // Reach into the scene to find the hidden owned-host AudioSource. The
         // owned-host path stamps a deterministic GameObject name so tests
         // don't need a back-door inspector for production-private state.

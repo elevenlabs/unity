@@ -418,15 +418,29 @@ namespace ElevenLabs.Native
                     }
                 }
                 // First drain after engine.Start (or after Interrupt/ClearRing
-                // reset the anchors) — capture the audible-head anchors. The
-                // pre-drain linear position is "where the speaker started
-                // playing from" (everything before this is pre-history, not
-                // audible). The current wall-clock stamp is "when the speaker
-                // started playing" — give or take Unity's DSP-buffer latency
+                // reset the anchors) that actually consumed real samples —
+                // capture the audible-head anchors. The pre-drain linear
+                // position is "where the speaker started playing from"
+                // (everything before this is pre-history, not audible). The
+                // current wall-clock stamp is "when the speaker started
+                // playing" — give or take Unity's DSP-buffer latency
                 // (~21 ms), which we tolerate to keep the model simple. From
                 // here, ComputeWallClockRms sweeps the audible head forward
                 // at the sample rate, independent of further drains.
-                if (_playbackStartStampTicks == 0)
+                //
+                // Gating on n > 0 is load-bearing for the second-turn case:
+                // between turns the ring is empty and the audio thread keeps
+                // firing silence-only drains. Stamping on those would anchor
+                // the wall-clock model at the silence-gap start, so by the
+                // time real samples for the next turn arrive seconds later
+                // the audible head has already swept forward into them and
+                // GetVolume reads the chunk's tail instead of 0. Holding off
+                // until a drain actually consumes real samples keeps the
+                // anchor aligned with audible playback across interrupts.
+                // (Doesn't compensate for Unity's internal streaming-buffer
+                // silence depth — see the audio-output-filter-engine.md
+                // follow-up.)
+                if (_playbackStartStampTicks == 0 && n > 0)
                 {
                     _playbackStartRingPos = preDrainReadPosLinear;
                     _playbackStartStampTicks = TimestampProvider();
