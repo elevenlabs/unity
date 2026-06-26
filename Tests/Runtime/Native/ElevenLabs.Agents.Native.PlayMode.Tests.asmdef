@@ -1,0 +1,25 @@
+{
+    "name": "ElevenLabs.Agents.Native.PlayMode.Tests",
+    "rootNamespace": "",
+    "references": [
+        "GUID:d91ada060a3e4829b26914b462b06f3b",
+        "ElevenLabs.Agents.Core",
+        "ElevenLabs.Agents.Native",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [
+        "WebGL"
+    ],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
