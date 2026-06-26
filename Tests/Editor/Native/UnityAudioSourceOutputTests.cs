@@ -899,6 +899,318 @@ namespace ElevenLabs.Native.Tests
             }
         }
 
+        // Engine integration via FakeAudioOutputEngine -------------------
+        //
+        // Step 4 of Docs~/plans/audio-output-testability.md: exercises the
+        // threshold-gate, sync pre-fill, and wall-clock interpolation paths
+        // against a calibrated fake engine so Unity's streaming-AudioClip
+        // behaviours can be regression-locked from Edit Mode. Two tests are
+        // [Ignore]d because they document open bugs (single-chunk timeout
+        // fallback + bob alignment) that the step-6 redesign will fix.
+
+        [Test]
+        public void Output_EmptyRingAtStart_PrefillFillsSilence_AndQueuesAheadOfRealAudio()
+        {
+            // Regression for the original ~800 ms gap (pre-threshold-gate).
+            // If engine.Start fires before the ring is filled, Unity's
+            // synchronous pre-fill (~12,800 samples on the default Unity 6
+            // audio config) silence-fills the streaming buffer ahead of
+            // whatever real audio arrives next. The threshold gate prevents
+            // this in production; here we bypass the gate by invoking
+            // fake.Start directly to lock the failure mode in case someone
+            // removes the gate later.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+
+            // 100 samples is far below the prefill threshold (~14,400 at 16 kHz)
+            // so the controller will not trigger engine.Start on its own.
+            output.PushAudio(LittleEndianConstant(100, short.MaxValue));
+            Assert.AreEqual(
+                0,
+                fake.StartCallCount,
+                "Below-threshold push must not trigger engine.Start."
+            );
+
+            // Manually fire Start to simulate the pre-threshold-gate world:
+            // the under-supplied ring is the only drain source for the
+            // 12,800-sample sync pre-fill.
+            fake.Start(new FormatConfig("pcm", sampleRate), output.ReadFromRing);
+
+            Assert.AreEqual(100, fake.RecordedRealSampleCount);
+            Assert.AreEqual(
+                12_800 - 100,
+                fake.RecordedSilenceFillSamples,
+                "Sync pre-fill should silence-fill ahead of the real samples when the ring is empty."
+            );
+        }
+
+        [Test]
+        public void Output_ThresholdGate_DelaysStartUntilRingDepthMet()
+        {
+            // Current threshold-gate behaviour: engine.Start defers until
+            // the ring holds at least PrefillThresholdMs of audio so the
+            // synchronous pre-fill lands entirely on real samples.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+
+            int thresholdSamples = sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000;
+            // Push half the threshold's worth — gate holds, Start deferred.
+            output.PushAudio(LittleEndianConstant(thresholdSamples / 2, short.MaxValue));
+            Assert.AreEqual(0, fake.StartCallCount, "Below threshold, Start stays deferred.");
+
+            // Top up over the threshold — Start fires on the second push.
+            output.PushAudio(LittleEndianConstant(thresholdSamples / 2 + 256, short.MaxValue));
+            Assert.AreEqual(1, fake.StartCallCount, "Crossing threshold should fire Start.");
+        }
+
+        [Test]
+        [Ignore(
+            "Documents the single-chunk timeout regression — the threshold-gate's wall-clock"
+                + " fallback only fires when a subsequent PushAudio runs, so a tiny one-and-done"
+                + " chunk never triggers Start. Re-enable once the timer-driven fallback ships;"
+                + " see the Companion follow-up in Docs~/plans/audio-output-testability.md."
+        )]
+        public void Output_ThresholdGate_TimeoutFiresIfNoFurtherChunks()
+        {
+            // Push a chunk well below the prefill threshold, then advance
+            // the wall clock past PrefillTimeoutMs without another
+            // PushAudio. The threshold-gate's timeout branch should fire
+            // engine.Start anyway so a tiny single-chunk response isn't
+            // held forever waiting on audio that won't arrive.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+            long fakeNow = 1_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            output.PushAudio(LittleEndianConstant(100, short.MaxValue));
+            Assert.AreEqual(0, fake.StartCallCount);
+
+            fakeNow += (long)(
+                (UnityAudioSourceOutput.PrefillTimeoutMs + 100) / 1000.0 * StopwatchFrequency
+            );
+
+            Assert.AreEqual(
+                1,
+                fake.StartCallCount,
+                "Single-chunk fallback should fire Start once the wall-clock timeout elapses,"
+                    + " even without a follow-up PushAudio."
+            );
+        }
+
+        [Test]
+        public void Output_PrefillDrainsEntirelyRealSamples_WhenRingHasEnoughDepth()
+        {
+            // Happy path: ring holds well over the prefill demand → the
+            // synchronous pre-fill drains 12,800 real samples and silence-
+            // fills nothing. Mirror of the empty-ring regression above
+            // with the threshold gate doing its job.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+
+            // 2 s of audio = 32,000 samples — comfortably past the 12,800
+            // sample sync pre-fill demand AND past the 14,400 sample threshold.
+            output.PushAudio(LittleEndianConstant(sampleRate * 2, short.MaxValue));
+
+            Assert.AreEqual(1, fake.StartCallCount);
+            Assert.AreEqual(12_800, fake.RecordedRealSampleCount);
+            Assert.AreEqual(
+                0,
+                fake.RecordedSilenceFillSamples,
+                "With a well-supplied ring, the sync pre-fill should never silence-fill."
+            );
+        }
+
+        [Test]
+        [Ignore(
+            "Documents the bob-alignment regression — GetVolume reads at _readPos which is"
+                + " post-pre-fill (≈ 800 ms ahead of audible playback). The fix tracks the"
+                + " audible playback head separately; see the Companion follow-up in"
+                + " Docs~/plans/audio-output-testability.md."
+        )]
+        public void GetVolume_TracksPlaybackPosition_DuringSyncPrefill_NotDrainHead()
+        {
+            // After the synchronous pre-fill, _readPos sits ~12,800 samples
+            // ahead of where the speaker is actually playing. GetVolume
+            // should reflect what's audible (start of the clip) rather
+            // than what was drained into Unity's streaming buffer (end of
+            // pre-fill window).
+            //
+            // Content layout: 100 ms LOUD | 850 ms SILENCE.
+            //   - Threshold met by the end of the second push (15,200 > 14,400).
+            //   - Pre-fill drains 12,800 samples (100 ms LOUD + 700 ms SILENCE).
+            //   - _readPos lands at content position 12,800, inside SILENCE.
+            // Correct GetVolume → audible head ≈ 0 → reads LOUD chunk → RMS ≈ 1.
+            // Buggy GetVolume   → reads samples at _readPos − windowSamples → SILENCE → RMS ≈ 0.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+            output.OutputLatencySamples = 0;
+            long fakeNow = 1_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            int loudSamples = sampleRate * 100 / 1000; // 1,600
+            int silenceSamples = sampleRate * 850 / 1000; // 13,600 → total = 15,200 > threshold.
+            output.PushAudio(LittleEndianConstant(loudSamples, short.MaxValue));
+            output.PushAudio(LittleEndianSilence(silenceSamples));
+
+            Assert.AreEqual(
+                1,
+                fake.StartCallCount,
+                "Threshold should trigger Start by the end of the second push."
+            );
+
+            float rms = output.Test_ComputeWallClockRms();
+            Assert.Greater(
+                rms,
+                0.9f,
+                $"Bob should track audible playback head at the start of the clip, got {rms}"
+                    + " (see bob-alignment redesign in Docs~/plans/audio-output-testability.md)."
+            );
+        }
+
+        [Test]
+        public void GetVolume_TracksPlaybackPosition_BetweenOngoingDrains()
+        {
+            // Wall-clock interpolation: between ongoing drain fires,
+            // GetVolume sweeps forward through the ring at the caller's
+            // poll rate so the bob's update rate is decoupled from
+            // PCMReaderCallback's ~3 Hz cadence. Drive the fake to fire
+            // one ongoing drain (stamping the wall clock + advancing
+            // _readPos to the SILENCE/LOUD boundary), then advance the
+            // fake clock between drains and confirm RMS sweeps into the
+            // LOUD chunk without waiting for the next Tick.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine
+            {
+                // Skip the sync pre-fill so the test controls _readPos
+                // positioning explicitly via Tick.
+                SyncPrefillCallbackCount = 0,
+                OngoingCallbackBatchSize = 160, // 10 ms at 16 kHz.
+                OngoingCallbackPeriodSeconds = 0.333,
+            };
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+            output.OutputLatencySamples = 0;
+            long fakeNow = 1_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            // Content layout: 10 ms SILENCE | 100 ms LOUD | ~890 ms SILENCE.
+            // Total = 16,000 samples (1 s) → crosses threshold on the third push.
+            int silenceHeadSamples = sampleRate * 10 / 1000; // 160
+            int loudSamples = sampleRate * 100 / 1000; // 1,600
+            int silenceTailSamples = sampleRate - silenceHeadSamples - loudSamples; // 14,240
+            output.PushAudio(LittleEndianSilence(silenceHeadSamples));
+            output.PushAudio(LittleEndianConstant(loudSamples, short.MaxValue));
+            output.PushAudio(LittleEndianSilence(silenceTailSamples));
+
+            Assert.AreEqual(1, fake.StartCallCount);
+            // Pre-drain: no playback yet, bob short-circuits to zero via
+            // the _lastDrainStampTicks == 0 guard.
+            Assert.AreEqual(
+                0f,
+                output.Test_ComputeWallClockRms(),
+                1e-6,
+                "Pre-drain: no playback yet, bob should rest at zero."
+            );
+
+            // Tick fires one ongoing drain of 160 samples → _readPos
+            // advances to the SILENCE/LOUD boundary and the wall-clock
+            // stamp is set to fakeNow.
+            fake.Tick(0.333);
+
+            float rmsAtDrain = output.Test_ComputeWallClockRms();
+            Assert.Less(
+                rmsAtDrain,
+                0.1f,
+                $"Right after the drain, bob should reflect just-played SILENCE ({rmsAtDrain})."
+            );
+
+            // Advance the fake wall clock by 10 ms WITHOUT firing another
+            // drain (10 ms < 333 ms ongoing period). Audible head sweeps
+            // 160 samples forward into the LOUD region.
+            fakeNow += (long)(0.010 * StopwatchFrequency);
+
+            float rmsBetweenDrains = output.Test_ComputeWallClockRms();
+            Assert.Greater(
+                rmsBetweenDrains,
+                0.9f,
+                $"Wall-clock sweep between drains should advance bob into LOUD ({rmsBetweenDrains})."
+            );
+        }
+
+        [Test]
+        public void PushAudio_DuringPrefill_ExtendsRingButDoesNotRetriggerStart()
+        {
+            // Once Start has fired, additional PushAudio calls extend the
+            // ring but must not re-invoke engine.Start — restarting would
+            // tear down the streaming AudioClip and replay the pre-fill
+            // silence-fill behaviour.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+
+            int triggerSamples =
+                sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+            output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
+            Assert.AreEqual(1, fake.StartCallCount, "First past-threshold push fires Start.");
+
+            output.PushAudio(LittleEndianConstant(1_000, short.MaxValue));
+            output.PushAudio(LittleEndianConstant(1_000, short.MaxValue));
+            Assert.AreEqual(1, fake.StartCallCount, "Subsequent pushes must not re-trigger Start.");
+        }
+
+        [Test]
+        public void Interrupt_ClearsRing_AndResetsPlaybackStartAnchor()
+        {
+            // Interrupt → ClearRing zeroes the ring AND the wall-clock
+            // anchor so a follow-up GetVolume doesn't sweep into the
+            // now-empty ring at a stale offset. Drive the drain through
+            // the fake to set the anchor before the interrupt clears it,
+            // then advance the clock and confirm GetVolume short-circuits
+            // to 0.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine
+            {
+                SyncPrefillCallbackCount = 0,
+                OngoingCallbackBatchSize = 160,
+                OngoingCallbackPeriodSeconds = 0.333,
+            };
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+            output.OutputLatencySamples = 0;
+            long fakeNow = 1_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            int triggerSamples =
+                sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+            output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
+
+            // One ongoing drain → stamps the wall clock; RMS picks up the
+            // just-played LOUD samples.
+            fake.Tick(0.333);
+            Assert.Greater(
+                output.Test_ComputeWallClockRms(),
+                0.5f,
+                "Post-drain RMS should reflect just-played LOUD samples."
+            );
+
+            output.Interrupt(resetDurationMs: 0);
+            Assert.AreEqual(0, output.Test_AvailableSamples, "Interrupt should clear the ring.");
+
+            // Without the anchor reset, GetVolume would sweep into the
+            // now-empty ring at the stale offset. With it, the
+            // _lastDrainStampTicks == 0 short-circuit fires.
+            fakeNow += (long)(0.1 * StopwatchFrequency);
+            Assert.AreEqual(
+                0f,
+                output.Test_ComputeWallClockRms(),
+                1e-6,
+                "Post-Interrupt GetVolume should short-circuit via the anchor reset."
+            );
+        }
+
         // Reach into the scene to find the hidden owned-host AudioSource. The
         // owned-host path stamps a deterministic GameObject name so tests
         // don't need a back-door inspector for production-private state.
