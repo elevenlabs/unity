@@ -174,18 +174,15 @@ The test seam wins. Production keeps its `Awaitable`-based wait; tests substitut
 
 Each step is independently committable. The whole sequence should land in a single PR (steps share an integration test).
 
-1. **Introduce `_readPosLinear` / `_writePosLinear` counters alongside `_readPos` / `_writePos`.** No behaviour change — both counters update in lockstep with the modular indices on every ring write / read; the linear counters just don't wrap. Existing tests pass unchanged.
+1. **[x] Introduce `_readPosLinear` / `_writePosLinear` counters alongside `_readPos` / `_writePos`.** Landed atomically with steps 2–3 (the counters are referenced from `ComputeWallClockRms` and the audible-head capture, so they couldn't usefully ship independently).
 
-2. **Rewrite `ComputeWallClockRms` against `_playbackStartStampTicks` + `_playbackStartRingPos`.** Wire the new anchor capture into the existing `_engine.Start` call site in `PushAudio`. Replace the `_lastDrainStampTicks == 0` guard with the new anchor check. Delete `OutputLatencySamples` and `_lastDrainStampTicks` once nothing references them.
-   - Lift `[Ignore]` on `GetVolume_TracksPlaybackPosition_DuringSyncPrefill_NotDrainHead`.
-   - Existing wall-clock interpolation tests (`GetVolume_TracksPlaybackPosition_BetweenOngoingDrains`, the latency-compensation tests around line 480, the post-interrupt zero-RMS tests) need to be updated to assert against the new model. Watch for tests that incrementally set `OutputLatencySamples` — those expectations evaporate.
+2. **[x] Rewrite `ComputeWallClockRms` against `_playbackStartStampTicks` + `_playbackStartRingPos`.** Replaced the `_lastDrainStampTicks` guard, dropped `OutputLatencySamples` + `ComputeOutputLatencySamples` entirely. Lifted `[Ignore]` on `GetVolume_TracksPlaybackPosition_DuringSyncPrefill_NotDrainHead`. Rewrote `GetVolume_SweepsForwardBetweenDrains_AsWallClockAdvances` → `..._SweepsForwardWithWallClock_AfterFirstDrainStampsAnchor` and `GetVolume_CapsVirtualOffsetAtAvailable_HoldsRmsAtTailDuringUnderrun` → `GetVolume_AudibleHead_ClampsAtWritePos_HoldsRmsAtTailDuringUnderrun` against new-model semantics. Deleted `GetVolume_OutputLatencyOffset_ShiftsTheRmsWindowBackward` (the field it tested no longer exists).
 
-3. **Add the single-chunk timeout fallback via `WaitForSecondsAsyncProvider` test seam.** Extract `StartPlayback()` as a shared helper called from both `PushAudio` (when the threshold trips) and `RunPrefillTimeoutAsync` (when the timer fires).
-   - Lift `[Ignore]` on `Output_ThresholdGate_TimeoutFiresIfNoFurtherChunks` and update it to inject a synchronous-completing awaitable through the new seam.
+3. **[x] Add the single-chunk timeout fallback via `WaitForSecondsAsyncProvider` test seam.** Extracted `StartPlayback()` helper + `RunPrefillTimeoutAsync` + `CancelPrefillTimeout`. Lifted `[Ignore]` on `Output_ThresholdGate_TimeoutFiresIfNoFurtherChunks` (stubs the awaitable via `AwaitableCompletionSource`). Added `Output_ThresholdGate_TimerCanceled_IfThresholdTripsFirst` to cover the idempotent-start guard.
 
-4. **Verify against the existing suite.** All ring / decode / volume-math tests should be unaffected; the wall-clock tests need touching as called out in step 2; both `[Ignore]`d tests should pass; the new behaviour shouldn't change the four `CreateAsync_*` tests that use the production engine.
+4. **[x] Verify against the existing suite.** All 428 tests green (was 427 with 2 ignored — both lifted, +1 new). `dotnet csharpier check .`, `pnpm --dir Bridge~ run format:check lint typecheck test verify:primitives verify:connection`, `pnpm --dir IntegrationTests~ run typecheck` all pass.
 
-5. **Check off step 6 in [`audio-output-testability.md`](audio-output-testability.md).** This plan's existence + landing IS that step.
+5. **[x] Check off step 6 in [`audio-output-testability.md`](audio-output-testability.md).** Done.
 
 6. **Manual PlayMode confirmation.** One interactive run of `Samples/ConversationSmokeTest/` (or `Samples/TalkingBox/`) with the user listening + watching the bob, to verify the audible head and the volume bob now move in sync. Document the observation in this plan's status header (e.g. "Confirmed bob alignment in PlayMode 2026-06-NN against agent {agentId}; no further follow-up needed.").
 
