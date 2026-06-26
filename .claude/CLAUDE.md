@@ -155,6 +155,20 @@ in the VS Code Problems panel.
 > the test runner fires and exits silently with no results. The test runner
 > exits the editor itself once tests finish.
 
+### Driving a live Unity Editor via MCP
+
+When the user has Unity open, [unity-mcp](https://github.com/Unity-Technologies/unity-mcp)
+exposes `Unity_ManageEditor`, `Unity_RunCommand`, `Unity_GetConsoleLogs`,
+`Unity_SceneView_*`, etc. Call `Unity_ManageEditor Action=GetState` first —
+the live editor is often against `/Users/kraenhansen/UnityProjects/Getting Started`,
+which references this package via `file:` with `testables: ["io.elevenlabs.agents"]`,
+so our runtime + samples + PlayMode tests are reachable from there.
+
+Caveats: PlayMode audio callbacks (`PCMReaderCallback` etc.) only fire when
+the Unity Editor window is focused — ask the user to focus it before
+measuring. `Unity_GetConsoleLogs` sometimes returns empty;
+`~/Library/Logs/Unity/Editor.log` is the reliable fallback.
+
 ## Unity-owned `.meta` files
 
 Unity generates a `.meta` sidecar for every file and folder it imports on
