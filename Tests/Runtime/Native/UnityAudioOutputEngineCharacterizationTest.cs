@@ -150,18 +150,21 @@ namespace ElevenLabs.Native.PlayMode.Tests
                         + syncSamplesInsideCreate
                 );
 
-                // Ongoing cadence: today's fake defaults to 0.333 s period
-                // ≈ 3 Hz. Over 5 s of playback we expect roughly 15 fires;
-                // band allows 1–10 Hz to absorb hardware / OS scheduling
-                // variance without losing the "Unity's callback cadence is
-                // coarse, not DSP-buffer-bound" signal.
+                // Ongoing cadence: today's fake defaults to 1/60 s period
+                // ≈ 60 Hz (measured 2026-06-26 on Unity 6.0.0.3.6f1 with a
+                // 16 kHz clip + 48 kHz output + DSP buffer 256: each fire
+                // covers 256 clip samples = 768 output samples = three DSP
+                // buffers). Band allows 30–120 Hz to absorb hardware / OS
+                // scheduling variance and to cover both halving and doubling
+                // of the fire-per-buffer ratio if Unity adjusts the
+                // streaming-clip batch size in a future release.
                 if (ongoingFires > 0)
                 {
                     double observedHz = ongoingFires / ObservationSeconds;
                     Assert.That(
                         observedHz,
-                        Is.InRange(1.0, 10.0),
-                        "Ongoing PCMReaderCallback cadence drifted outside 1–10 Hz — update "
+                        Is.InRange(30.0, 120.0),
+                        "Ongoing PCMReaderCallback cadence drifted outside 30–120 Hz — update "
                             + "FakeAudioOutputEngine.OngoingCallbackPeriodSeconds to match. Observed: "
                             + observedHz.ToString("0.##")
                             + " Hz"

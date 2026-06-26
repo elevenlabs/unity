@@ -12,9 +12,12 @@ namespace ElevenLabs.Native.Tests
     /// pre-fill inside <see cref="Start"/> (~12,800 clip-rate samples on a
     /// default Unity 6 audio config) and an ongoing
     /// <see cref="UnityEngine.AudioClip.PCMReaderCallback"/> cadence of
-    /// roughly 3 Hz once playback is rolling. Driven from Edit-Mode tests so
-    /// the SDK can exercise pre-fill, threshold-gate, and bob-alignment
-    /// scenarios without standing up a real <see cref="UnityEngine.AudioSource"/>.
+    /// ~60 Hz once playback is rolling (one fire per <c>clipLength</c>
+    /// samples, which at 256 clip-rate samples on a 16 kHz clip and a 48 kHz
+    /// output rate works out to three DSP buffers per fire). Driven from
+    /// Edit-Mode tests so the SDK can exercise pre-fill, threshold-gate,
+    /// and bob-alignment scenarios without standing up a real
+    /// <see cref="UnityEngine.AudioSource"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -62,12 +65,16 @@ namespace ElevenLabs.Native.Tests
 
         /// <summary>
         /// Wall-clock period (seconds) between ongoing drain callbacks
-        /// (default 0.333 ≈ 3 Hz). Tick advances a budget; when the budget
-        /// crosses this period, a drain callback fires and the budget
-        /// subtracts the period (so multi-period advances fire multiple
-        /// callbacks in sequence).
+        /// (default 1/60 s ≈ 16.67 ms, matching the ~60 Hz cadence measured
+        /// in <c>UnityAudioOutputEngineCharacterizationTest</c> on a Unity 6
+        /// default audio config: clip rate 16 kHz, output rate 48 kHz,
+        /// DSP buffer 256 — so each fire covers 256 clip samples =
+        /// 768 output samples = three DSP buffers). Tick advances a budget;
+        /// when the budget crosses this period, a drain callback fires and
+        /// the budget subtracts the period (so multi-period advances fire
+        /// multiple callbacks in sequence).
         /// </summary>
-        public double OngoingCallbackPeriodSeconds { get; set; } = 0.333;
+        public double OngoingCallbackPeriodSeconds { get; set; } = 1.0 / 60.0;
 
         /// <summary>
         /// Cumulative count of underrun samples the fake has silence-filled
