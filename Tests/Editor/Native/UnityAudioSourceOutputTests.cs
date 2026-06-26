@@ -252,6 +252,32 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
+        public void PushAudio_ResetsEngineVolumeToUserLevel()
+        {
+            // Every PushAudio cancels any in-flight fade and snaps the
+            // engine volume back to _userVolume so a chunk arriving
+            // mid-fade plays at the right gain. Observable via
+            // FakeAudioOutputEngine.Volume — NullAudioOutputEngine has the
+            // same setter signature but no test could read the value back
+            // meaningfully. Step 3 of audio-output-testability.md.
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000), fake);
+            output.SetVolume(0.7f);
+            fake.Volume = 0.1f; // simulate mid-fade
+
+            // 3 samples is well below the pre-fill threshold (~14,400 at
+            // 16 kHz × 900 ms), so engine.Start does not fire — the
+            // unconditional volume reset is the only side effect here.
+            output.PushAudio(LittleEndian(1, 2, 3));
+            Assert.AreEqual(0.7f, fake.Volume, 1e-6);
+            Assert.AreEqual(
+                0,
+                fake.StartCallCount,
+                "below-threshold PushAudio should not trigger engine.Start."
+            );
+        }
+
+        [Test]
         public void PushAudio_Overrun_DropsOldestSamples()
         {
             // 1 Hz * 5 s ring = 5 samples. Push 7 → first two are dropped.
@@ -294,6 +320,29 @@ namespace ElevenLabs.Native.Tests
             output.PushAudio(LittleEndian(10, 20, 30));
             output.Interrupt();
             Assert.AreEqual(0, output.Test_AvailableSamples);
+        }
+
+        [Test]
+        public void Interrupt_ImmediateCut_RestoresUserVolumeOnEngine()
+        {
+            // The immediate-cut path (resetDurationMs=0, or Edit-Mode
+            // default where Application.isPlaying is false) flushes the
+            // ring and writes _userVolume back to the engine so a follow-up
+            // PushAudio resumes at the right gain instead of inheriting a
+            // stale mid-fade level. Pre-port (NullAudioOutputEngine) the
+            // ring-clear was observable but the engine-volume restore was
+            // not. Step 3 of audio-output-testability.md.
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000), fake);
+            output.SetVolume(0.4f);
+            Assert.AreEqual(0.4f, fake.Volume, 1e-6);
+
+            // Simulate the engine landing at a mid-fade level so the
+            // post-Interrupt restore is observable as a delta, not as a
+            // no-op write back to the same value.
+            fake.Volume = 0f;
+            output.Interrupt(resetDurationMs: 0);
+            Assert.AreEqual(0.4f, fake.Volume, 1e-6);
         }
 
         // Analysis buffer is fed at drain time (audio thread), not push time
@@ -575,15 +624,25 @@ namespace ElevenLabs.Native.Tests
         // SetVolume --------------------------------------------------------
 
         [Test]
-        public void SetVolume_ClampedToZeroOne()
+        public void SetVolume_ClampedToZeroOne_PropagatedToEngine()
         {
-            // Without an AudioSource, SetVolume just stores the value; we
-            // confirm it survives a clamp by reading it back via GetVolume's
-            // null-source short-circuit (returns 0 with no source).
-            // Indirectly: SetVolume(-1) and SetVolume(2) must not throw.
-            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000));
-            Assert.DoesNotThrow(() => output.SetVolume(-1f));
-            Assert.DoesNotThrow(() => output.SetVolume(2f));
+            // SetVolume clamps to [0, 1] and forwards to the engine.
+            // Driving the controller through FakeAudioOutputEngine lets us
+            // observe the forwarded value directly — the pre-port version
+            // of this test ran on NullAudioOutputEngine and could only
+            // DoesNotThrow, which proves neither the clamp nor the
+            // propagation. Step 3 of audio-output-testability.md.
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000), fake);
+
+            output.SetVolume(0.5f);
+            Assert.AreEqual(0.5f, fake.Volume, 1e-6);
+
+            output.SetVolume(-1f);
+            Assert.AreEqual(0f, fake.Volume, 1e-6, "negative input must clamp to 0");
+
+            output.SetVolume(2f);
+            Assert.AreEqual(1f, fake.Volume, 1e-6, "input > 1 must clamp to 1");
         }
 
         // GetByteFrequencyData --------------------------------------------
@@ -597,6 +656,56 @@ namespace ElevenLabs.Native.Tests
                 buffer[i] = 0xAB;
             output.GetByteFrequencyData(buffer);
             CollectionAssert.AreEqual(new byte[buffer.Length], buffer);
+        }
+
+        [Test]
+        public void GetByteFrequencyData_EngineUnavailable_FillsZeros()
+        {
+            // Disposing the engine flips IsAvailable to false → controller
+            // short-circuits to Array.Clear instead of computing the FFT
+            // over the (potentially non-zero) analysis buffer. Distinct
+            // from the empty-analysis-buffer path covered above, where the
+            // engine is available and the FFT runs but yields zeros
+            // because the input is all zeros. Step 3 of
+            // audio-output-testability.md.
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000), fake);
+            // Prime the analysis buffer with real samples so the
+            // available-engine path would yield a non-zero FFT result —
+            // proves the buffer was cleared by the IsAvailable short-
+            // circuit, not because the FFT happened to read zeros.
+            output.PushAudio(LittleEndian(short.MaxValue, short.MaxValue, short.MaxValue));
+            output.ReadFromRing(new float[3]);
+            Assert.Greater(output.Test_AnalysisBufferRms, 0f);
+
+            fake.Dispose();
+            Assert.IsFalse(fake.IsAvailable);
+
+            byte[] buffer = new byte[8];
+            for (int i = 0; i < buffer.Length; i++)
+                buffer[i] = 0xAB;
+            output.GetByteFrequencyData(buffer);
+            CollectionAssert.AreEqual(new byte[buffer.Length], buffer);
+        }
+
+        // Lifecycle --------------------------------------------------------
+
+        [Test]
+        public async Task Close_DisposesEngine()
+        {
+            // Close flows through to engine.Dispose so test-side fakes
+            // flip IsAvailable to false (mirroring the production
+            // teardown that stops AudioSource and destroys the host
+            // GameObject). Step 3 of audio-output-testability.md — the
+            // pre-port lifecycle assertions all went through CreateAsync
+            // + real UnityAudioOutputEngine, which couldn't be exercised
+            // without standing up Unity's audio subsystem.
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16_000), fake);
+            Assert.IsTrue(fake.IsAvailable);
+
+            await output.Close();
+            Assert.IsFalse(fake.IsAvailable);
         }
 
         // Supplied OutputAudioSource --------------------------------------
