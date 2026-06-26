@@ -10,11 +10,12 @@ using Debug = UnityEngine.Debug;
 namespace ElevenLabs.Native
 {
     /// <summary>
-    /// <see cref="IOutputController"/> backed by Unity's <see cref="AudioSource"/>.
-    /// Each <see cref="PushAudio(byte[])"/> chunk is decoded from 16-bit
-    /// little-endian PCM into floats and written into a ring buffer; a
-    /// streaming <see cref="AudioClip"/> drains the ring on the audio thread
-    /// via its <see cref="AudioClip.PCMReaderCallback"/>.
+    /// <see cref="IOutputController"/> backed by an <see cref="IAudioOutputEngine"/>
+    /// (production: Unity's <see cref="AudioSource"/> + streaming
+    /// <see cref="AudioClip"/>). Each <see cref="PushAudio(byte[])"/> chunk
+    /// is decoded from 16-bit little-endian PCM into floats and written into
+    /// a ring buffer; the engine drains the ring on Unity's audio thread via
+    /// the callback registered with <see cref="IAudioOutputEngine.Start"/>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -28,9 +29,21 @@ namespace ElevenLabs.Native
     /// Threading: <see cref="PushAudio(byte[])"/>, <see cref="Interrupt(int?)"/>,
     /// <see cref="SetVolume(float)"/>, and lifecycle methods run on the Unity
     /// main thread (the native read loop marshals there before raising
-    /// events). <see cref="AudioClip.PCMReaderCallback"/> runs on Unity's
-    /// audio thread — the ring buffer and analysis buffer are guarded by a
-    /// single lock so the two threads never tear each other's writes.
+    /// events). <see cref="IAudioOutputEngine"/> invokes the drain callback
+    /// on Unity's audio thread — the ring buffer and analysis buffer are
+    /// guarded by a single lock so the two threads never tear each other's
+    /// writes.
+    /// </para>
+    /// <para>
+    /// All Unity-API interaction (AudioClip lifecycle, AudioSource.Play/Stop,
+    /// host GameObject setup, supplied-source restoration) lives inside the
+    /// injected <see cref="IAudioOutputEngine"/>. The plumbing in this class
+    /// is engine-agnostic, which lets Edit-Mode tests drive ring / decode /
+    /// volume-math paths against a no-op
+    /// <see cref="NullAudioOutputEngine"/> — and (step 2 of
+    /// <c>Docs~/plans/audio-output-testability.md</c>) lets future tests
+    /// drive a calibrated <c>FakeAudioOutputEngine</c> for pre-fill /
+    /// drain-cadence scenarios.
     /// </para>
     /// </remarks>
     internal sealed class UnityAudioSourceOutput : IOutputController
@@ -59,12 +72,14 @@ namespace ElevenLabs.Native
         private readonly int _ringCapacity;
         private readonly float[] _ring;
         private readonly float[] _analysisBuffer;
+        private readonly IAudioOutputEngine _engine;
 
-        // PCMReaderCallback (audio thread) and PushAudio / Interrupt (main
-        // thread) both touch _ring + _analysisBuffer. Hold this lock around
-        // any read or write so the audio thread never sees a half-written
-        // sample. Critical sections are O(samplesPerCallback) and lock-free
-        // alternatives aren't worth the complexity at v0.1.
+        // PCMReaderCallback (audio thread, invoked via the engine's drain
+        // callback) and PushAudio / Interrupt (main thread) both touch _ring
+        // + _analysisBuffer. Hold this lock around any read or write so the
+        // audio thread never sees a half-written sample. Critical sections
+        // are O(samplesPerCallback) and lock-free alternatives aren't worth
+        // the complexity at v0.1.
         private readonly object _bufferLock = new();
 
         private int _readPos;
@@ -107,37 +122,31 @@ namespace ElevenLabs.Native
 
         private float _userVolume = 1f;
         private CancellationTokenSource? _fadeCts;
-
-        private GameObject? _hostObject;
-        private AudioSource? _audioSource;
-        private AudioClip? _outputClip;
         private int _disposed;
 
-        // True when _audioSource was supplied via ConversationOptions.OutputAudioSource
-        // rather than created on a hidden host. Drives Close() behaviour
-        // (restore vs destroy) and the mid-session destruction warning.
-        private bool _suppliedSource;
-
-        // Pre-session snapshot of SDK-owned overwrites on a supplied source,
-        // restored on Close. Captured at StartAudioSource time so a session
-        // that's torn down before any audio plays still rolls cleanly back.
-        private float _savedVolume;
-        private bool _savedLoop;
-        private AudioClip? _savedClip;
-
-        // Latches once the supplied source is observed as null (destroyed) by
-        // PushAudio / Interrupt so the warning fires exactly once per session.
-        // Doesn't apply to the owned-host path: HideAndDontSave + DontDestroyOnLoad
-        // means external code can't destroy it.
-        private bool _destructionWarned;
-
-        // Exposed for tests — the launcher takes the factory route which
-        // creates the AudioSource + AudioClip; unit tests bypass both by
-        // constructing the controller directly to exercise the decode +
-        // ring + analysis paths against synthetic samples.
+        /// <summary>
+        /// Bare-engine constructor for Edit-Mode tests that exercise the
+        /// ring / decode / volume-math paths directly against synthetic
+        /// samples — wires a no-op <see cref="NullAudioOutputEngine"/> so
+        /// the controller logic stays uniform without needing a real
+        /// <see cref="AudioSource"/>. Production callers go through
+        /// <see cref="CreateAsync"/>, which wires
+        /// <see cref="UnityAudioOutputEngine"/>.
+        /// </summary>
         internal UnityAudioSourceOutput(FormatConfig format)
+            : this(format, new NullAudioOutputEngine()) { }
+
+        /// <summary>
+        /// Construct with an explicit <see cref="IAudioOutputEngine"/>.
+        /// Production passes <see cref="UnityAudioOutputEngine"/>; future
+        /// Edit-Mode tests can inject a calibrated fake to drive the
+        /// engine's pre-fill / drain-cadence behaviour deterministically
+        /// (see <c>Docs~/plans/audio-output-testability.md</c>).
+        /// </summary>
+        internal UnityAudioSourceOutput(FormatConfig format, IAudioOutputEngine engine)
         {
             _format = format ?? throw new ArgumentNullException(nameof(format));
+            _engine = engine ?? throw new ArgumentNullException(nameof(engine));
             if (format.SampleRate <= 0)
                 throw new ArgumentException(
                     "FormatConfig.SampleRate must be positive.",
@@ -193,20 +202,24 @@ namespace ElevenLabs.Native
         }
 
         /// <summary>
-        /// Production factory. Marshals onto the main thread, creates the
-        /// host <see cref="GameObject"/> + <see cref="AudioSource"/> +
-        /// streaming <see cref="AudioClip"/>, and starts playback. The
-        /// returned instance is ready to accept <see cref="PushAudio(byte[])"/>
-        /// calls immediately.
+        /// Production factory. Marshals onto the main thread, constructs a
+        /// <see cref="UnityAudioOutputEngine"/> (which sets up the host
+        /// <see cref="GameObject"/> + <see cref="AudioSource"/>), and
+        /// returns a controller wired to it. Playback itself — the
+        /// streaming <see cref="AudioClip"/> + <see cref="AudioSource.Play"/>
+        /// — is deferred to the first <see cref="PushAudio(byte[])"/>
+        /// crossing the pre-fill threshold; see
+        /// <c>Docs~/plans/audio-output-testability.md</c> for the design
+        /// rationale.
         /// </summary>
         /// <param name="format">Negotiated agent-output format.</param>
         /// <param name="device">Optional output device override (logged + ignored).</param>
         /// <param name="audioSource">
         /// Optional user-supplied <see cref="AudioSource"/> to play through.
-        /// When non-null, the controller binds to it instead of creating a
-        /// hidden host — preserving spatialisation, mixer routing, and
-        /// transform parenting. Pre-session <c>volume</c>, <c>loop</c>, and
-        /// <c>clip</c> are captured and restored on <see cref="Close"/>.
+        /// When non-null, the engine binds to it instead of creating a hidden
+        /// host — preserving spatialisation, mixer routing, and transform
+        /// parenting. Pre-session <c>volume</c>, <c>loop</c>, and <c>clip</c>
+        /// are captured and restored on <see cref="Close"/>.
         /// </param>
         internal static async Awaitable<UnityAudioSourceOutput> CreateAsync(
             FormatConfig format,
@@ -215,86 +228,12 @@ namespace ElevenLabs.Native
         )
         {
             await Awaitable.MainThreadAsync();
-            var output = new UnityAudioSourceOutput(format);
-            output.StartAudioSource(device, audioSource);
-            return output;
-        }
-
-        private void StartAudioSource(OutputDeviceConfig? device, AudioSource? suppliedSource)
-        {
-            // CRITICAL: AudioClip.Create with a PCMReaderCallback synchronously
-            // fires the callback enough times to fill Unity's DSP buffer-ahead
-            // queue (~8 fires × 100 ms = 800 ms on the Unity 6 default config).
-            // If we create the clip here, the ring is still empty, every
-            // pre-fill drains silence, and the speaker plays through that
-            // silence before reaching any real audio — perceived as ~700 ms
-            // of latency between session start and audible voice. Defer the
-            // AudioClip.Create to the first PushAudio so the synchronous
-            // pre-fills land on real samples in the ring instead.
-            if (suppliedSource != null)
-            {
-                _suppliedSource = true;
-                _audioSource = suppliedSource;
-                // Capture every SDK-owned overwrite so Close can put the
-                // source back exactly the way the caller handed it over.
-                _savedVolume = suppliedSource.volume;
-                _savedLoop = suppliedSource.loop;
-                _savedClip = suppliedSource.clip;
-            }
-            else
-            {
-                _hostObject = new GameObject("ElevenLabs.UnityAudioSourceOutput")
-                {
-                    hideFlags = HideFlags.HideAndDontSave,
-                };
-                if (Application.isPlaying)
-                    UnityEngine.Object.DontDestroyOnLoad(_hostObject);
-                _audioSource = _hostObject.AddComponent<AudioSource>();
-            }
-
-            // Stop any prior playback (a supplied source might have been
-            // playing something else). Critically, we also defer ASSIGNING
-            // the streaming AudioClip until the first PushAudio — Unity
-            // pre-fills the streaming clip's internal buffer the moment
-            // it's attached to a source, and that pre-fill runs through
-            // PCMReaderCallback with our (still-empty) ring, queuing
-            // ~800 ms of silence ahead of any real audio. By holding the
-            // clip off until we have real samples, the pre-fill picks up
-            // the real audio on its first fire instead.
-            _audioSource.Stop();
-            _audioSource.loop = true;
-            _audioSource.volume = _userVolume;
-            // Output device switching is process-wide via AudioSettings; not
-            // per-AudioSource. Mirror the SetDevice path's warning so callers
-            // know the request didn't take effect.
-            if (device != null && !string.IsNullOrEmpty(device.OutputDeviceId))
-            {
-                Debug.LogWarning(
-                    "UnityAudioSourceOutput: per-source output device selection isn't "
-                        + "supported; falling back to the system default device."
-                );
-            }
-        }
-
-        // True the first time we observe a supplied source as destroyed mid-session.
-        // Logs a single warning, then suppresses further audio-related side effects
-        // for the rest of the session. Uses Unity's overloaded == null, which
-        // returns true for destroyed UnityEngine.Object references.
-        private bool SuppliedSourceLost()
-        {
-            if (!_suppliedSource || _audioSource != null)
-                return false;
-            if (_disposed != 0)
-                return true; // Post-Close: silently no-op (expected).
-            if (!_destructionWarned)
-            {
-                _destructionWarned = true;
-                Debug.LogWarning(
-                    "[ElevenLabs] OutputAudioSource was destroyed mid-session; "
-                        + "audio output disabled for the remainder of the session."
-                );
-            }
-            return true;
+            // Engine construction runs Unity-API setup (GameObject.Create +
+            // AddComponent on the owned-host path; pre-session snapshot
+            // capture on the supplied-source path), so the main-thread
+            // await above is load-bearing.
+            IAudioOutputEngine engine = new UnityAudioOutputEngine(audioSource, device);
+            return new UnityAudioSourceOutput(format, engine);
         }
 
         // Wall-clock timestamp (Stopwatch ticks) of the very first PushAudio
@@ -305,8 +244,9 @@ namespace ElevenLabs.Native
         // the user isn't waiting indefinitely for more audio.
         private long _firstPushAudioStampTicks;
 
-        // True once the first real chunk has triggered AudioSource.Play().
-        // Deferring Play to the moment we have enough audio queued avoids
+        // True once the first real chunk has triggered IAudioOutputEngine.Start
+        // (AudioClip.Create + AudioSource.Play under the hood). Deferring
+        // engine.Start to the moment we have enough audio queued avoids
         // Unity pre-buffering hundreds of milliseconds of silence ahead of
         // the real samples — that silence has to drain through the speaker
         // before the agent's voice is heard, and shows up as a perceived
@@ -320,10 +260,9 @@ namespace ElevenLabs.Native
             if (pcm == null || pcm.Length < 2)
                 return;
             // Surface mid-session destruction of a supplied source through a
-            // one-time warning; subsequent pushes silently drain into the ring
-            // (where they'll cycle through overrun without ever reaching the
-            // audio thread, since there's no AudioSource left to drive it).
-            if (SuppliedSourceLost())
+            // one-time warning (the engine fires it lazily from
+            // IsAvailable); subsequent pushes silently no-op.
+            if (!_engine.IsAvailable)
                 return;
             int samples = pcm.Length / 2;
             if (_firstPushAudioStampTicks == 0)
@@ -333,8 +272,7 @@ namespace ElevenLabs.Native
             // level. Mirrors MediaDeviceOutput.playAudio's
             // cancelScheduledValues + gain reset before queueing the chunk.
             CancelFade();
-            if (_audioSource != null)
-                _audioSource.volume = _userVolume;
+            _engine.Volume = _userVolume;
             // Write the chunk to the ring BEFORE flipping playback on. Unity
             // pre-fills the streaming clip's internal buffer the moment
             // Play() is called (8+ PCMReaderCallback fires at 100 ms each
@@ -364,46 +302,31 @@ namespace ElevenLabs.Native
                     }
                 }
             }
-            // First real chunk: trigger AudioClip.Create + Play(). Both are
-            // deferred from StartAudioSource because AudioClip.Create
-            // SYNCHRONOUSLY fires PCMReaderCallback enough times to fill
-            // Unity's streaming buffer (~12,800 clip-rate samples ≈ 800 ms
-            // on the Unity 6 default audio config), and whatever the
-            // callback returns gets baked into the internal clip buffer
-            // ahead of the speaker — if the ring is empty or under-supplied
-            // when those sync fires happen, that silence plays before the
-            // real audio. Wait for the ring to hold enough samples to
-            // cover the pre-fill demand (with margin), or fall back to a
-            // wall-clock timeout for short single-chunk responses where
-            // the threshold will never be reached. See
-            // Docs~/plans/audio-output-testability.md for the design
-            // history and follow-ups (timer-driven fallback + bob alignment).
+            // First real chunk: trigger engine.Start() (AudioClip.Create +
+            // AudioSource.Play under the hood). Deferred from CreateAsync
+            // because AudioClip.Create SYNCHRONOUSLY fires the drain
+            // callback enough times to fill Unity's streaming buffer
+            // (~12,800 clip-rate samples ≈ 800 ms on the Unity 6 default
+            // audio config), and whatever the callback returns gets baked
+            // into the internal clip buffer ahead of the speaker — if the
+            // ring is empty or under-supplied when those sync fires
+            // happen, that silence plays before the real audio. Wait for
+            // the ring to hold enough samples to cover the pre-fill demand
+            // (with margin), or fall back to a wall-clock timeout for
+            // short single-chunk responses where the threshold will never
+            // be reached. See Docs~/plans/audio-output-testability.md for
+            // the design history and follow-ups (timer-driven fallback +
+            // bob alignment).
             int prefillThresholdSamples = _format.SampleRate * PrefillThresholdMs / 1000;
             long timeoutTicks = (long)(PrefillTimeoutMs / 1000.0 * StopwatchTicksPerSecond);
             bool ringThresholdMet = _available >= prefillThresholdSamples;
             bool timeoutElapsed =
                 _firstPushAudioStampTicks > 0
                 && (TimestampProvider() - _firstPushAudioStampTicks) >= timeoutTicks;
-            if (!_playbackStarted && _audioSource != null && (ringThresholdMet || timeoutElapsed))
+            if (!_playbackStarted && (ringThresholdMet || timeoutElapsed))
             {
                 _playbackStarted = true;
-                // Keep the clip length small. Unity's pre-fill total is
-                // roughly fixed at the streaming-buffer depth, but a
-                // smaller clip means each PCMReaderCallback fire drains
-                // less per call, which makes the underrun granularity
-                // finer when the threshold gate falls back on timeout
-                // with a short ring.
-                int clipSamples = Math.Max(256, _format.SampleRate / 100);
-                _outputClip = AudioClip.Create(
-                    name: "ElevenLabsAgentOutput",
-                    lengthSamples: clipSamples,
-                    channels: 1,
-                    frequency: _format.SampleRate,
-                    stream: true,
-                    pcmreadercallback: PCMReaderCallback
-                );
-                _audioSource.clip = _outputClip;
-                _audioSource.Play();
+                _engine.Start(_format, ReadFromRing);
             }
         }
 
@@ -421,17 +344,19 @@ namespace ElevenLabs.Native
         // timer-driven follow-up that handles single-chunk-then-silent.
         internal const int PrefillTimeoutMs = 500;
 
-        // Audio-thread entry point. Unity guarantees this is called on the
-        // dedicated audio thread (separate from Update / coroutines), so the
-        // ring access goes through the same lock as the main-thread writes.
-        private void PCMReaderCallback(float[] data) => ReadFromRing(data);
-
-        // Internal seam so tests can drive the read path directly without
-        // standing up a real AudioSource / audio thread.
-        internal void ReadFromRing(float[] dest)
+        // Engine drain callback — Unity guarantees this runs on the dedicated
+        // audio thread (separate from Update / coroutines), so the ring
+        // access goes through the same lock as the main-thread writes.
+        // Returns the number of REAL samples written; the engine silence-
+        // fills any remaining slots before handing the buffer back to
+        // Unity. The local silence-fill below stays put so the analysis
+        // buffer decays naturally after the agent stops talking — and so
+        // existing Edit-Mode tests that drive ReadFromRing directly still
+        // see a silence-filled dest array on underrun.
+        internal int ReadFromRing(float[] dest)
         {
             if (dest == null || dest.Length == 0)
-                return;
+                return 0;
             lock (_bufferLock)
             {
                 int n = Math.Min(dest.Length, _available);
@@ -450,12 +375,12 @@ namespace ElevenLabs.Native
                     _analysisWritePos = (_analysisWritePos + 1) % _analysisBuffer.Length;
                 }
                 _available -= n;
-                // Underrun — fill the remainder with silence. PCMReaderCallback's
-                // contract is "fill the entire buffer"; leaving the tail
-                // unwritten plays whatever the buffer previously held. Feed the
-                // silence into the analysis buffer too so RMS decays naturally
-                // after the agent stops talking, instead of holding the last
-                // non-silent value forever.
+                // Underrun — fill the remainder with silence. Drain callbacks
+                // must fill the entire buffer; leaving the tail unwritten
+                // plays whatever the buffer previously held. Feed the
+                // silence into the analysis buffer too so RMS decays
+                // naturally after the agent stops talking, instead of
+                // holding the last non-silent value forever.
                 if (n < dest.Length)
                 {
                     Array.Clear(dest, n, dest.Length - n);
@@ -470,6 +395,7 @@ namespace ElevenLabs.Native
                 // — main-thread polling between drains gets a sweeping RMS
                 // window instead of holding the audio-thread cadence value.
                 _lastDrainStampTicks = TimestampProvider();
+                return n;
             }
         }
 
@@ -477,18 +403,17 @@ namespace ElevenLabs.Native
         {
             // Same warn-once gate as PushAudio so a destroyed supplied source
             // surfaces on whichever entry point fires first.
-            if (SuppliedSourceLost())
+            if (!_engine.IsAvailable)
                 return;
             int duration = resetDurationMs ?? DefaultInterruptDurationMs;
             CancelFade();
-            if (_audioSource == null || duration <= 0 || !Application.isPlaying)
+            if (duration <= 0 || !Application.isPlaying)
             {
-                // No source yet (tests), immediate-cut request, or Edit Mode
+                // Immediate-cut request, or Edit Mode
                 // (Awaitable.NextFrameAsync only ticks during Play Mode) —
                 // skip the fade and clear the ring synchronously.
                 ClearRing();
-                if (_audioSource != null)
-                    _audioSource.volume = _userVolume;
+                _engine.Volume = _userVolume;
                 return;
             }
             _fadeCts = new CancellationTokenSource();
@@ -499,28 +424,27 @@ namespace ElevenLabs.Native
         {
             try
             {
-                AudioSource source = _audioSource!;
-                float startVolume = source.volume;
+                float startVolume = _engine.Volume;
                 float startTime = Time.unscaledTime;
                 float duration = durationMs / 1000f;
                 while (true)
                 {
                     await Awaitable.NextFrameAsync(token);
-                    if (token.IsCancellationRequested || _audioSource == null)
+                    if (token.IsCancellationRequested || !_engine.IsAvailable)
                         return;
                     float elapsed = Time.unscaledTime - startTime;
                     if (elapsed >= duration)
                     {
-                        _audioSource.volume = 0f;
+                        _engine.Volume = 0f;
                         break;
                     }
-                    _audioSource.volume = Mathf.Lerp(startVolume, 0f, elapsed / duration);
+                    _engine.Volume = Mathf.Lerp(startVolume, 0f, elapsed / duration);
                 }
                 if (token.IsCancellationRequested)
                     return;
                 ClearRing();
-                if (_audioSource != null)
-                    _audioSource.volume = _userVolume;
+                if (_engine.IsAvailable)
+                    _engine.Volume = _userVolume;
             }
             catch (OperationCanceledException)
             {
@@ -574,13 +498,13 @@ namespace ElevenLabs.Native
             // While a fade is in flight, RunFadeAsync owns the volume value
             // and will restore _userVolume itself when the fade completes —
             // don't fight it from here.
-            if (_audioSource != null && _fadeCts == null)
-                _audioSource.volume = _userVolume;
+            if (_fadeCts == null)
+                _engine.Volume = _userVolume;
         }
 
         public float GetVolume()
         {
-            if (_audioSource == null)
+            if (!_engine.IsAvailable)
                 return 0f;
             return ComputeWallClockRms();
         }
@@ -651,8 +575,9 @@ namespace ElevenLabs.Native
             return Mathf.Clamp01((float)Math.Sqrt(sumSquares / sampleCount));
         }
 
-        // Test seam: bypasses the AudioSource-null short-circuit so unit
-        // tests can drive the wall-clock-interpolated RMS path directly.
+        // Test seam: bypasses the engine.IsAvailable short-circuit so unit
+        // tests can drive the wall-clock-interpolated RMS path directly,
+        // even with a bare-constructor (NullEngine) controller.
         internal float Test_ComputeWallClockRms() => ComputeWallClockRms();
 
         public Awaitable SetDevice(OutputDeviceConfig? config = null, FormatConfig? format = null)
@@ -680,7 +605,7 @@ namespace ElevenLabs.Native
         {
             if (buffer == null || buffer.Length == 0)
                 return;
-            if (_audioSource == null)
+            if (!_engine.IsAvailable)
             {
                 Array.Clear(buffer, 0, buffer.Length);
                 return;
@@ -712,58 +637,11 @@ namespace ElevenLabs.Native
                 return;
             CancelFade();
             await Awaitable.MainThreadAsync();
-            if (_audioSource != null)
-            {
-                try
-                {
-                    _audioSource.Stop();
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogException(ex);
-                }
-                if (_suppliedSource)
-                {
-                    // Restore every SDK-owned overwrite (volume, loop, clip)
-                    // symmetrically so a subsequent session — or non-agent use
-                    // of the same source — starts from the caller's original
-                    // configuration. The AudioSource and its GameObject are
-                    // left intact for the user to reuse.
-                    try
-                    {
-                        _audioSource.clip = _savedClip;
-                        _audioSource.loop = _savedLoop;
-                        _audioSource.volume = _savedVolume;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.LogException(ex);
-                    }
-                }
-            }
-            if (_outputClip != null)
-            {
-                DestroyObject(_outputClip);
-                _outputClip = null;
-            }
-            if (_hostObject != null)
-            {
-                DestroyObject(_hostObject);
-                _hostObject = null;
-            }
-            _savedClip = null;
-            _audioSource = null;
-        }
-
-        private static void DestroyObject(UnityEngine.Object obj)
-        {
-            // Destroy is a Play-Mode operation; Edit Mode (and headless test
-            // runs) need DestroyImmediate or Unity logs a "Destroy may not be
-            // called from edit mode" warning and leaks the object.
-            if (Application.isPlaying)
-                UnityEngine.Object.Destroy(obj);
-            else
-                UnityEngine.Object.DestroyImmediate(obj);
+            // Engine handles AudioSource.Stop + supplied-source restoration +
+            // host GameObject / AudioClip destruction — everything Unity-API
+            // shaped lives behind the seam so this class stays
+            // engine-agnostic.
+            _engine.Dispose();
         }
 
         // Static helpers — pulled out so unit tests can exercise the decoder
