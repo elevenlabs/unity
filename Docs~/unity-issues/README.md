@@ -27,6 +27,13 @@ See the "Reporting Unity issues" section of
   — UnityLinker silently drops package-internal `link.xml` files when
   the package is referenced as a local file-path package whose root is
   the embedded host project's parent.
+- [`streaming-audioclip-prefill-depth.md`](./streaming-audioclip-prefill-depth.md)
+  — `AudioClip.Create(stream=true, pcmreadercallback=…)` reserves
+  ~800 ms of pre-fill ahead of the speaker (12,800 samples at 16 kHz
+  on the default Unity 6 audio config), invariant in `lengthSamples`,
+  with no public API to shrink it. Forces low-latency PCM SDKs to ship
+  a visual-sync workaround or bypass streaming `AudioClip` entirely
+  via `OnAudioFilterRead`.
 - [`webgl-scriptable-audio-pipeline.md`](./webgl-scriptable-audio-pipeline.md)
   — WebGL has no scriptable audio pipeline: `AudioClip.Create(stream=true,
   pcmreadercallback=…)`, `OnAudioFilterRead`, `AudioRenderer`, and

@@ -20,7 +20,7 @@ lengthSamples= 16000 | sync fires=  4 | sync samples=12800 (~800.0 ms)
 
 **Pre-fill is structurally locked at 12,800 clip-rate samples regardless of `lengthSamples`.** Only the per-fire batch granularity changes — Unity slices the same 12,800-sample pre-fill into N fires of `lengthSamples` each. This is ~38× larger than the DSP buffer depth (1024 output-rate samples ≈ 21 ms), so Unity is clearly reserving a fixed streaming-buffer headroom independent of clip configuration. There is no public API to shrink it per-clip. Sweeping the DSP buffer process-wide via `AudioSettings.Reset` would reduce it, but that's invasive (affects all audio in the user's project, can cause crackling on slow machines) and was ruled out as a v0.1 fix.
 
-**Conclusion driving this plan:** the 800 ms pre-fill is a structural property of Unity's streaming `AudioClip`. The bob redesign compensates for it visually; the filter-engine follow-up would eliminate it structurally.
+**Conclusion driving this plan:** the 800 ms pre-fill is a structural property of Unity's streaming `AudioClip`. The bob redesign compensates for it visually; the filter-engine follow-up would eliminate it structurally. Written up upstream-style at [`Docs~/unity-issues/streaming-audioclip-prefill-depth.md`](../unity-issues/streaming-audioclip-prefill-depth.md) for handoff to Unity.
 
 ---
 
