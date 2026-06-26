@@ -87,16 +87,32 @@ namespace ElevenLabs.Native
         private int _available;
         private int _analysisWritePos;
 
-        // Wall-clock timestamp (Stopwatch ticks) of the last audio-thread drain.
-        // Combined with SampleRate, lets GetVolume on the main thread interpolate
-        // the playback position between PCMReaderCallback fires. Empirically the
-        // callback lands around 3 Hz on a streaming AudioClip — without this
-        // interpolation, GetVolume's refresh rate is bounded by that cadence
-        // even when callers poll at frame rate. Updated inside _bufferLock so
-        // GetVolume sees a consistent (_readPos, _available, stamp) tuple.
-        // Zero before the first drain — GetVolume treats that as "no playback
-        // yet" and returns 0.
-        private long _lastDrainStampTicks;
+        // Monotonically-increasing counters parallel to the modular _readPos /
+        // _writePos. Used by the wall-clock GetVolume math (audible playback
+        // head is anchored in linear ring coordinates so the modular wrap
+        // doesn't introduce edge cases). `long` is sized for multi-hour
+        // sessions without wrapping.
+        private long _readPosLinear;
+        private long _writePosLinear;
+
+        // Wall-clock timestamp (Stopwatch ticks) at the moment playback became
+        // audible — set by ReadFromRing on its first call (which happens
+        // inside engine.Start's synchronous pre-fill, or on the first drain
+        // after Interrupt/ClearRing resets the anchors). Combined with
+        // _playbackStartRingPos, lets GetVolume compute the audible playback
+        // head as a pure wall-clock count, independent of engine drain
+        // cadence and independent of how much Unity pre-buffered ahead of the
+        // speaker. Zero before the first drain — GetVolume treats that as
+        // "no playback yet" and returns 0.
+        private long _playbackStartStampTicks;
+
+        // Linear ring position (in samples written across the session) the
+        // speaker started playing from. Equals _readPosLinear at the moment
+        // _playbackStartStampTicks was captured — i.e., where the drain head
+        // was BEFORE Unity's first drain consumed any samples. The audible
+        // head sweeps forward from here at the configured sample rate
+        // regardless of how many further drains have fired.
+        private long _playbackStartRingPos;
 
         // Test seam: lets the wall-clock advance be driven manually in unit
         // tests without spinning a real audio thread. Defaults to
@@ -107,21 +123,21 @@ namespace ElevenLabs.Native
         private static readonly double StopwatchTicksPerSecond =
             Stopwatch.Frequency > 0 ? Stopwatch.Frequency : 10_000_000.0;
 
-        // Output latency in clip-rate samples — the time between Unity's audio
-        // engine consuming samples (PCMReaderCallback fire) and those samples
-        // reaching the speakers. Subtracted from the wall-clock-interpolated
-        // virtual playback head so GetVolume reads what's *audible now*, not
-        // what's *consumed now*. Without this offset the RMS leads the audio
-        // by one DSP buffer (~10-30 ms on typical setups), enough to throw
-        // off lip-sync visually.
-        //
-        // Captured at construction from AudioSettings.GetDSPBufferSize + the
-        // engine output rate; readable + writable for tests that need to pin
-        // it independent of the host audio configuration.
-        internal int OutputLatencySamples { get; set; }
+        // Test seam: the awaitable used by the single-chunk pre-fill timeout
+        // fallback. Production wires Awaitable.WaitForSecondsAsync; tests
+        // inject an AwaitableCompletionSource they control so the timeout
+        // fires deterministically without the Unity frame loop. Signature
+        // mirrors the production overload (seconds + cancellation).
+        internal Func<
+            float,
+            CancellationToken,
+            Awaitable
+        > WaitForSecondsAsyncProvider { get; set; } =
+            static (sec, ct) => Awaitable.WaitForSecondsAsync(sec, ct);
 
         private float _userVolume = 1f;
         private CancellationTokenSource? _fadeCts;
+        private CancellationTokenSource? _prefillTimeoutCts;
         private int _disposed;
 
         /// <summary>
@@ -163,42 +179,6 @@ namespace ElevenLabs.Native
             _ring = new float[_ringCapacity];
             int windowSamples = Math.Max(1, format.SampleRate * AnalysisWindowMs / 1000);
             _analysisBuffer = new float[windowSamples];
-            OutputLatencySamples = ComputeOutputLatencySamples(format.SampleRate);
-        }
-
-        // Estimate the number of clip-rate samples between
-        // PCMReaderCallback fire (audio engine consumes samples) and
-        // audible speaker output. Built from AudioSettings.GetDSPBufferSize
-        // (samples per DSP buffer, in output device rate) and the typical
-        // double-buffering count Unity uses to keep playback smooth.
-        // Falls back to a conservative 20 ms when AudioSettings hasn't been
-        // initialized (e.g. batch-mode Edit Mode tests) so the compensation
-        // never lands at zero and silently re-introduces the lead.
-        private static int ComputeOutputLatencySamples(int clipSampleRate)
-        {
-            const int FallbackLatencyMs = 20;
-            try
-            {
-                AudioSettings.GetDSPBufferSize(out int bufLen, out int bufCount);
-                int outputRate = AudioSettings.outputSampleRate;
-                if (bufLen <= 0 || bufCount <= 0 || outputRate <= 0)
-                {
-                    return clipSampleRate * FallbackLatencyMs / 1000;
-                }
-                // Effective latency = one full set of DSP buffers in flight
-                // between consumption and audible output. Convert to clip-
-                // rate samples since virtualOffset lives in that space.
-                double latencySeconds = (double)bufLen * bufCount / outputRate;
-                return (int)(latencySeconds * clipSampleRate);
-            }
-            catch
-            {
-                // AudioSettings.GetDSPBufferSize can throw inside isolated
-                // test runners without a real audio context; swallow and
-                // fall back to the conservative default rather than break
-                // construction.
-                return clipSampleRate * FallbackLatencyMs / 1000;
-            }
         }
 
         /// <summary>
@@ -236,14 +216,6 @@ namespace ElevenLabs.Native
             return new UnityAudioSourceOutput(format, engine);
         }
 
-        // Wall-clock timestamp (Stopwatch ticks) of the very first PushAudio
-        // call this session. Drives the threshold-gate timeout fallback:
-        // when chunks arrive but the ring never reaches the pre-fill
-        // threshold (e.g., agent ships a single short utterance), the
-        // playback start fires anyway after a bounded wall-clock delay so
-        // the user isn't waiting indefinitely for more audio.
-        private long _firstPushAudioStampTicks;
-
         // True once the first real chunk has triggered IAudioOutputEngine.Start
         // (AudioClip.Create + AudioSource.Play under the hood). Deferring
         // engine.Start to the moment we have enough audio queued avoids
@@ -265,8 +237,6 @@ namespace ElevenLabs.Native
             if (!_engine.IsAvailable)
                 return;
             int samples = pcm.Length / 2;
-            if (_firstPushAudioStampTicks == 0)
-                _firstPushAudioStampTicks = TimestampProvider();
             // New agent audio arrives → cancel any in-flight interrupt fade
             // and restore the user volume so playback resumes at the right
             // level. Mirrors MediaDeviceOutput.playAudio's
@@ -288,6 +258,7 @@ namespace ElevenLabs.Native
                     float f = DecodeInt16Sample(s);
                     _ring[_writePos] = f;
                     _writePos = (_writePos + 1) % _ringCapacity;
+                    _writePosLinear++;
                     if (_available < _ringCapacity)
                     {
                         _available++;
@@ -299,6 +270,7 @@ namespace ElevenLabs.Native
                         // chunk cadence usually means the audio thread isn't
                         // keeping up, not that the agent is too fast.
                         _readPos = (_readPos + 1) % _ringCapacity;
+                        _readPosLinear++;
                     }
                 }
             }
@@ -314,19 +286,20 @@ namespace ElevenLabs.Native
             // the ring to hold enough samples to cover the pre-fill demand
             // (with margin), or fall back to a wall-clock timeout for
             // short single-chunk responses where the threshold will never
-            // be reached. See Docs~/plans/audio-output-testability.md for
-            // the design history and follow-ups (timer-driven fallback +
-            // bob alignment).
+            // be reached. See Docs~/plans/audio-output-testability.md and
+            // Docs~/plans/bob-alignment-redesign.md.
+            if (_playbackStarted)
+                return;
             int prefillThresholdSamples = _format.SampleRate * PrefillThresholdMs / 1000;
-            long timeoutTicks = (long)(PrefillTimeoutMs / 1000.0 * StopwatchTicksPerSecond);
-            bool ringThresholdMet = _available >= prefillThresholdSamples;
-            bool timeoutElapsed =
-                _firstPushAudioStampTicks > 0
-                && (TimestampProvider() - _firstPushAudioStampTicks) >= timeoutTicks;
-            if (!_playbackStarted && (ringThresholdMet || timeoutElapsed))
+            if (_available >= prefillThresholdSamples)
             {
-                _playbackStarted = true;
-                _engine.Start(_format, ReadFromRing);
+                CancelPrefillTimeout();
+                StartPlayback();
+            }
+            else if (_prefillTimeoutCts == null)
+            {
+                _prefillTimeoutCts = new CancellationTokenSource();
+                _ = RunPrefillTimeoutAsync(_prefillTimeoutCts.Token);
             }
         }
 
@@ -336,13 +309,65 @@ namespace ElevenLabs.Native
         // small safety margin so the pre-fill never silence-fills.
         internal const int PrefillThresholdMs = 900;
 
-        // Wall-clock fallback (ms since first PushAudio): trigger anyway
-        // after this elapses even if the ring never reaches the threshold,
-        // so short single-chunk responses don't stall forever waiting for
-        // more audio that won't arrive. NB: only fires when a subsequent
-        // PushAudio runs — see audio-output-testability.md for the
-        // timer-driven follow-up that handles single-chunk-then-silent.
+        // Wall-clock fallback (ms after the first PushAudio that didn't
+        // trip the threshold): trigger engine.Start anyway after this
+        // elapses, so short single-chunk responses don't stall forever
+        // waiting for more audio that won't arrive. Driven by an
+        // Awaitable.WaitForSecondsAsync (via the WaitForSecondsAsyncProvider
+        // test seam), so the fallback fires even with no follow-up
+        // PushAudio.
         internal const int PrefillTimeoutMs = 500;
+
+        // Common entry into engine.Start — kept as a separate helper so
+        // both the threshold-met path (called from PushAudio) and the
+        // wall-clock-timeout path (called from RunPrefillTimeoutAsync) flow
+        // through the same idempotent gate. ReadFromRing stamps the
+        // audible-head anchors on its first call inside engine.Start's
+        // synchronous pre-fill.
+        private void StartPlayback()
+        {
+            if (_playbackStarted)
+                return;
+            _playbackStarted = true;
+            _engine.Start(_format, ReadFromRing);
+        }
+
+        private async Awaitable RunPrefillTimeoutAsync(CancellationToken token)
+        {
+            try
+            {
+                await WaitForSecondsAsyncProvider(PrefillTimeoutMs / 1000f, token);
+                if (token.IsCancellationRequested || _playbackStarted || !_engine.IsAvailable)
+                    return;
+                StartPlayback();
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when the threshold trips before the timeout or
+                // when Close/Dispose tears the controller down.
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        private void CancelPrefillTimeout()
+        {
+            if (_prefillTimeoutCts == null)
+                return;
+            try
+            {
+                _prefillTimeoutCts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
+            try
+            {
+                _prefillTimeoutCts.Dispose();
+            }
+            catch (ObjectDisposedException) { }
+            _prefillTimeoutCts = null;
+        }
 
         // Engine drain callback — Unity guarantees this runs on the dedicated
         // audio thread (separate from Update / coroutines), so the ring
@@ -359,12 +384,14 @@ namespace ElevenLabs.Native
                 return 0;
             lock (_bufferLock)
             {
+                long preDrainReadPosLinear = _readPosLinear;
                 int n = Math.Min(dest.Length, _available);
                 for (int i = 0; i < n; i++)
                 {
                     float f = _ring[_readPos];
                     dest[i] = f;
                     _readPos = (_readPos + 1) % _ringCapacity;
+                    _readPosLinear++;
                     // Feed the analysis buffer here (audio-thread drain) rather
                     // than at PushAudio time so GetVolume / GetByteFrequencyData
                     // reflect what's *playing right now*, not what was last
@@ -390,11 +417,20 @@ namespace ElevenLabs.Native
                         _analysisWritePos = (_analysisWritePos + 1) % _analysisBuffer.Length;
                     }
                 }
-                // Stamp wall clock at the moment we finish this drain so
-                // GetVolume can interpolate the playback position from here
-                // — main-thread polling between drains gets a sweeping RMS
-                // window instead of holding the audio-thread cadence value.
-                _lastDrainStampTicks = TimestampProvider();
+                // First drain after engine.Start (or after Interrupt/ClearRing
+                // reset the anchors) — capture the audible-head anchors. The
+                // pre-drain linear position is "where the speaker started
+                // playing from" (everything before this is pre-history, not
+                // audible). The current wall-clock stamp is "when the speaker
+                // started playing" — give or take Unity's DSP-buffer latency
+                // (~21 ms), which we tolerate to keep the model simple. From
+                // here, ComputeWallClockRms sweeps the audible head forward
+                // at the sample rate, independent of further drains.
+                if (_playbackStartStampTicks == 0)
+                {
+                    _playbackStartRingPos = preDrainReadPosLinear;
+                    _playbackStartStampTicks = TimestampProvider();
+                }
                 return n;
             }
         }
@@ -482,13 +518,17 @@ namespace ElevenLabs.Native
                 _readPos = 0;
                 _writePos = 0;
                 _available = 0;
+                _readPosLinear = 0;
+                _writePosLinear = 0;
                 Array.Clear(_ring, 0, _ring.Length);
                 Array.Clear(_analysisBuffer, 0, _analysisBuffer.Length);
                 _analysisWritePos = 0;
-                // Reset the playback-position interpolation anchor so a
-                // GetVolume right after an interrupt doesn't sweep into the
-                // now-zeroed ring at a stale wall-clock offset.
-                _lastDrainStampTicks = 0;
+                // Reset the audible-head anchors so a GetVolume right after
+                // an interrupt short-circuits to 0 instead of sweeping into
+                // the now-zeroed ring at a stale wall-clock offset. The next
+                // drain after a follow-up PushAudio will re-stamp.
+                _playbackStartStampTicks = 0;
+                _playbackStartRingPos = 0;
             }
         }
 
@@ -526,10 +566,9 @@ namespace ElevenLabs.Native
             if (windowSamples == 0)
                 return 0f;
             double sumSquares = 0.0;
-            int sampleCount;
             lock (_bufferLock)
             {
-                if (_lastDrainStampTicks == 0)
+                if (_playbackStartStampTicks == 0)
                 {
                     // No drain has happened yet (pre-first-callback or post-
                     // ClearRing). The ring is either empty or carries data
@@ -538,41 +577,55 @@ namespace ElevenLabs.Native
                     // volume".
                     return 0f;
                 }
-                long elapsedTicks = TimestampProvider() - _lastDrainStampTicks;
+                long elapsedTicks = TimestampProvider() - _playbackStartStampTicks;
                 if (elapsedTicks < 0)
                     elapsedTicks = 0;
-                int elapsedSamples = (int)(
+                // Audible playback head as a linear ring position: anchored at
+                // _playbackStartRingPos (where the drain head was BEFORE the
+                // first drain consumed any samples) and swept forward at the
+                // configured sample rate. Independent of how many drains have
+                // fired since — Unity's streaming-buffer pre-fill (~12,800
+                // samples on a typical Unity 6 config) drained ahead of the
+                // speaker, and reading those samples here would put the bob
+                // ~800 ms ahead of the audio.
+                long elapsedSamples = (long)(
                     (elapsedTicks / StopwatchTicksPerSecond) * _format.SampleRate
                 );
-                // Cap to queued-ahead samples — beyond that, the audio engine
-                // would be in underrun and we'd be sweeping into silence-fill
-                // territory. Holding the offset at _available keeps the RMS
-                // window pinned at the tail of buffered audio until the next
-                // chunk arrives.
-                int virtualOffset = Math.Min(elapsedSamples, _available);
-                // Subtract the audio engine's output latency so the RMS reflects
-                // what's *audible* at the speaker right now, not what Unity has
-                // *consumed* from the AudioClip — those differ by one set of
-                // DSP buffers in flight (~10-30 ms on typical setups). Without
-                // this, the bob leads the audio noticeably during lip-sync.
-                // Clamp at 0 so early-playback callers read the most-recently-
-                // drained window instead of wrapping into stale slots.
-                int audibleHead = Math.Max(0, virtualOffset - OutputLatencySamples);
-                // RMS window ends at the audible playback head. Walk back
-                // windowSamples from there to capture the most-recently-played
-                // envelope.
+                long audibleRingPos = _playbackStartRingPos + elapsedSamples;
+                // Clamp at the write head — beyond that, no audio has been
+                // queued, so reading would sweep into zero-initialised ring
+                // slots (silence). Pinning at _writePosLinear keeps the RMS
+                // window at the tail of what's been buffered.
+                if (audibleRingPos > _writePosLinear)
+                    audibleRingPos = _writePosLinear;
+                long windowStart = audibleRingPos - windowSamples;
+                long minReadable = _writePosLinear - _ringCapacity;
+                if (minReadable < 0)
+                    minReadable = 0;
                 for (int i = 0; i < windowSamples; i++)
                 {
-                    int rel = _readPos + audibleHead - windowSamples + i;
-                    int pos = rel % _ringCapacity;
-                    if (pos < 0)
-                        pos += _ringCapacity;
-                    float s = _ring[pos];
+                    long linearPos = windowStart + i;
+                    if (linearPos < _playbackStartRingPos || linearPos < minReadable)
+                    {
+                        // Pre-history (before the speaker started playing) or
+                        // overwritten by ring wrap — pad with silence so the
+                        // RMS naturally ramps in/out instead of reading stale
+                        // or unmapped slots.
+                        continue;
+                    }
+                    if (linearPos >= audibleRingPos)
+                    {
+                        // After the audible head — hasn't been played yet.
+                        continue;
+                    }
+                    int idx = (int)(linearPos % _ringCapacity);
+                    if (idx < 0)
+                        idx += _ringCapacity;
+                    float s = _ring[idx];
                     sumSquares += s * s;
                 }
-                sampleCount = windowSamples;
             }
-            return Mathf.Clamp01((float)Math.Sqrt(sumSquares / sampleCount));
+            return Mathf.Clamp01((float)Math.Sqrt(sumSquares / windowSamples));
         }
 
         // Test seam: bypasses the engine.IsAvailable short-circuit so unit
@@ -636,6 +689,7 @@ namespace ElevenLabs.Native
             if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
                 return;
             CancelFade();
+            CancelPrefillTimeout();
             await Awaitable.MainThreadAsync();
             // Engine handles AudioSource.Stop + supplied-source restoration +
             // host GameObject / AudioClip destruction — everything Unity-API

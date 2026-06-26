@@ -421,125 +421,85 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
-        public void GetVolume_SweepsForwardBetweenDrains_AsWallClockAdvances()
+        public void GetVolume_SweepsForwardWithWallClock_AfterFirstDrainStampsAnchor()
         {
-            // Push two chunks with distinct amplitude profiles, drain once
-            // (which stamps the clock), then advance the fake clock in steps
-            // and confirm the RMS reflects a forward sweep into the queued
-            // (not yet drained) chunk, even though no further drain happens.
+            // New (bob-alignment-redesign) model: the first drain after
+            // engine.Start stamps _playbackStartRingPos (= pre-drain linear
+            // read pos, i.e. where the speaker started playing FROM) and
+            // _playbackStartStampTicks (= now). ComputeWallClockRms then
+            // sweeps the audible head forward at the sample rate, *not*
+            // tied to subsequent drains. Drain at sample 0, advance the
+            // fake clock past the silent prefix, confirm the bob lights up
+            // when the audible head reaches the LOUD chunk.
             int sampleRate = 16_000;
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
-            // Pin the output-latency comp to 0 so this test measures pure
-            // wall-clock sweep; latency compensation has its own coverage.
-            output.OutputLatencySamples = 0;
             long fakeNow = 1_000_000L; // arbitrary non-zero baseline
             output.TimestampProvider = () => fakeNow;
 
-            // First chunk: 160 samples of silence (10 ms). Second chunk: 160
-            // samples at near-full amplitude. Drain just the silent half so
-            // the loud half is queued ahead and the stamp is anchored at the
-            // boundary.
-            int chunkSamples = sampleRate * 10 / 1000; // 160
-            output.PushAudio(LittleEndianSilence(chunkSamples));
-            output.PushAudio(LittleEndianConstant(chunkSamples, short.MaxValue));
-            output.ReadFromRing(new float[chunkSamples]); // drains the silent half
-
-            // Right at the drain stamp: virtual head is at _readPos (start of
-            // loud chunk minus windowSamples), so RMS reads back into the
-            // just-played silent samples → near zero.
-            float rmsAtBoundary = output.Test_ComputeWallClockRms();
-
-            // Advance the fake clock by 10 ms → virtual head sweeps fully
-            // into the loud chunk → RMS rises to near 1.
-            fakeNow += (long)(0.010 * (double)StopwatchFrequency);
-            float rmsInsideLoudChunk = output.Test_ComputeWallClockRms();
-
-            Assert.Less(
-                rmsAtBoundary,
-                0.1f,
-                $"At drain boundary, RMS should reflect just-played silence ({rmsAtBoundary})."
-            );
-            Assert.Greater(
-                rmsInsideLoudChunk,
-                0.9f,
-                $"After advancing 10 ms, RMS should reflect the loud chunk ({rmsInsideLoudChunk})."
-            );
-        }
-
-        [Test]
-        public void GetVolume_OutputLatencyOffset_ShiftsTheRmsWindowBackward()
-        {
-            // Push silence followed by a long loud chunk; drain just the
-            // silent half so the stamp anchors at the boundary. With a
-            // non-zero latency offset, advancing the wall clock by exactly
-            // the latency duration should keep the *audible* head pinned at
-            // the silence boundary (consumed head − latency = 0) and RMS
-            // should still read silence — that's the comp doing its job.
-            // Advancing further sweeps the audible head into the loud chunk.
-            int sampleRate = 16_000;
-            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
-            int latencyMs = 10;
-            output.OutputLatencySamples = sampleRate * latencyMs / 1000; // 160 samples
-            long fakeNow = 1_500_000L;
-            output.TimestampProvider = () => fakeNow;
-
-            int silentMs = 10;
-            int loudMs = 60; // long enough that the audible head can sweep into the loud region
-            int silentSamples = sampleRate * silentMs / 1000;
-            int loudSamples = sampleRate * loudMs / 1000;
-            output.PushAudio(LittleEndianSilence(silentSamples));
+            // Content layout: 5 ms SILENCE | 20 ms LOUD | 75 ms SILENCE.
+            //   - First drain (1 sample) stamps anchor at preDrainLinearPos=0.
+            //   - audibleRingPos = 0 + (elapsed * sampleRate).
+            //   - LOUD occupies linear positions [80, 400).
+            int silentHeadSamples = sampleRate * 5 / 1000; // 80
+            int loudSamples = sampleRate * 20 / 1000; // 320
+            int silentTailSamples = sampleRate * 75 / 1000; // 1200
+            output.PushAudio(LittleEndianSilence(silentHeadSamples));
             output.PushAudio(LittleEndianConstant(loudSamples, short.MaxValue));
-            output.ReadFromRing(new float[silentSamples]); // drains silent half
+            output.PushAudio(LittleEndianSilence(silentTailSamples));
+            output.ReadFromRing(new float[1]); // stamps anchor
 
-            // Wall clock advances by exactly the latency offset → consumed
-            // head has crossed into the loud chunk, but the *audible* head
-            // (consumed − latency) is still at the boundary → RMS still reads
-            // just-played silence.
-            fakeNow += (long)((latencyMs / 1000.0) * (double)StopwatchFrequency);
-            float rmsAtAudibleBoundary = output.Test_ComputeWallClockRms();
-            Assert.Less(
-                rmsAtAudibleBoundary,
-                0.1f,
-                $"With {latencyMs} ms latency comp, the audible head should still be at the boundary ({rmsAtAudibleBoundary})."
+            // Pre-advance: audible head at 0 → window before _playbackStartRingPos
+            // → padded silence → RMS = 0.
+            float rmsAtAnchor = output.Test_ComputeWallClockRms();
+            Assert.Less(rmsAtAnchor, 0.1f, $"At anchor, no audio has played yet ({rmsAtAnchor}).");
+
+            // Advance ~12 ms → audible head ≈ 192 → window [112, 192) → inside LOUD → ~1.
+            fakeNow += (long)(0.012 * (double)StopwatchFrequency);
+            float rmsInsideLoud = output.Test_ComputeWallClockRms();
+            Assert.Greater(
+                rmsInsideLoud,
+                0.9f,
+                $"After wall-clock advance into LOUD, bob should light up ({rmsInsideLoud})."
             );
 
-            // Advance another 20 ms (well past the latency offset) → audible
-            // head sweeps fully into the loud region → RMS jumps to ~1.
-            fakeNow += (long)(0.020 * (double)StopwatchFrequency);
-            float rmsInsideLoudChunk = output.Test_ComputeWallClockRms();
-            Assert.Greater(
-                rmsInsideLoudChunk,
-                0.9f,
-                $"After audible head crosses past the latency offset, RMS should reflect the loud chunk ({rmsInsideLoudChunk})."
+            // Advance further to ~30 ms → audible head ≈ 480 → past LOUD (which
+            // ended at 400) → window [400, 480) → in silent tail → RMS ≈ 0.
+            fakeNow += (long)(0.018 * (double)StopwatchFrequency);
+            float rmsAfterLoud = output.Test_ComputeWallClockRms();
+            Assert.Less(
+                rmsAfterLoud,
+                0.1f,
+                $"After wall-clock advance past LOUD, bob should fall back to 0 ({rmsAfterLoud})."
             );
         }
 
         [Test]
-        public void GetVolume_CapsVirtualOffsetAtAvailable_HoldsRmsAtTailDuringUnderrun()
+        public void GetVolume_AudibleHead_ClampsAtWritePos_HoldsRmsAtTailDuringUnderrun()
         {
-            // Once the wall clock has elapsed more samples than are queued,
-            // virtualOffset should clamp at _available — the RMS window
-            // pins to the tail of buffered audio (the last samples that
-            // would have played) until a new chunk arrives. Without the
-            // clamp we'd sweep into stale/freed slots and report garbage.
+            // Once the wall clock has elapsed more samples than have been
+            // queued, audibleRingPos should clamp at _writePosLinear — the
+            // RMS window pins to the tail of buffered audio (the last
+            // samples that would have played) until a new chunk arrives.
+            // Without the clamp we'd sweep into zero-initialised ring slots
+            // (silence) past the queue.
             int sampleRate = 16_000;
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
-            output.OutputLatencySamples = 0; // isolate from latency comp
             long fakeNow = 2_000_000L;
             output.TimestampProvider = () => fakeNow;
 
             int chunkSamples = sampleRate * 20 / 1000; // 20 ms = 320
             output.PushAudio(LittleEndianConstant(chunkSamples, short.MaxValue));
-            output.ReadFromRing(new float[1]); // tiny drain to stamp the clock
+            output.ReadFromRing(new float[1]); // tiny drain to stamp the anchor
 
             // Advance the fake clock by 10 seconds — far past whatever the
-            // ring has queued. Without clamping, virtualOffset would walk
+            // ring has queued. Without clamping, audibleRingPos would walk
             // off the end of the queued region.
             fakeNow += (long)(10.0 * StopwatchFrequency);
             float rms = output.Test_ComputeWallClockRms();
 
             // Should land at the tail of the loud chunk → near 1, not 0 or
-            // garbage.
+            // garbage. Window = [_writePosLinear - windowSamples, _writePosLinear)
+            // = [240, 320) — all LOUD.
             Assert.Greater(
                 rms,
                 0.9f,
@@ -966,37 +926,65 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
-        [Ignore(
-            "Documents the single-chunk timeout regression — the threshold-gate's wall-clock"
-                + " fallback only fires when a subsequent PushAudio runs, so a tiny one-and-done"
-                + " chunk never triggers Start. Re-enable once the timer-driven fallback ships;"
-                + " see the Companion follow-up in Docs~/plans/audio-output-testability.md."
-        )]
         public void Output_ThresholdGate_TimeoutFiresIfNoFurtherChunks()
         {
-            // Push a chunk well below the prefill threshold, then advance
-            // the wall clock past PrefillTimeoutMs without another
-            // PushAudio. The threshold-gate's timeout branch should fire
-            // engine.Start anyway so a tiny single-chunk response isn't
-            // held forever waiting on audio that won't arrive.
+            // Push a tiny chunk below the prefill threshold and never push
+            // anything else. The threshold-gate's wall-clock timeout
+            // fallback runs on its own Awaitable timer (via the
+            // WaitForSecondsAsyncProvider seam) so engine.Start fires once
+            // the timeout elapses, even without a follow-up PushAudio.
             int sampleRate = 16_000;
             var fake = new FakeAudioOutputEngine();
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
-            long fakeNow = 1_000_000L;
-            output.TimestampProvider = () => fakeNow;
+
+            // Stub the timer awaitable so we control when it completes
+            // (Awaitable.WaitForSecondsAsync needs Unity's frame loop, which
+            // doesn't tick in Edit Mode batch tests).
+            var timerSource = new AwaitableCompletionSource();
+            output.WaitForSecondsAsyncProvider = (sec, ct) => timerSource.Awaitable;
 
             output.PushAudio(LittleEndianConstant(100, short.MaxValue));
-            Assert.AreEqual(0, fake.StartCallCount);
+            Assert.AreEqual(0, fake.StartCallCount, "Pre-timer: Start should not have fired yet.");
 
-            fakeNow += (long)(
-                (UnityAudioSourceOutput.PrefillTimeoutMs + 100) / 1000.0 * StopwatchFrequency
-            );
+            // Fire the timer → continuation runs synchronously → StartPlayback.
+            timerSource.SetResult();
 
             Assert.AreEqual(
                 1,
                 fake.StartCallCount,
                 "Single-chunk fallback should fire Start once the wall-clock timeout elapses,"
                     + " even without a follow-up PushAudio."
+            );
+        }
+
+        [Test]
+        public void Output_ThresholdGate_TimerCanceled_IfThresholdTripsFirst()
+        {
+            // If a follow-up PushAudio trips the threshold before the timer
+            // fires, the timer should be cancelled and StartPlayback should
+            // run only once.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine();
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+
+            var timerSource = new AwaitableCompletionSource();
+            output.WaitForSecondsAsyncProvider = (sec, ct) => timerSource.Awaitable;
+
+            output.PushAudio(LittleEndianConstant(100, short.MaxValue));
+            Assert.AreEqual(0, fake.StartCallCount);
+
+            // Cross the threshold before the timer fires.
+            int thresholdSamples = sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000;
+            output.PushAudio(LittleEndianConstant(thresholdSamples, short.MaxValue));
+            Assert.AreEqual(1, fake.StartCallCount, "Threshold-met path should fire Start once.");
+
+            // Fire the stubbed timer late; the redundant-start guard means
+            // StartCallCount stays at 1 even if the continuation runs.
+            timerSource.SetResult();
+            Assert.AreEqual(
+                1,
+                fake.StartCallCount,
+                "Late-firing timer should not double-fire Start (idempotent gate)."
             );
         }
 
@@ -1025,30 +1013,27 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
-        [Ignore(
-            "Documents the bob-alignment regression — GetVolume reads at _readPos which is"
-                + " post-pre-fill (≈ 800 ms ahead of audible playback). The fix tracks the"
-                + " audible playback head separately; see the Companion follow-up in"
-                + " Docs~/plans/audio-output-testability.md."
-        )]
         public void GetVolume_TracksPlaybackPosition_DuringSyncPrefill_NotDrainHead()
         {
             // After the synchronous pre-fill, _readPos sits ~12,800 samples
-            // ahead of where the speaker is actually playing. GetVolume
-            // should reflect what's audible (start of the clip) rather
-            // than what was drained into Unity's streaming buffer (end of
-            // pre-fill window).
+            // ahead of where the speaker is actually playing. GetVolume in
+            // the new (bob-alignment-redesign) model anchors on
+            // _playbackStartRingPos (the linear ring pos BEFORE the first
+            // drain) so the audible head starts at the beginning of the
+            // queued audio, not at the drain head. Advance the clock 10 ms
+            // → audible head into the LOUD chunk → bob lights up.
             //
             // Content layout: 100 ms LOUD | 850 ms SILENCE.
             //   - Threshold met by the end of the second push (15,200 > 14,400).
-            //   - Pre-fill drains 12,800 samples (100 ms LOUD + 700 ms SILENCE).
-            //   - _readPos lands at content position 12,800, inside SILENCE.
-            // Correct GetVolume → audible head ≈ 0 → reads LOUD chunk → RMS ≈ 1.
-            // Buggy GetVolume   → reads samples at _readPos − windowSamples → SILENCE → RMS ≈ 0.
+            //   - Sync pre-fill drains 12,800 samples; _playbackStartRingPos = 0
+            //     was captured before the first drain. _readPosLinear lands at
+            //     12,800 (deep inside the SILENCE region).
+            // OLD-MODEL bug: reads samples around _readPos → silence → RMS ≈ 0.
+            // NEW MODEL:    reads samples around audible head (= 0 + elapsed × sampleRate)
+            //               → at 10 ms elapsed, reads LOUD start → RMS ≈ 1.
             int sampleRate = 16_000;
             var fake = new FakeAudioOutputEngine();
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
-            output.OutputLatencySamples = 0;
             long fakeNow = 1_000_000L;
             output.TimestampProvider = () => fakeNow;
 
@@ -1063,12 +1048,15 @@ namespace ElevenLabs.Native.Tests
                 "Threshold should trigger Start by the end of the second push."
             );
 
+            // Advance 10 ms → audible head ≈ 160 → window [80, 160) — all
+            // inside the LOUD chunk ([0, 1600)) → bob ≈ 1.
+            fakeNow += (long)(0.010 * StopwatchFrequency);
             float rms = output.Test_ComputeWallClockRms();
             Assert.Greater(
                 rms,
                 0.9f,
                 $"Bob should track audible playback head at the start of the clip, got {rms}"
-                    + " (see bob-alignment redesign in Docs~/plans/audio-output-testability.md)."
+                    + " (see Docs~/plans/bob-alignment-redesign.md)."
             );
         }
 
@@ -1093,7 +1081,6 @@ namespace ElevenLabs.Native.Tests
                 OngoingCallbackPeriodSeconds = 0.333,
             };
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
-            output.OutputLatencySamples = 0;
             long fakeNow = 1_000_000L;
             output.TimestampProvider = () => fakeNow;
 
@@ -1107,8 +1094,9 @@ namespace ElevenLabs.Native.Tests
             output.PushAudio(LittleEndianSilence(silenceTailSamples));
 
             Assert.AreEqual(1, fake.StartCallCount);
-            // Pre-drain: no playback yet, bob short-circuits to zero via
-            // the _lastDrainStampTicks == 0 guard.
+            // Pre-drain: anchor not set yet (no drain has happened) → bob
+            // short-circuits to zero via the _playbackStartStampTicks == 0
+            // guard.
             Assert.AreEqual(
                 0f,
                 output.Test_ComputeWallClockRms(),
@@ -1116,22 +1104,25 @@ namespace ElevenLabs.Native.Tests
                 "Pre-drain: no playback yet, bob should rest at zero."
             );
 
-            // Tick fires one ongoing drain of 160 samples → _readPos
-            // advances to the SILENCE/LOUD boundary and the wall-clock
-            // stamp is set to fakeNow.
+            // Tick fires one ongoing drain of 160 samples → first drain
+            // stamps anchor at preDrainPos=0, ticks=fakeNow. _readPosLinear
+            // advances to 160 (start of LOUD region in content coords).
             fake.Tick(0.333);
 
+            // Right at the anchor (elapsed=0): audible head at 0, window
+            // ends BEFORE _playbackStartRingPos → padded silence → 0.
             float rmsAtDrain = output.Test_ComputeWallClockRms();
             Assert.Less(
                 rmsAtDrain,
                 0.1f,
-                $"Right after the drain, bob should reflect just-played SILENCE ({rmsAtDrain})."
+                $"Right after the drain, bob should reflect not-yet-played silence ({rmsAtDrain})."
             );
 
-            // Advance the fake wall clock by 10 ms WITHOUT firing another
-            // drain (10 ms < 333 ms ongoing period). Audible head sweeps
-            // 160 samples forward into the LOUD region.
-            fakeNow += (long)(0.010 * StopwatchFrequency);
+            // Advance the fake wall clock by 20 ms WITHOUT firing another
+            // drain (20 ms < 333 ms ongoing period). Audible head sweeps
+            // to 320 → window [240, 320) → fully inside LOUD region
+            // ([160, 1760)) → bob ≈ 1.
+            fakeNow += (long)(0.020 * StopwatchFrequency);
 
             float rmsBetweenDrains = output.Test_ComputeWallClockRms();
             Assert.Greater(
@@ -1179,7 +1170,6 @@ namespace ElevenLabs.Native.Tests
                 OngoingCallbackPeriodSeconds = 0.333,
             };
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
-            output.OutputLatencySamples = 0;
             long fakeNow = 1_000_000L;
             output.TimestampProvider = () => fakeNow;
 
@@ -1187,13 +1177,15 @@ namespace ElevenLabs.Native.Tests
                 sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
             output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
 
-            // One ongoing drain → stamps the wall clock; RMS picks up the
-            // just-played LOUD samples.
+            // One ongoing drain → first drain stamps anchor at preDrainPos=0.
+            // Advance the clock 10 ms so the audible head sweeps into the
+            // LOUD content → bob lights up.
             fake.Tick(0.333);
+            fakeNow += (long)(0.010 * StopwatchFrequency);
             Assert.Greater(
                 output.Test_ComputeWallClockRms(),
                 0.5f,
-                "Post-drain RMS should reflect just-played LOUD samples."
+                "Post-drain RMS should reflect LOUD samples after wall-clock advance into the content."
             );
 
             output.Interrupt(resetDurationMs: 0);
@@ -1201,7 +1193,7 @@ namespace ElevenLabs.Native.Tests
 
             // Without the anchor reset, GetVolume would sweep into the
             // now-empty ring at the stale offset. With it, the
-            // _lastDrainStampTicks == 0 short-circuit fires.
+            // _playbackStartStampTicks == 0 short-circuit fires.
             fakeNow += (long)(0.1 * StopwatchFrequency);
             Assert.AreEqual(
                 0f,
