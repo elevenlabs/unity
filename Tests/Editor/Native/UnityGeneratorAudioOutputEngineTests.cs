@@ -28,11 +28,15 @@ namespace ElevenLabs.Native.Tests
     /// <see cref="AudioSource.generator"/>, Dispose lifecycle). The
     /// audio-thread <c>Process</c> cadence is covered by
     /// <see cref="ElevenLabs.Native.PlayMode.Tests.UnityGeneratorAudioOutputEngineCharacterizationTest"/>
-    /// in PlayMode; the cadence-calibrated fake-driven tests in
+    /// in PlayMode. The cadence-calibrated fake-driven tests in
     /// <see cref="UnityAudioSourceOutputTests"/> (sync-pre-fill threshold
-    /// gate, drain timing) remain calibrated to the legacy streaming-clip
-    /// path until step 5/6 simplifies the threshold gate for the
-    /// structurally-zero-pre-fill generator path.
+    /// gate, drain timing) compute the threshold via
+    /// <see cref="UnityAudioSourceOutput.ComputePrefillThresholdSamples"/>,
+    /// which reads
+    /// <see cref="IAudioOutputEngine.SyncPrefillSampleCount"/>; under the
+    /// generator engine that collapses to just the controller's DSP-buffer
+    /// margin (see step 5 of <c>Docs~/plans/audio-generator-engine.md</c>
+    /// for the decision rationale).
     /// </para>
     /// <para>
     /// Construction note: the engine creates real <see cref="GameObject"/> +
@@ -138,9 +142,11 @@ namespace ElevenLabs.Native.Tests
                     // as a delta, not a no-op write back to the same value.
                     engine.Volume = 0.1f;
 
-                    // 3 samples is well below the prefill threshold so
-                    // engine.Start does not fire — the unconditional volume
-                    // reset is the only side effect.
+                    // 3 samples is well below the controller's prefill
+                    // threshold (DSP-buffer margin alone with the generator
+                    // engine's SyncPrefillSampleCount == 0) so engine.Start
+                    // does not fire — the unconditional volume reset is the
+                    // only side effect.
                     output.PushAudio(LittleEndian(1, 2, 3));
                     Assert.AreEqual(0.7f, engine.Volume, 1e-6);
                     Assert.AreEqual(0.7f, supplied.volume, 1e-6);

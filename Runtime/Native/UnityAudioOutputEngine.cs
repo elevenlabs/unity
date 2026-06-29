@@ -167,6 +167,17 @@ namespace ElevenLabs.Native
             }
         }
 
+        // Empirically-measured pre-fill at 16 kHz input on a Unity 6 default
+        // audio config (50 PCMReaderCallback fires × 256 samples per fire,
+        // covering the streaming buffer's 256 × 4 = 1024 output-rate samples
+        // at 48 kHz). Reported as input-rate samples — the controller's
+        // threshold gate is sized in the same units as the SDK's ring.
+        // Rate-independent in practice: Unity's pre-fill demand is fixed
+        // by the streaming buffer depth, not the input rate, so this
+        // constant covers typical agent input rates (16/24 kHz) with
+        // margin to spare.
+        public int SyncPrefillSampleCount => 12_800;
+
         public void Start(FormatConfig format, Func<float[], int> drainCallback)
         {
             if (format == null)

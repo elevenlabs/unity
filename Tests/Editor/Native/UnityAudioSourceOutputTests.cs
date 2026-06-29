@@ -693,9 +693,8 @@ namespace ElevenLabs.Native.Tests
                     "Streaming clip is deferred to first PushAudio; should be null at CreateAsync."
                 );
 
-                // Push enough audio to clear the prefill threshold.
-                int triggerSamples =
-                    sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+                // Push enough audio to clear the engine-driven prefill threshold.
+                int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                 output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
 
                 Assert.IsNotNull(
@@ -748,8 +747,7 @@ namespace ElevenLabs.Native.Tests
                     // Drive a chunk past the prefill threshold so the clip
                     // gets bound; this is the point where Unity's pre-fill
                     // would otherwise silence-fill an empty ring.
-                    int triggerSamples =
-                        sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+                    int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                     output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
                     Assert.IsNotNull(
                         supplied.clip,
@@ -803,8 +801,7 @@ namespace ElevenLabs.Native.Tests
 
                 // Trigger the deferred clip bind so we can verify Close
                 // unbinds it again below.
-                int triggerSamples =
-                    sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+                int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                 output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
                 Assert.IsNotNull(supplied.clip);
 
@@ -909,13 +906,14 @@ namespace ElevenLabs.Native.Tests
         public void Output_ThresholdGate_DelaysStartUntilRingDepthMet()
         {
             // Current threshold-gate behaviour: engine.Start defers until
-            // the ring holds at least PrefillThresholdMs of audio so the
-            // synchronous pre-fill lands entirely on real samples.
+            // the ring holds at least IAudioOutputEngine.SyncPrefillSampleCount
+            // (plus the controller's DSP-buffer margin) so the synchronous
+            // pre-fill lands entirely on real samples.
             int sampleRate = 16_000;
             var fake = new FakeAudioOutputEngine();
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
 
-            int thresholdSamples = sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000;
+            int thresholdSamples = output.ComputePrefillThresholdSamples();
             // Push half the threshold's worth — gate holds, Start deferred.
             output.PushAudio(LittleEndianConstant(thresholdSamples / 2, short.MaxValue));
             Assert.AreEqual(0, fake.StartCallCount, "Below threshold, Start stays deferred.");
@@ -974,7 +972,7 @@ namespace ElevenLabs.Native.Tests
             Assert.AreEqual(0, fake.StartCallCount);
 
             // Cross the threshold before the timer fires.
-            int thresholdSamples = sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000;
+            int thresholdSamples = output.ComputePrefillThresholdSamples();
             output.PushAudio(LittleEndianConstant(thresholdSamples, short.MaxValue));
             Assert.AreEqual(1, fake.StartCallCount, "Threshold-met path should fire Start once.");
 
@@ -1143,8 +1141,7 @@ namespace ElevenLabs.Native.Tests
             var fake = new FakeAudioOutputEngine();
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
 
-            int triggerSamples =
-                sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+            int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
             output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
             Assert.AreEqual(1, fake.StartCallCount, "First past-threshold push fires Start.");
 
@@ -1173,8 +1170,7 @@ namespace ElevenLabs.Native.Tests
             long fakeNow = 1_000_000L;
             output.TimestampProvider = () => fakeNow;
 
-            int triggerSamples =
-                sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+            int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
             output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
 
             // One ongoing drain → first drain stamps anchor at preDrainPos=0.
@@ -1236,8 +1232,7 @@ namespace ElevenLabs.Native.Tests
 
             // Turn 1: push enough to trip the threshold + drain once to
             // stamp the anchor + advance into LOUD content.
-            int triggerSamples =
-                sampleRate * UnityAudioSourceOutput.PrefillThresholdMs / 1000 + 256;
+            int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
             output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
             fake.Tick(0.333); // first real drain → stamps anchor at preDrainPos=0, t=fakeNow.
 

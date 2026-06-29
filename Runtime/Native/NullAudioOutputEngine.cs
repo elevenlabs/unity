@@ -26,6 +26,13 @@ namespace ElevenLabs.Native
 
         public float Volume { get; set; } = 1f;
 
+        // No real playback subsystem — the drain callback never fires, so
+        // the engine drains nothing synchronously inside Start. Bare
+        // Edit-Mode tests using the bare-constructor controller see the
+        // threshold gate collapse to its DSP-buffer margin, which is fine
+        // because those tests drive ReadFromRing directly anyway.
+        public int SyncPrefillSampleCount => 0;
+
         public void Start(FormatConfig format, Func<float[], int> drainCallback)
         {
             // No real playback subsystem — drainCallback is never invoked.

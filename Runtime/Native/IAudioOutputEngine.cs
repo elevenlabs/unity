@@ -50,6 +50,41 @@ namespace ElevenLabs.Native
         bool IsAvailable { get; }
 
         /// <summary>
+        /// Approximate number of input-rate samples the engine drains
+        /// synchronously inside <see cref="Start"/> before returning.
+        /// <see cref="UnityAudioSourceOutput"/> defers <see cref="Start"/>
+        /// until the ring holds at least this many samples (plus a small
+        /// DSP-buffer margin) so the pre-fill lands on real audio instead
+        /// of silence-filling Unity's streaming buffer ahead of the speaker.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The streaming-<see cref="UnityEngine.AudioClip"/> path
+        /// (<see cref="UnityAudioOutputEngine"/>) reports ~12,800 — the
+        /// empirically-measured pre-fill at 16 kHz input on a Unity 6
+        /// default audio config (DSP buffer 256 × 4 at 48 kHz output;
+        /// see <c>Docs~/unity-issues/streaming-audioclip-prefill-depth.md</c>).
+        /// The <see cref="IAudioGenerator"/> path
+        /// (<see cref="UnityGeneratorAudioOutputEngine"/>) reports 0 —
+        /// per the PlayMode characterization test, <c>Process</c> fires
+        /// strictly asynchronously after <see cref="UnityEngine.AudioSource.Play"/>,
+        /// so the controller can fire <see cref="Start"/> on the first
+        /// chunk above DSP-buffer size without risking silence-fill.
+        /// </para>
+        /// <para>
+        /// Engines that drain a fixed pre-fill regardless of input rate
+        /// (Unity's streaming clip behaves this way at typical agent input
+        /// rates) report a constant sample count; engines that scale with
+        /// rate should overestimate so the controller's gate remains a
+        /// safety bound. The controller adds a small margin (~one DSP
+        /// buffer's worth of input samples) before triggering
+        /// <see cref="Start"/>, so a slight underestimate here only
+        /// shortens the safety cushion — it doesn't break correctness.
+        /// </para>
+        /// </remarks>
+        int SyncPrefillSampleCount { get; }
+
+        /// <summary>
         /// Pass-through to the underlying playback destination's volume. In
         /// production this writes <see cref="UnityEngine.AudioSource.volume"/>
         /// directly; fakes can record the value for test assertions.

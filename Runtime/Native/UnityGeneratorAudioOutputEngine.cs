@@ -213,6 +213,16 @@ namespace ElevenLabs.Native
             }
         }
 
+        // Zero by construction — Unity's IAudioGenerator surface fires
+        // Process strictly on the audio thread AFTER Play(), with no
+        // synchronous pre-fill inside Play() itself (confirmed in the
+        // PlayMode characterization test at step 1: 0 Process fires inside
+        // Play(), ~187.5 Hz cadence afterward). The controller's threshold
+        // gate collapses to just its DSP-buffer margin under this engine —
+        // engine.Start can fire on the first chunk above DSP-buffer size
+        // without risking silence-fill.
+        public int SyncPrefillSampleCount => 0;
+
         public void Start(FormatConfig format, Func<float[], int> drainCallback)
         {
             if (format == null)

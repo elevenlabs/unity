@@ -290,7 +290,7 @@ namespace ElevenLabs.Native
             // Docs~/plans/bob-alignment-redesign.md.
             if (_playbackStarted)
                 return;
-            int prefillThresholdSamples = _format.SampleRate * PrefillThresholdMs / 1000;
+            int prefillThresholdSamples = ComputePrefillThresholdSamples();
             if (_available >= prefillThresholdSamples)
             {
                 CancelPrefillTimeout();
@@ -303,11 +303,21 @@ namespace ElevenLabs.Native
             }
         }
 
-        // Ring-depth gate (clip-rate ms): wait until the ring holds this
-        // much audio before triggering AudioClip.Create. Sized to cover the
-        // ~800 ms pre-fill Unity does synchronously inside Create, plus a
-        // small safety margin so the pre-fill never silence-fills.
-        internal const int PrefillThresholdMs = 900;
+        // Ring-depth gate: wait until the ring holds enough audio to cover
+        // the engine's synchronous pre-fill demand (so the pre-fill lands
+        // on real samples instead of silence-filling Unity's streaming
+        // buffer ahead of the speaker), plus a small DSP-buffer margin so
+        // a producer that just barely meets the demand still has cushion.
+        // The threshold is engine-driven via
+        // <see cref="IAudioOutputEngine.SyncPrefillSampleCount"/>: the
+        // legacy streaming-clip engine reports ~12,800 samples; the
+        // IAudioGenerator engine reports 0, collapsing the gate to just
+        // the margin (~16 ms at 16 kHz). Centralized here so the test
+        // suite and the controller compute the gate identically.
+        internal const int PrefillMarginSamples = 256;
+
+        internal int ComputePrefillThresholdSamples() =>
+            _engine.SyncPrefillSampleCount + PrefillMarginSamples;
 
         // Wall-clock fallback (ms after the first PushAudio that didn't
         // trip the threshold): trigger engine.Start anyway after this

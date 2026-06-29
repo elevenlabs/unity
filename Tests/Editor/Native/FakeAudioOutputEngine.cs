@@ -46,7 +46,14 @@ namespace ElevenLabs.Native.Tests
     /// zero sync pre-fill and a ~187.5 Hz ongoing cadence (measured in
     /// <see cref="ElevenLabs.Native.PlayMode.Tests.UnityGeneratorAudioOutputEngineCharacterizationTest"/>);
     /// tests modeling that path set <c>SyncPrefillCallbackCount = 0</c> and
-    /// override <see cref="OngoingCallbackPeriodSeconds"/>. Step 6 of
+    /// override <see cref="OngoingCallbackPeriodSeconds"/>. With the
+    /// step-5 engine-driven threshold gate, the controller's
+    /// <see cref="UnityAudioSourceOutput.ComputePrefillThresholdSamples"/>
+    /// automatically scales with this fake's
+    /// <see cref="SyncPrefillSampleCount"/>, so a test that flips
+    /// <see cref="SyncPrefillCallbackCount"/> to 0 also collapses the
+    /// gate to just the DSP-buffer margin — no test-side bookkeeping
+    /// required. Step 6 of
     /// <c>Docs~/plans/audio-generator-engine.md</c> swaps the production
     /// wiring; the defaults should be revisited at that point.
     /// </para>
@@ -126,6 +133,15 @@ namespace ElevenLabs.Native.Tests
         public bool IsAvailable => !_disposed;
 
         public float Volume { get; set; } = 1f;
+
+        // Derived from the configured sync-pre-fill behaviour so the
+        // controller's engine-driven threshold gate stays in lockstep with
+        // whatever cadence the test calibrates. Tests modeling the
+        // generator path set SyncPrefillCallbackCount = 0, which collapses
+        // this to 0 — matching UnityGeneratorAudioOutputEngine's
+        // zero-pre-fill contract.
+        public int SyncPrefillSampleCount =>
+            SyncPrefillCallbackCount * SyncPrefillSampleCountPerCallback;
 
         private Func<float[], int>? _drainCallback;
         private double _tickBudgetSeconds;
