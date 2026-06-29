@@ -50,11 +50,20 @@ Codegen~/         Protocol DTO codegen: reads the vendored AsyncAPI spec at
                   Codegen~/schemas/convai-asyncapi.yml and emits the C# DTO + dispatcher +
                   args records under Runtime/Core/Protocol/*.g.cs. Standalone pnpm project.
 
-Samples/          Self-contained UPM samples that ship with the package.
+Samples~/         User-facing UPM samples that ship with the package, hidden from the
+                  AssetDatabase (Unity convention — the tilde prevents the consuming project
+                  from seeing them twice once Package Manager copies them into Assets/Samples/).
+  GettingStarted/          Walk-up-and-talk demo — the README's headline sample.
+  QuickStart/              Minimal one-MonoBehaviour smoke sample.
+
+Samples/          In-repo smoke harnesses. NOT in package.json#files — Unity compiles them
+                  so HostBuild can load the MonoBehaviour types via Type.GetType, but they
+                  never reach UPM consumers.
   BridgeSmokeTest/         JS↔C# primitives smoke MonoBehaviour (exercised by the WebGL
                            primitives integration test).
   ConversationSmokeTest/   End-to-end Conversation smoke MonoBehaviour (exercised by the
                            WebGL conversation integration test).
+  StandaloneSmokeTest/     Native end-to-end smoke MonoBehaviour for the standalone player.
 
 TestProject/      Embedded dev Unity host project. Used to (a) run the Edit Mode test suite
                   headlessly and (b) produce WebGL builds of the samples for the browser

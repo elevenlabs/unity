@@ -136,7 +136,7 @@ move the asset under any `Resources/` folder
 ### 4. Add `TalkingBox.cs`
 
 Create `Assets/Scripts/TalkingBox.cs`. The full file is in the sample at
-[`Samples/GettingStarted/Scripts/TalkingBox.cs`](../Samples/GettingStarted/Scripts/TalkingBox.cs);
+[`Samples/GettingStarted/Scripts/TalkingBox.cs`](../Samples~/GettingStarted/Scripts/TalkingBox.cs);
 copy it verbatim or use the snippets below as the basis for your own. The
 four regions worth understanding:
 
@@ -234,7 +234,7 @@ In an empty scene:
    the `Audio Source` slot.
 4. **Add a player**: a Capsule with a **non-trigger** Collider (the default
    CapsuleCollider works) and a child Camera at head height. Drop the
-   sample's [`SimplePlayerController`](../Samples/GettingStarted/Scripts/SimplePlayerController.cs)
+   sample's [`SimplePlayerController`](../Samples~/GettingStarted/Scripts/SimplePlayerController.cs)
    on it for WASD + mouse-look, or use your own controller — anything that
    moves a collider into the trigger will work.
 5. **Press Play.** Walk into the cube; the agent greets you. Walk away; the

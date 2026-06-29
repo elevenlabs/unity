@@ -116,17 +116,19 @@ the recording lands once captured.
       and `Samples/GettingStarted` are listed) and its `samples` array
       (same two). No action needed; the smoke tests live in-repo for
       our integration tests but never reach UPM consumers.
-- [ ] **Follow-up — move `Samples/` → `Samples~/`.** Today the
-      package's sample sources live at `Samples/` (no tilde), so they're
-      visible to the AssetDatabase of any consumer project. When the
-      user imports a sample via Package Manager, Unity copies it into
-      `Assets/Samples/...` — both copies now exist, with the same
-      asmdef name, which produces a hard "Assembly with name X already
-      exists" error and GUID-conflict warnings on every imported
-      asset. Renaming to `Samples~/` is the Unity convention to hide
-      the sources from AssetDatabase while keeping Package Manager
-      able to copy them on demand. Affects QuickStart too; out of
-      scope for task 1.
+- [x] **Follow-up — move `Samples/` → `Samples~/`.** Done for the two
+      user-facing samples: `Samples/QuickStart` → `Samples~/QuickStart`
+      and `Samples/GettingStarted` → `Samples~/GettingStarted`. The
+      smoke harnesses (`BridgeSmokeTest/`, `ConversationSmokeTest/`,
+      `StandaloneSmokeTest/`) stay under `Samples/` because Unity must
+      compile them so `HostBuild` can load the MonoBehaviour types via
+      `Type.GetType` (per the v0.1-parity plan's earlier decision); they
+      were already excluded from `package.json#files`, so UPM consumers
+      never saw them. Updated `package.json#files` + `#samples` paths,
+      deleted the now-stale `Samples/QuickStart.meta` /
+      `Samples/GettingStarted.meta`, and repointed README /
+      GETTING_STARTED.md / COMPATIBILITY.md / CONTRIBUTING.md links at
+      the new `Samples~/` paths.
 
 ### 2. Write `Docs~/GETTING_STARTED.md`
 
@@ -185,25 +187,36 @@ the recording lands once captured.
 
 ### 5. Track follow-ups as issues
 
-- [ ] File "Publish to OpenUPM" issue.
-- [ ] File "Record landing media" issue if we pick option 1 or 2 above.
+- [x] File "Publish to OpenUPM" issue — [#18](https://github.com/elevenlabs/unity/issues/18).
+- [x] File "Record landing media" issue — [#19](https://github.com/elevenlabs/unity/issues/19)
+      (option 1: 30s recording with audio, embed as inline video).
 
 ### 6. Public-readiness audit (parallel pass — separate plan if it grows)
 
-- [ ] Confirm [`LICENSE`](../../LICENSE) matches the org's preferred license
-      for public OSS.
-- [ ] [`.github/`](../../.github/) — verify CI workflow status, add issue +
-      PR templates if missing.
-- [ ] [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — confirmed OK for now per
+- [x] Confirm [`LICENSE`](../../LICENSE) matches the org's preferred license
+      for public OSS. MIT — standard permissive OSS, ready as-is.
+- [x] [`.github/`](../../.github/) — CI workflows (unity-tests, lint,
+      integration) all present and functional. Issue + PR templates,
+      CODEOWNERS, and SECURITY.md are missing; tracked as a follow-up
+      ([#20](https://github.com/elevenlabs/unity/issues/20)) since they're
+      polish, not blockers.
+- [x] [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — confirmed OK for now per
       user.
-- [ ] [`Docs~/plans/`](.) — these are working design docs. Decide whether
-      they ship publicly (fine — they tell the story of how we got here) or
-      move to internal. Lean toward keeping public.
-- [ ] Grep for internal-only references: Slack channels, internal monorepo
+- [x] [`Docs~/plans/`](.) — these are working design docs. Decision: keep
+      public. They tell the story of how we got here; the audit spot-checked
+      the most recently modified plans and found no unredacted credentials,
+      customer names, or internal gossip.
+- [x] Grep for internal-only references: Slack channels, internal monorepo
       links, personal usernames in non-commit pointers, hardcoded paths
-      under `/Users/`.
-- [ ] Confirm [`package.json`](../../package.json) `documentationUrl` lands
-      somewhere useful after the README rewrite.
+      under `/Users/`. Clean — the only `/Users/` paths are in
+      [`.claude/CLAUDE.md`](../../.claude/CLAUDE.md) (Claude Code context
+      file — not shipped, intentionally local) and inside this plan file
+      (which now points at the vendored sample instead). No Slack channels,
+      no internal monorepo URLs in shipped surfaces, no leaked secrets.
+- [x] Confirm [`package.json`](../../package.json) `documentationUrl` lands
+      somewhere useful after the README rewrite. Points at
+      `https://github.com/elevenlabs/unity#readme` — the rewritten slim
+      landing page, which is exactly the right destination.
 
 ---
 

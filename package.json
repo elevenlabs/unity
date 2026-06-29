@@ -27,10 +27,8 @@
     "Tests.meta",
     "Plugins",
     "Plugins.meta",
-    "Samples/QuickStart",
-    "Samples/QuickStart.meta",
-    "Samples/GettingStarted",
-    "Samples/GettingStarted.meta",
+    "Samples~/QuickStart",
+    "Samples~/GettingStarted",
     "COMPATIBILITY.md",
     "CONTRIBUTING.md"
   ],
@@ -38,12 +36,12 @@
     {
       "displayName": "GettingStarted",
       "description": "Walk-up-and-talk demo: trigger-based session lifecycle, dynamic variables, spatial audio, and a per-frame volume-driven bob.",
-      "path": "Samples/GettingStarted"
+      "path": "Samples~/GettingStarted"
     },
     {
       "displayName": "QuickStart",
       "description": "Minimal scene showing how to open a Conversation session and render the live transcript.",
-      "path": "Samples/QuickStart"
+      "path": "Samples~/QuickStart"
     }
   ],
   "dependencies": {

@@ -72,4 +72,4 @@ Use the SDK's cross-platform reading APIs instead — they're tuned to return co
 | Scalar volume `[0, 1]` for an envelope / meter / bob | `audioSource.GetOutputData(buf); rms(buf);` | `conversation.GetOutputVolume()` |
 | Frequency-domain magnitudes | `AudioSource.GetSpectrumData(...)` | `conversation.GetByteFrequencyData(buf)` |
 
-The shipped samples under `Samples/` follow this rule — copy from them.
+The shipped samples under `Samples~/` follow this rule — copy from them.

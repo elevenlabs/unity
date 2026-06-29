@@ -24,8 +24,8 @@ Import via **Window → Package Manager → ElevenAgents → Samples**.
 
 | Sample | What it shows |
 | --- | --- |
-| **[GettingStarted](./Samples/GettingStarted/README.md)** | Walk-up-and-talk demo: trigger-based session lifecycle, per-instance dynamic variables, spatial audio, and a volume-driven bob. This is the headline. |
-| **[QuickStart](./Samples/QuickStart/README.md)** | Smallest possible smoke test — one GameObject, one MonoBehaviour, transcript via `OnGUI`. Use when you want the API surface without any scene dressing. |
+| **[GettingStarted](./Samples~/GettingStarted/README.md)** | Walk-up-and-talk demo: trigger-based session lifecycle, per-instance dynamic variables, spatial audio, and a volume-driven bob. This is the headline. |
+| **[QuickStart](./Samples~/QuickStart/README.md)** | Smallest possible smoke test — one GameObject, one MonoBehaviour, transcript via `OnGUI`. Use when you want the API surface without any scene dressing. |
 
 ## Documentation
 
