@@ -103,13 +103,11 @@ namespace ElevenLabs.Native
                 if (value > 0 && value != InputSampleRate)
                 {
                     ResamplerKernel = BuildResamplerKernel(InputSampleRate, value);
-                    ResamplerCarry = new float[KernelTaps / 2];
                     ResampleFracPos = 0.0;
                 }
                 else
                 {
                     ResamplerKernel = null;
-                    ResamplerCarry = null;
                     ResampleFracPos = 0.0;
                 }
                 Volatile.Write(ref _deviceSampleRate, value);
@@ -221,16 +219,6 @@ namespace ElevenLabs.Native
         /// semantics).</summary>
         public float[]? ResamplerKernel;
 
-        /// <summary>The <see cref="KernelTaps"/> / 2 most recently
-        /// consumed input samples — the left half of each output
-        /// sample's interpolation window, carried across
-        /// <see cref="AgentAudioRealtime.Process"/> calls so the kernel
-        /// always has a full <see cref="KernelTaps"/>-tap support
-        /// regardless of where the fractional cursor lands. Index 0 is
-        /// the oldest; index <see cref="KernelTaps"/>/2 − 1 is the most
-        /// recent. Touched only on the audio thread (no concurrency).</summary>
-        public float[]? ResamplerCarry;
-
         /// <summary>Fractional position in [0, 1) carried across
         /// <see cref="AgentAudioRealtime.Process"/> calls — how far we've
         /// stepped past the last consumed input sample toward the next
@@ -340,24 +328,61 @@ namespace ElevenLabs.Native
 
         /// <summary>
         /// Audio-thread drain. Reads up to <c>dest.Length</c> samples from
-        /// the ring; on underrun, synchronously pulls more from the
-        /// installed drain callback into the ring and re-reads. Returns the
-        /// count actually written into <paramref name="dest"/> — callers
-        /// must silence-fill any remainder.
+        /// the ring (advancing the read cursor); on underrun, synchronously
+        /// pulls more from the installed drain callback into the ring and
+        /// re-reads. Returns the count actually written into
+        /// <paramref name="dest"/> — callers must silence-fill any
+        /// remainder.
         /// </summary>
+        /// <remarks>
+        /// Used by the fast 1:1 path in <see cref="AgentAudioRealtime.Process"/>
+        /// (when the negotiated input rate equals the device output rate)
+        /// where every drained sample is consumed exactly once. The
+        /// resampling path uses <see cref="Peek"/> + <see cref="Discard"/>
+        /// instead, so kernel-lookahead samples that the next call still
+        /// needs aren't dropped from the producer ring at each Process
+        /// boundary.
+        /// </remarks>
         public int Drain(Span<float> dest)
+        {
+            int read = PeekOrPull(dest);
+            if (read > 0)
+                Ring.Discard(read);
+            return read;
+        }
+
+        /// <summary>
+        /// Audio-thread peek. Reads up to <c>dest.Length</c> samples from
+        /// the ring <em>without</em> advancing the read cursor; on
+        /// underrun, synchronously pulls more from the installed drain
+        /// callback into the ring and re-peeks. Returns the count
+        /// actually written into <paramref name="dest"/>.
+        /// </summary>
+        /// <remarks>
+        /// Used by the resampling path: the kernel reads <c>taps</c>
+        /// samples per output frame including <c>half</c> samples of
+        /// lookahead past the "consumed" cursor. Peeking lets the next
+        /// Process call re-see those lookahead samples instead of
+        /// silently dropping them at the call boundary (which caused
+        /// audible clicks every ~5 ms in earlier iterations of the FIR
+        /// resampler — see commit history). Pair with
+        /// <see cref="Discard"/> to advance the cursor by the
+        /// <em>consumed</em> count once the call's outputs are
+        /// computed.
+        /// </remarks>
+        public int PeekOrPull(Span<float> dest)
         {
             if (_disposed != 0 || dest.IsEmpty)
                 return 0;
-            int read = Ring.Read(dest);
-            if (read >= dest.Length)
-                return read;
+            int peeked = Ring.Peek(dest);
+            if (peeked >= dest.Length)
+                return peeked;
             // Snapshot the callback once — a control-thread SetProducer
             // race may swap it out between the null-check and the
             // invocation otherwise.
             Func<float[], int>? cb = _drainCallback;
             if (cb == null)
-                return read;
+                return peeked;
             int got;
             try
             {
@@ -370,16 +395,27 @@ namespace ElevenLabs.Native
                 // callback already silence-fills on its own underrun, so
                 // a thrown exception is a programmer error we shouldn't
                 // propagate into Unity's audio system.
-                return read;
+                return peeked;
             }
             if (got > 0)
             {
                 int writeLen = Math.Min(got, _refillScratch.Length);
                 Ring.Write(_refillScratch.AsSpan(0, writeLen));
             }
-            int more = Ring.Read(dest.Slice(read));
-            return read + more;
+            // Re-peek into the full dest (the prior peek already filled
+            // dest[0..peeked-1]; refill is now visible at dest[peeked..]).
+            int more = Ring.Peek(dest);
+            return more > peeked ? more : peeked;
         }
+
+        /// <summary>
+        /// Advance the read cursor by <paramref name="count"/> samples,
+        /// clamped to the currently available count. Pair with
+        /// <see cref="PeekOrPull"/> on the resampling path so peeked
+        /// samples that became "consumed" by the kernel's anchor
+        /// advancing past them are released to the ring.
+        /// </summary>
+        public void Discard(int count) => Ring.Discard(count);
 
         public void Dispose()
         {

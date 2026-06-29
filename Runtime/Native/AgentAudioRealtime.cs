@@ -108,94 +108,96 @@ namespace ElevenLabs.Native
             // rate requirement, the resampler drops out without touching
             // the producer.
             //
-            // Why polyphase FIR over the prior Hermite cubic: Hermite
-            // gave ~12-20 dB stopband attenuation, which left visible
-            // imaging above the source Nyquist (audible as "dust" on
-            // speech; confirmed via spectrogram on the live agent).
-            // Polyphase windowed-sinc at L=16 taps, Kaiser β=8 hits
-            // ~60 dB stopband — well below the perceptual floor.
+            // Why polyphase FIR over the earlier linear / cubic-Hermite
+            // attempts: their narrower kernels left ~12-20 dB stopband
+            // attenuation, which produced audible imaging above the
+            // source Nyquist ("dust" on speech). Polyphase windowed-sinc
+            // at L=16 taps, Kaiser β=8 hits ~60 dB stopband — well below
+            // the perceptual floor.
             //
-            // Layout: the conceptual buffer is
-            //   [Carry[0]..Carry[half-1], mono[0], mono[1], ...]
-            // with ResampleFracPos giving the fractional offset past
-            // the LAST carry sample (the most recent consumed input).
-            // We prepend the half-tap carry into the first half slots
-            // of MonoScratch so the loop indexes a contiguous buffer
-            // (no carry-vs-fresh branch per output sample).
+            // Continuity across Process calls: the kernel reads `taps`
+            // samples per output frame, including `half` samples of
+            // lookahead past the cursor's "consumed" position. We
+            // <em>peek</em> the full window from the bridge ring
+            // (PeekOrPull doesn't advance the read cursor), walk the
+            // output frames, then Discard only the `consumed` samples
+            // at the end. Earlier iterations of this resampler had a
+            // structural sample-loss bug where every Process call
+            // dropped its `half` lookahead samples — those gaps were
+            // smeared by linear/Hermite's narrow kernels into "dust",
+            // but the FIR's wide kernel turned each gap into a discrete
+            // click at the ~187 Hz Process cadence (visible as broadband
+            // vertical lines in spectrograms). The Peek+Discard split
+            // eliminates that gap by source-of-truth-ing the ring
+            // across call boundaries.
+            //
+            // Buffer layout: peek directly into MonoScratch[0..needed-1].
+            // The kernel's anchor at f=0 is mono[half-1], so on a fresh
+            // ring with no leading silence the first output absorbs
+            // ~half-1 samples (~0.5 ms at 16 kHz) of "pre-history". The
+            // threshold gate's pre-fill makes this imperceptible in
+            // practice.
             float[]? kernel = bridge.ResamplerKernel;
-            float[]? carry = bridge.ResamplerCarry;
-            if (kernel == null || carry == null)
+            if (kernel == null)
             {
                 SilenceFill(buffer, channels, frames);
                 return frames;
             }
             const int taps = AgentAudioGeneratorBridge.KernelTaps;
             const int phases = AgentAudioGeneratorBridge.PhaseCount;
-            int half = taps / 2;
 
             double step = (double)inputRate / deviceRate;
             double startFrac = bridge.ResampleFracPos;
 
-            // Prepend the carry buffer into the first `half` slots of
-            // the scratch so the kernel's left taps are always valid
-            // without a per-sample boundary branch.
-            for (int i = 0; i < half; i++)
-                mono[i] = carry[i];
-
-            // Figure out how many FRESH input samples to drain into
-            // mono[half..]. The last output frame's source position
-            // past the most recent carry sample is
-            //   startFrac + (frames - 1) * step.
-            // The kernel reads `half` taps to the right of its anchor,
-            // so we need ceil(that) + half samples past the carry.
-            int needed = (int)Math.Ceiling(startFrac + (frames - 1) * step) + half;
-            if (needed < 1)
-                needed = 1;
-            int drainCapacity = mono.Length - half;
-            if (needed > drainCapacity)
-                needed = drainCapacity;
-            int gotR = bridge.Drain(mono.AsSpan(half, needed));
+            // Compute the maximum kernel read index across all frames:
+            //   max touched = floor(startFrac + (frames-1)*step) + taps - 1
+            // so the peek window size is that + 1.
+            int maxSampleStart = (int)Math.Floor(startFrac + (frames - 1) * step);
+            if (maxSampleStart < 0)
+                maxSampleStart = 0;
+            int needed = maxSampleStart + taps;
+            if (needed > mono.Length)
+                needed = mono.Length;
+            int gotR = bridge.PeekOrPull(mono.AsSpan(0, needed));
             // Pad-on-underrun with last-sample-hold (avoids transient
-            // click vs zero-fill). Pad source is the last good fresh
-            // sample, or the most recent carry sample if no fresh
-            // samples arrived.
+            // click vs zero-fill). The pad covers any kernel taps that
+            // would otherwise read uninitialized slots; the convolution
+            // against a flat tail is benign.
             if (gotR < needed)
             {
-                float pad = gotR > 0 ? mono[half + gotR - 1] : carry[half - 1];
+                float pad = gotR > 0 ? mono[gotR - 1] : 0f;
                 for (int i = gotR; i < needed; i++)
-                    mono[half + i] = pad;
+                    mono[i] = pad;
             }
-            int monoEnd = half + needed; // one past the last valid index
 
             double pos = startFrac;
             for (int f = 0; f < frames; f++)
             {
-                // Anchor input index = (half - 1) + floor(pos). At f=0
-                // with floor(pos)=0 the anchor is carry[half-1] (the
-                // most recent consumed). The kernel's `taps` samples
-                // span [anchor - half + 1, anchor + half] inclusive,
-                // i.e. mono[sampleStart..sampleStart+taps-1] where
-                // sampleStart = floor(pos).
+                // sampleStart = floor(pos); kernel reads mono[sampleStart..
+                // sampleStart+taps-1]. The phase index selects the
+                // appropriate row of the polyphase coefficient table —
+                // nearest-phase lookup is fine at PhaseCount=256 (max
+                // error well below the 60 dB stopband).
                 int floorPos = (int)Math.Floor(pos);
                 double frac = pos - floorPos;
                 int phaseIdx = (int)(frac * phases + 0.5);
                 if (phaseIdx >= phases)
                 {
-                    // Phase rounded up across the boundary; advance
-                    // anchor by one and snap to phase 0.
+                    // Phase rounded up across the integer boundary;
+                    // advance sampleStart by one and snap to phase 0
+                    // so the kernel window doesn't double-shift.
                     phaseIdx = 0;
                     floorPos++;
                 }
                 int kernelBase = phaseIdx * taps;
                 int sampleStart = floorPos;
-                // Clamp on the right if underrun truncated the drain.
-                // sampleStart should never go negative here (floorPos
-                // >= 0 + invariant startFrac in [0, 1)), but defensively
-                // clamp anyway so a pathological state can't OOB-read.
+                // Clamp on the right if peek underran. sampleStart
+                // should always be in [0, monoEnd-taps], but defensively
+                // clamp so a pathological state can't OOB-read.
                 if (sampleStart < 0)
                     sampleStart = 0;
-                if (sampleStart + taps > monoEnd)
-                    sampleStart = monoEnd - taps;
+                if (sampleStart + taps > needed)
+                    sampleStart = needed - taps;
                 if (sampleStart < 0)
                     sampleStart = 0;
 
@@ -208,27 +210,16 @@ namespace ElevenLabs.Native
                 pos += step;
             }
 
-            // Update carry: keep the `half` samples ending at the new
-            // anchor position. After the loop, pos = startFrac +
-            // frames*step. The next call's anchor will be at conceptual
-            // index (half - 1) + floor(pos); we need carry[i] = mono at
-            // (floor(pos) + i) — i.e., the half samples starting from
-            // mono[floor(pos)].
-            int finalFloor = (int)Math.Floor(pos);
-            int carryStart = finalFloor;
-            // Clamp so we don't read past monoEnd in any pathological
-            // case (e.g., heavy underrun truncated `needed` below
-            // expectations).
-            if (carryStart + half > monoEnd)
-                carryStart = monoEnd - half;
-            if (carryStart < 0)
-                carryStart = 0;
-            for (int i = 0; i < half; i++)
-            {
-                int idx = carryStart + i;
-                carry[i] = idx < monoEnd ? mono[idx] : 0f;
-            }
-            bridge.ResampleFracPos = pos - finalFloor;
+            // After the loop, pos = startFrac + frames*step. The number
+            // of input samples the cursor advanced past = floor(pos).
+            // Discard exactly that many from the ring so the next
+            // Process call's peek starts where this call's anchor left
+            // off. The remaining samples (the kernel's lookahead) stay
+            // in the ring for re-peek.
+            int consumed = (int)Math.Floor(pos);
+            if (consumed > 0)
+                bridge.Discard(consumed);
+            bridge.ResampleFracPos = pos - consumed;
             return frames;
         }
 

@@ -167,6 +167,63 @@ namespace ElevenLabs.Native
             return toRead;
         }
 
+        /// <summary>
+        /// Copy as many samples from the ring into
+        /// <paramref name="destination"/> as are available <em>without</em>
+        /// advancing the read cursor. Returns the count actually peeked.
+        /// Subsequent <see cref="Peek"/> / <see cref="Read"/> calls see
+        /// the same samples until <see cref="Discard"/> or
+        /// <see cref="Read"/> advances past them.
+        /// </summary>
+        /// <remarks>
+        /// Use this with <see cref="Discard"/> when the consumer needs
+        /// to read a sliding window where the right edge of the window
+        /// is "lookahead" (peeked) and the left edge is "consumed"
+        /// (discarded) — e.g., a polyphase FIR resampler whose kernel
+        /// reads <c>taps</c> samples but only advances the cursor by
+        /// <c>consumed</c> samples per call. Must be called from the
+        /// single consumer thread.
+        /// </remarks>
+        public int Peek(Span<float> destination)
+        {
+            if (_disposed != 0 || destination.IsEmpty)
+                return 0;
+            long readIndex = Interlocked.Read(ref _readIndex);
+            long writeIndex = Interlocked.Read(ref _writeIndex);
+            int count = (int)(writeIndex - readIndex);
+            int toRead = Math.Min(destination.Length, count);
+            if (toRead <= 0)
+                return 0;
+            int readPos = (int)(readIndex % Capacity);
+            int firstChunk = Math.Min(toRead, Capacity - readPos);
+            for (int i = 0; i < firstChunk; i++)
+                destination[i] = _buffer[readPos + i];
+            int secondChunk = toRead - firstChunk;
+            for (int i = 0; i < secondChunk; i++)
+                destination[firstChunk + i] = _buffer[i];
+            return toRead;
+        }
+
+        /// <summary>
+        /// Advance the read cursor by <paramref name="count"/> samples,
+        /// clamped to the currently available count. No-op when the
+        /// ring is empty or disposed, or when <paramref name="count"/>
+        /// is non-positive. Must be called from the single consumer
+        /// thread.
+        /// </summary>
+        public void Discard(int count)
+        {
+            if (_disposed != 0 || count <= 0)
+                return;
+            long readIndex = Interlocked.Read(ref _readIndex);
+            long writeIndex = Interlocked.Read(ref _writeIndex);
+            int available = (int)(writeIndex - readIndex);
+            int toDiscard = Math.Min(count, available);
+            if (toDiscard <= 0)
+                return;
+            Interlocked.Exchange(ref _readIndex, readIndex + toDiscard);
+        }
+
         public void Dispose()
         {
             if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)

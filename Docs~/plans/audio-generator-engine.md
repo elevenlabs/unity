@@ -227,6 +227,16 @@ Fix: replaced Hermite with a **Kaiser-windowed sinc polyphase FIR resampler** (L
 
 Edit-Mode tests: 449/449 still pass after each upgrade.
 
+**Peek + Discard refactor — added 2026-06-29.** Fourth A/B 1 attempt (post-FIR): the user reported the audio sounded *worse* than under Hermite, and shared a spectrogram showing broadband vertical lines through the speech segments — the smoking-gun signature of buffer-boundary clicks, not imaging dust.
+
+Diagnosis: a structural sample-loss bug shared by all three resampler iterations (linear, Hermite, polyphase FIR). `bridge.Drain` advanced the producer ring's read cursor by however many samples were drained, but the kernel always reads `half` samples *past* the cursor's consumed position (lookahead for the right taps). Those `half` lookahead samples were drained but never re-fed to the next Process call — the next call's drain started `half` samples ahead of where it should, leaving a gap in the input stream every ~5 ms (Process cadence).
+
+Hermite's 4-tap kernel smeared the 2-sample gap into a tiny tick that perceptually blended with imaging — perceived as part of the "dust." The FIR's 16-tap kernel spread the same gap into clear broadband ringing at the Process cadence — visible as the spectrogram's vertical lines and audibly worse than Hermite despite better stopband.
+
+Fix: added `Peek(Span<float>)` + `Discard(int)` primitives to [`AudioPcmRing`](../../Runtime/Native/AudioPcmRing.cs) — peek reads from the ring without advancing the cursor, discard advances it by an explicit count. Bridge gains `PeekOrPull` (peek with synchronous refill-on-underrun) + `Discard`. The resampler now peeks `maxSampleStart + taps` samples per call, walks all output frames, then discards only `consumed = floor(pos_after_loop)` samples. The `half` lookahead samples stay in the ring for the next call's peek — boundary continuity is exact. The `ResamplerCarry` field disappears: the producer ring itself is now the source of truth across call boundaries.
+
+This is the right fix structurally — applies cleanly to any resampler kernel size, with no per-kernel carry bookkeeping. Edit-Mode tests: 449/449 still pass.
+
 - [ ] **A/B 1 — Turn 1 latency.** Walk into a cube's trigger; the agent's `firstMessage` should start audibly within ~16 ms of the trigger fire (256-sample DSP-buffer margin at 16 kHz; was `12_800 + 256 = 13_056` samples ≈ 816 ms under the legacy engine — step 5's threshold-gate collapse). Expect a near-instant "Hi there!" instead of a perceptible ~0.8 s gap.
 - [ ] **A/B 2 — Turn 2+ drift.** Have a 3+ turn conversation through a single cube. The bob's peak should remain locked to the audible head across all turns (the residual ~tens-of-ms drift the bob redesign couldn't fully fix — should be gone since the wall-clock anchor stamps at zero pre-fill instead of ~800 ms).
 - [ ] **A/B 3 — Voice clarity.** Listen for resampler artifacts (clicks, aliasing, pitch warble) on multi-syllable words. Unity's built-in resampler handles 16 → 48 kHz via the `IControl.Configure` Setup negotiation; should sound identical to the legacy `AudioClip`-resampled path or cleaner.
