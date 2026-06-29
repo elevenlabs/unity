@@ -147,16 +147,16 @@ namespace ElevenLabs.Native
         /// the controller logic stays uniform without needing a real
         /// <see cref="AudioSource"/>. Production callers go through
         /// <see cref="CreateAsync"/>, which wires
-        /// <see cref="UnityAudioOutputEngine"/>.
+        /// <see cref="UnityGeneratorAudioOutputEngine"/>.
         /// </summary>
         internal UnityAudioSourceOutput(FormatConfig format)
             : this(format, new NullAudioOutputEngine()) { }
 
         /// <summary>
         /// Construct with an explicit <see cref="IAudioOutputEngine"/>.
-        /// Production passes <see cref="UnityAudioOutputEngine"/>; future
-        /// Edit-Mode tests can inject a calibrated fake to drive the
-        /// engine's pre-fill / drain-cadence behaviour deterministically
+        /// Production passes <see cref="UnityGeneratorAudioOutputEngine"/>;
+        /// future Edit-Mode tests can inject a calibrated fake to drive
+        /// the engine's pre-fill / drain-cadence behaviour deterministically
         /// (see <c>Docs~/plans/audio-output-testability.md</c>).
         /// </summary>
         internal UnityAudioSourceOutput(FormatConfig format, IAudioOutputEngine engine)
@@ -183,14 +183,18 @@ namespace ElevenLabs.Native
 
         /// <summary>
         /// Production factory. Marshals onto the main thread, constructs a
-        /// <see cref="UnityAudioOutputEngine"/> (which sets up the host
-        /// <see cref="GameObject"/> + <see cref="AudioSource"/>), and
-        /// returns a controller wired to it. Playback itself — the
-        /// streaming <see cref="AudioClip"/> + <see cref="AudioSource.Play"/>
-        /// — is deferred to the first <see cref="PushAudio(byte[])"/>
-        /// crossing the pre-fill threshold; see
+        /// <see cref="UnityGeneratorAudioOutputEngine"/> (which sets up the
+        /// host <see cref="GameObject"/> + <see cref="AudioSource"/> and
+        /// binds a sibling <see cref="AgentAudioGeneratorComponent"/> via
+        /// <see cref="AudioSource.generator"/>), and returns a controller
+        /// wired to it. Playback itself — <see cref="AudioSource.Play"/>
+        /// against the bound generator — is deferred to the first
+        /// <see cref="PushAudio(byte[])"/> crossing the pre-fill threshold
+        /// (which collapses to a single DSP-buffer margin under the
+        /// generator engine — see
+        /// <see cref="IAudioOutputEngine.SyncPrefillSampleCount"/> and
         /// <c>Docs~/plans/audio-output-testability.md</c> for the design
-        /// rationale.
+        /// rationale).
         /// </summary>
         /// <param name="format">Negotiated agent-output format.</param>
         /// <param name="device">Optional output device override (logged + ignored).</param>
@@ -198,8 +202,9 @@ namespace ElevenLabs.Native
         /// Optional user-supplied <see cref="AudioSource"/> to play through.
         /// When non-null, the engine binds to it instead of creating a hidden
         /// host — preserving spatialisation, mixer routing, and transform
-        /// parenting. Pre-session <c>volume</c>, <c>loop</c>, and <c>clip</c>
-        /// are captured and restored on <see cref="Close"/>.
+        /// parenting. Pre-session <c>volume</c>, <c>loop</c>, <c>clip</c>,
+        /// and <c>generator</c> are captured and restored on
+        /// <see cref="Close"/>.
         /// </param>
         internal static async Awaitable<UnityAudioSourceOutput> CreateAsync(
             FormatConfig format,
@@ -212,7 +217,7 @@ namespace ElevenLabs.Native
             // AddComponent on the owned-host path; pre-session snapshot
             // capture on the supplied-source path), so the main-thread
             // await above is load-bearing.
-            IAudioOutputEngine engine = new UnityAudioOutputEngine(audioSource, device);
+            IAudioOutputEngine engine = new UnityGeneratorAudioOutputEngine(audioSource, device);
             return new UnityAudioSourceOutput(format, engine);
         }
 

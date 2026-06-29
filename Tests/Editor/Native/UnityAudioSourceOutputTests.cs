@@ -673,12 +673,16 @@ namespace ElevenLabs.Native.Tests
         [Test]
         public async Task CreateAsync_CreatesOwnHost_WhenNoAudioSourceSupplied()
         {
-            // Regression-lock today's owned-host path: no AudioSource supplied
+            // Regression-lock the owned-host path: no AudioSource supplied
             // → controller spins up a hidden host GameObject + AudioSource.
-            // Clip assignment is deferred until the first PushAudio (to avoid
-            // Unity's synchronous AudioClip.Create pre-fill silence-filling
-            // an empty ring — see Docs~/plans/audio-output-testability.md),
-            // so we push a ring-threshold's worth of audio to trigger it.
+            // Under the generator engine wired by CreateAsync (step 6 of
+            // Docs~/plans/audio-generator-engine.md), engine.Start binds an
+            // AgentAudioGeneratorComponent to AudioSource.generator on the
+            // first PushAudio crossing the prefill threshold — there is no
+            // streaming AudioClip in this path. The deferral pattern itself
+            // is unchanged: the controller defers engine.Start until enough
+            // audio is queued so Unity doesn't observe an empty pipeline at
+            // Play() time.
             int sampleRate = 16_000;
             var output = await UnityAudioSourceOutput.CreateAsync(
                 new FormatConfig("pcm", sampleRate)
@@ -687,19 +691,26 @@ namespace ElevenLabs.Native.Tests
             {
                 AudioSource? created = FindHiddenHostAudioSource();
                 Assert.IsNotNull(created, "Owned-host path should create an AudioSource.");
-                Assert.IsTrue(created!.loop, "Owned host streaming clip needs loop=true.");
+                Assert.IsTrue(created!.loop, "Owned host needs loop=true for generator playback.");
                 Assert.IsNull(
-                    created.clip,
-                    "Streaming clip is deferred to first PushAudio; should be null at CreateAsync."
+                    created.generator,
+                    "Generator binding is deferred to first PushAudio; should be null at CreateAsync."
                 );
 
                 // Push enough audio to clear the engine-driven prefill threshold.
+                // Edit-Mode batchmode runs without a live audio device, so
+                // AudioSource.Play() against the generator logs an error from
+                // Unity's audio backend ("Realtime generators must obey system
+                // sampling rate"). The generator-component binding itself
+                // still succeeds — that's the wiring under test — so we
+                // whitelist the expected log via LogAssert.Expect.
+                ExpectGeneratorSamplingRateError();
                 int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                 output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
 
                 Assert.IsNotNull(
-                    created.clip,
-                    "After first PushAudio crosses the prefill threshold, the clip should be bound."
+                    created.generator,
+                    "After first PushAudio crosses the prefill threshold, AudioSource.generator should be bound."
                 );
             }
             finally
@@ -731,11 +742,12 @@ namespace ElevenLabs.Native.Tests
                 try
                 {
                     // SDK-owned overwrites that fire at CreateAsync time
-                    // (clip assignment itself is deferred to first PushAudio
-                    // — see Docs~/plans/audio-output-testability.md).
+                    // (generator binding itself is deferred to first PushAudio
+                    // — see Docs~/plans/audio-output-testability.md and step 6
+                    // of Docs~/plans/audio-generator-engine.md).
                     Assert.IsTrue(
                         supplied.loop,
-                        "Supplied source must be looping for PCMReaderCallback."
+                        "Supplied source must be looping for generator playback."
                     );
                     Assert.AreEqual(
                         1f,
@@ -744,14 +756,18 @@ namespace ElevenLabs.Native.Tests
                         "Default user volume should be applied."
                     );
 
-                    // Drive a chunk past the prefill threshold so the clip
-                    // gets bound; this is the point where Unity's pre-fill
-                    // would otherwise silence-fill an empty ring.
+                    // Drive a chunk past the prefill threshold so the
+                    // AgentAudioGeneratorComponent gets bound to
+                    // AudioSource.generator; the controller defers
+                    // engine.Start until enough audio is queued. Whitelist
+                    // the batchmode-only sampling-rate error (see the
+                    // matching note in CreateAsync_CreatesOwnHost_… above).
+                    ExpectGeneratorSamplingRateError();
                     int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                     output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
                     Assert.IsNotNull(
-                        supplied.clip,
-                        "Supplied source should be bound to the streaming clip after first PushAudio."
+                        supplied.generator,
+                        "Supplied source should be bound to the generator after first PushAudio."
                     );
 
                     // User-owned settings preserved verbatim.
@@ -788,6 +804,7 @@ namespace ElevenLabs.Native.Tests
                 supplied.volume = 0.42f;
                 supplied.loop = false;
                 AudioClip? originalClip = supplied.clip; // null is fine — captured + restored.
+                UnityEngine.Audio.IAudioGenerator? originalGenerator = supplied.generator; // null is fine — captured + restored.
 
                 int sampleRate = 16_000;
                 var output = await UnityAudioSourceOutput.CreateAsync(
@@ -795,15 +812,18 @@ namespace ElevenLabs.Native.Tests
                     audioSource: supplied
                 );
                 // Mid-session: SDK overwrote volume + loop per the binding
-                // contract. Clip is deferred to first PushAudio.
+                // contract. Generator binding is deferred to first PushAudio.
                 Assert.AreEqual(1f, supplied.volume, 1e-6);
                 Assert.IsTrue(supplied.loop);
 
-                // Trigger the deferred clip bind so we can verify Close
-                // unbinds it again below.
+                // Trigger the deferred generator bind so we can verify Close
+                // unbinds it again below. Whitelist the batchmode-only
+                // sampling-rate error (see the matching note in
+                // CreateAsync_CreatesOwnHost_… above).
+                ExpectGeneratorSamplingRateError();
                 int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                 output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
-                Assert.IsNotNull(supplied.clip);
+                Assert.IsNotNull(supplied.generator);
 
                 await output.Close();
 
@@ -811,6 +831,11 @@ namespace ElevenLabs.Native.Tests
                 Assert.AreEqual(0.42f, supplied.volume, 1e-6, "volume must be restored on Close.");
                 Assert.IsFalse(supplied.loop, "loop must be restored on Close.");
                 Assert.AreSame(originalClip, supplied.clip, "clip must be restored on Close.");
+                Assert.AreSame(
+                    originalGenerator,
+                    supplied.generator,
+                    "generator must be restored on Close."
+                );
                 Assert.IsNotNull(supplied, "AudioSource itself must not be destroyed.");
             }
             finally
@@ -1288,15 +1313,41 @@ namespace ElevenLabs.Native.Tests
         // don't need a back-door inspector for production-private state.
         // FindObjectsByType (even with FindObjectsInactive.Include) skips
         // HideAndDontSave objects; Resources.FindObjectsOfTypeAll returns
-        // every loaded object regardless of hide flags.
+        // every loaded object regardless of hide flags. The name tracks
+        // CreateAsync's wired engine — step 6 of
+        // Docs~/plans/audio-generator-engine.md swapped production to
+        // UnityGeneratorAudioOutputEngine, whose owned host is named
+        // "ElevenLabs.UnityGeneratorAudioOutput".
         private static AudioSource? FindHiddenHostAudioSource()
         {
             foreach (AudioSource src in Resources.FindObjectsOfTypeAll<AudioSource>())
             {
-                if (src.gameObject.name == "ElevenLabs.UnityAudioSourceOutput")
+                if (src.gameObject.name == "ElevenLabs.UnityGeneratorAudioOutput")
                     return src;
             }
             return null;
+        }
+
+        // Edit-Mode batchmode has no live audio device, so AudioSource.Play()
+        // against an IAudioGenerator logs an error from Unity's audio backend
+        // ("Realtime generators must obey system sampling rate") before the
+        // generator instance is fully allocated. The binding side-effect
+        // (audioSource.generator = component) still lands — which is the
+        // wiring we're regression-locking — so we whitelist the expected
+        // message via LogAssert.Expect. Most generator-engine tests sidestep
+        // this by staying below the prefill threshold (see
+        // UnityGeneratorAudioOutputEngineTests' "deliberately avoid calling
+        // …Start in most tests" remark); the three CreateAsync_… tests in
+        // this file genuinely exercise the trigger and so opt in to the
+        // whitelist.
+        private static void ExpectGeneratorSamplingRateError()
+        {
+            UnityEngine.TestTools.LogAssert.Expect(
+                UnityEngine.LogType.Error,
+                new System.Text.RegularExpressions.Regex(
+                    ".*Realtime generators must obey system sampling rate.*"
+                )
+            );
         }
 
         // Helpers ----------------------------------------------------------

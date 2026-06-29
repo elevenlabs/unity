@@ -199,9 +199,9 @@ Single line change at [`UnityAudioSourceOutput.CreateAsync`](../../Runtime/Nativ
 
 Keep the old `UnityAudioOutputEngine` in tree as a fallback through v0.2 soak; mark deprecated in XML doc. Removable in a follow-up.
 
-- [ ] Native wiring switched
-- [ ] WebGL preprocessor gate verified (no accidental native engine on WebGL builds)
-- [ ] Old engine retained + deprecation-marked
+- [x] Native wiring switched — single-line swap in [`UnityAudioSourceOutput.CreateAsync`](../../Runtime/Native/UnityAudioSourceOutput.cs#L215) (`new UnityAudioOutputEngine(...)` → `new UnityGeneratorAudioOutputEngine(...)`). The engine-driven prefill threshold gate (step 5) collapsed from `12_800 + 256 = 13_056` samples to `0 + 256 = 256` samples automatically — no further controller-side changes. Three CreateAsync-driven regression tests in [`UnityAudioSourceOutputTests`](../../Tests/Editor/Native/UnityAudioSourceOutputTests.cs) updated to assert against the new generator semantics (`audioSource.generator != null` post-trigger; restore on Close includes `generator`); they whitelist Unity's batchmode-only `"Realtime generators must obey system sampling rate"` error via `LogAssert.Expect` since Edit-Mode batchmode has no live audio device. 449/449 Edit-Mode tests green via `pnpm --dir TestProject run test`
+- [x] WebGL preprocessor gate verified — the entire `Runtime/Native/` asmdef ([`ElevenLabs.Agents.Native.asmdef`](../../Runtime/Native/ElevenLabs.Agents.Native.asmdef)) sets `excludePlatforms: ["WebGL"]`, so neither engine compiles into a WebGL build. No per-file `#if !UNITY_WEBGL` gate needed inside `CreateAsync`; WebGL keeps its `web-audio-sink.ts` path via the separate `Runtime/WebGL/` asmdef + `BridgedSessionLauncher` registration
+- [x] Old engine retained + deprecation-marked — [`UnityAudioOutputEngine`](../../Runtime/Native/UnityAudioOutputEngine.cs)'s XML doc now opens with a `<strong>Deprecated for production.</strong>` paragraph pointing at `UnityGeneratorAudioOutputEngine` as the new production wiring and noting the v0.2 soak-fallback retention reason. The class is `internal sealed` so there's no `[Obsolete]` public-API contract to attach; the XML deprecation note is the right shape for the seam
 
 ### Step 7 — Manual PlayMode A/B + WebGL build verification
 

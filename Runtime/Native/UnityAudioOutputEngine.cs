@@ -9,7 +9,7 @@ using Debug = UnityEngine.Debug;
 namespace ElevenLabs.Native
 {
     /// <summary>
-    /// Production <see cref="IAudioOutputEngine"/> backed by Unity's
+    /// Legacy <see cref="IAudioOutputEngine"/> backed by Unity's
     /// <see cref="AudioSource"/> + streaming <see cref="AudioClip"/>. Wraps
     /// the <see cref="AudioClip.Create(string, int, int, int, bool, AudioClip.PCMReaderCallback)"/>
     /// + <see cref="AudioSource.Play"/> + <see cref="AudioClip.PCMReaderCallback"/>
@@ -17,12 +17,27 @@ namespace ElevenLabs.Native
     /// engine-agnostic (and therefore testable in Edit Mode).
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <strong>Deprecated for production.</strong> As of the audio-generator
+    /// engine swap (<c>Docs~/plans/audio-generator-engine.md</c> step 6),
+    /// <see cref="UnityAudioSourceOutput.CreateAsync"/> wires
+    /// <see cref="UnityGeneratorAudioOutputEngine"/> instead — Unity 6.3's
+    /// <see cref="IAudioGenerator"/> surface eliminates this engine's ~800 ms
+    /// structural pre-fill (the streaming-<see cref="AudioClip"/> property
+    /// documented at <c>Docs~/unity-issues/streaming-audioclip-prefill-depth.md</c>).
+    /// Retained in tree as the v0.2 soak fallback and as a regression baseline
+    /// for the pre-fill-threshold gate; removal will follow once the generator
+    /// path has soaked. New call sites should use
+    /// <see cref="UnityGeneratorAudioOutputEngine"/>.
+    /// </para>
+    /// <para>
     /// Holds the host <see cref="GameObject"/> (when no
     /// <see cref="AudioSource"/> is supplied), the bound
     /// <see cref="AudioSource"/>, the streaming <see cref="AudioClip"/>,
     /// and the pre-session snapshot of SDK-owned overwrites on a supplied
     /// source. See <c>Docs~/plans/audio-output-testability.md</c> for the
     /// design rationale.
+    /// </para>
     /// </remarks>
     internal sealed class UnityAudioOutputEngine : IAudioOutputEngine
     {
