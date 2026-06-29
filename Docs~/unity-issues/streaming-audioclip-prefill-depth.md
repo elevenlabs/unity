@@ -184,6 +184,34 @@ would be, and the residual-artifact problem above demonstrates why
 the structural fix matters even for SDKs that have already absorbed
 the visual-compensation cost.
 
+## Newer APIs worth evaluating (Unity 6.3 LTS)
+
+Unity 6.3 introduces a new audio-generation surface that looks like a
+better structural fit for real-time PCM streaming than either
+`AudioClip.Create(stream: true, …)` or `OnAudioFilterRead`:
+
+- [`UnityEngine.Audio.IAudioGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.IAudioGenerator.html)
+  — factory interface for instantiating a `GeneratorInstance`,
+  attachable to an `AudioSource` via the new `AudioSource.generator` /
+  `AudioSource.generatorInstance` properties (or allocatable
+  programmatically via `ControlContext.AllocateGenerator()`).
+- [`UnityEngine.Audio.GeneratorInstance`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.GeneratorInstance.html)
+  — a `ProcessorInstance` that generates audio. Implementors provide
+  `IControl` (control-thread state) and `IRealtime` (a `Process()`
+  callback that fills a `ChannelBuffer` at a given sample rate /
+  speaker mode), giving SDK authors a first-class hook into the audio
+  pipeline without the streaming-`AudioClip` indirection.
+
+We haven't evaluated whether the pre-fill behaviour described above
+applies to `GeneratorInstance` as well, but the surface area suggests
+it shouldn't: there's no `lengthSamples` / streaming-buffer
+intermediary, and `Process()` is documented as the realtime callback
+itself. If true, this would supersede both the v0.1 wall-clock
+workaround and the v0.2 `OnAudioFilterRead` engine for projects on
+Unity 6.3+. The SDK currently targets Unity 6 LTS (6000.0+), so any
+adoption would need to coexist with the existing path until the
+floor moves to 6.3.
+
 ## Asks for Unity
 
 1. **Add a `prefillSamples` (or similar) parameter to
