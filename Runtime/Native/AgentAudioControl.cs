@@ -9,11 +9,16 @@ namespace ElevenLabs.Native
     /// <summary>
     /// Control-thread half of the
     /// <see cref="AgentAudioGeneratorComponent"/>'s generator pairing.
-    /// <see cref="Configure"/> declares the generator's input
-    /// <see cref="GeneratorInstance.Setup"/> (mono at the host-supplied
-    /// sample rate) so Unity's audio pipeline resamples to whatever the
-    /// output device wants — eliminating the hand-rolled resampler the
-    /// <c>OnAudioFilterRead</c>-based design would have required.
+    /// <see cref="Configure"/> declares the generator's
+    /// <see cref="GeneratorInstance.Setup"/> at the <em>device's</em>
+    /// output rate (Unity's hard requirement for realtime generators —
+    /// the audio backend emits a <c>"Realtime generators must obey system
+    /// sampling rate"</c> error otherwise and consumes our samples 1:1 at
+    /// the device rate, producing pitch-shifted output) and publishes the
+    /// device rate into the bridge so
+    /// <see cref="AgentAudioRealtime.Process"/> can resample the
+    /// negotiated input rate (e.g. <c>pcm_16000</c>) up/down to whatever
+    /// the device wants.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -51,19 +56,28 @@ namespace ElevenLabs.Native
             ref GeneratorInstance.Properties properties
         )
         {
-            // Declare OUR input format (mono at the configured rate). The
-            // `format` parameter Unity passes in describes the device's
-            // requested output — by returning a Setup that differs, we ask
-            // Unity to insert its rate-conversion + channel-expansion
-            // stage between Process and the device. The
-            // UnityGeneratorAudioOutputEngineCharacterizationTest measured
-            // ChannelBuffer.channelCount=2 even though Setup declared mono
-            // (Unity expanded), so the expansion path is confirmed
-            // working at the API level.
+            // Match the DEVICE rate Unity passed in (not our input rate).
+            // Unity's realtime-generator path doesn't run a rate-conversion
+            // stage between Process and the device — discovered during step
+            // 7's A/B testing: declaring Setup at the input rate (e.g. 16
+            // kHz) caused Unity to consume samples 1:1 at the device's 48
+            // kHz, producing ~3× pitch-shifted output and logging
+            // "Realtime generators must obey system sampling rate". Bridge
+            // the gap on the audio thread instead — see
+            // AgentAudioRealtime.Process for the resampling math. The mono
+            // declaration is fine: the characterization test confirmed
+            // Unity still expands mono → ChannelBuffer.channelCount on the
+            // channel axis (that wasn't the broken part).
+            setup = new GeneratorInstance.Setup(AudioSpeakerMode.Mono, format.sampleRate);
+
+            // Publish the device rate into the bridge so the audio-thread
+            // resampler can drive its input→output ratio. The bridge field
+            // is volatile-stored (control thread writes here; audio thread
+            // reads from Process).
             AgentAudioGeneratorBridge? bridge =
                 Handle == 0 ? null : AgentAudioGeneratorBridge.LookupByHandle(Handle);
-            int rate = bridge != null ? bridge.InputSampleRate : format.sampleRate;
-            setup = new GeneratorInstance.Setup(AudioSpeakerMode.Mono, rate);
+            if (bridge != null)
+                bridge.DeviceSampleRate = format.sampleRate;
         }
 
         public void Dispose(ControlContext context, ref AgentAudioRealtime realtime)

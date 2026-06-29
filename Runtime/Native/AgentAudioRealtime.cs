@@ -77,33 +77,102 @@ namespace ElevenLabs.Native
                 return frames;
             }
 
-            // Drain mono samples into the bridge's pre-allocated scratch.
-            // If the ring underruns, Drain synchronously pulls from the
-            // host's drain callback to refill — single-shot, matching
-            // UnityAudioOutputEngine.OnPcmRead's behaviour today. `request`
-            // caps at MonoScratch.Length so an unusually large DSP buffer
-            // (above the bridge's pre-sized capacity) silences the tail
-            // rather than reading uninitialized slots.
+            int inputRate = bridge.InputSampleRate;
+            int deviceRate = bridge.DeviceSampleRate;
             float[] mono = bridge.MonoScratch;
-            int request = frames <= mono.Length ? frames : mono.Length;
-            int got = bridge.Drain(mono.AsSpan(0, request));
-            if (got < request)
-                Array.Clear(mono, got, request - got);
 
-            // Broadcast mono input to every output channel. Unity's
-            // generator pipeline handles the rate conversion (declared via
-            // AgentAudioControl.Configure's Setup), so this loop only
-            // expands channels — no resampling math here.
-            for (int ch = 0; ch < channels; ch++)
+            // Fast path: rates match (or device rate not yet published by
+            // a Configure fire) — drain one mono sample per output frame
+            // and broadcast across channels. Matches the original
+            // pre-resampler shape exactly.
+            if (deviceRate <= 0 || deviceRate == inputRate)
             {
-                for (int f = 0; f < request; f++)
-                    buffer[ch, f] = mono[f];
-                // Silence-fill the overflow tail if scratch was smaller
-                // than the requested frame count (defensive — see above).
-                for (int f = request; f < frames; f++)
-                    buffer[ch, f] = 0f;
+                int request = frames <= mono.Length ? frames : mono.Length;
+                int got = bridge.Drain(mono.AsSpan(0, request));
+                if (got < request)
+                    Array.Clear(mono, got, request - got);
+                for (int ch = 0; ch < channels; ch++)
+                {
+                    for (int f = 0; f < request; f++)
+                        buffer[ch, f] = mono[f];
+                    for (int f = request; f < frames; f++)
+                        buffer[ch, f] = 0f;
+                }
+                return frames;
             }
 
+            // Resample path: linear-interpolate the bridge's
+            // negotiated-input-rate samples up/down to the device's output
+            // rate. We do this on the audio thread (vs the producer side)
+            // so the network-decode path stays at whatever rate the server
+            // negotiated — if Unity ever lifts the realtime-generator rate
+            // requirement, the resampler drops out without touching the
+            // producer.
+            //
+            // Linear interpolation is the same fidelity bar the
+            // OnAudioFilterRead plan would have set; for typical
+            // upsampling (16 kHz → 48 kHz speech) the artifact floor is
+            // well below the source's bandwidth limit. Downsampling
+            // without an anti-alias prefilter would be lossier, but the
+            // realistic case is upsampling (server outputs ≤ device rate).
+            double step = (double)inputRate / deviceRate;
+            double startFrac = bridge.ResampleFracPos;
+            // Figure out how many input mono samples we need to satisfy
+            // `frames` output frames. The last output frame's source
+            // position is startFrac + (frames - 1) * step; we need
+            // ceil(that) + 1 mono samples for the right endpoint of the
+            // final interpolation (+1 because mono[0] is the right
+            // endpoint when fractional position is in [0, 1)).
+            int needed = (int)Math.Ceiling(startFrac + (frames - 1) * step) + 1;
+            if (needed < 1)
+                needed = 1;
+            if (needed > mono.Length)
+                needed = mono.Length;
+            int gotR = bridge.Drain(mono.AsSpan(0, needed));
+            float left = bridge.LastInputSample;
+            // Pad-on-underrun with last-sample-hold (avoids click on
+            // underrun vs zero-fill). Cap to the requested window so the
+            // interpolation loop reads only valid slots.
+            if (gotR < needed)
+            {
+                float pad = gotR > 0 ? mono[gotR - 1] : left;
+                for (int i = gotR; i < needed; i++)
+                    mono[i] = pad;
+            }
+
+            // Walk the interpolation interval forward one output frame at
+            // a time. `pos` tracks the fractional offset between `left`
+            // and `right`; when it crosses 1.0, slide the interval by one
+            // input sample.
+            float right = mono[0];
+            double pos = startFrac;
+            int idx = 0;
+            for (int f = 0; f < frames; f++)
+            {
+                while (pos >= 1.0)
+                {
+                    pos -= 1.0;
+                    left = right;
+                    idx++;
+                    right = idx < needed ? mono[idx] : left;
+                }
+                float sample = (float)(left + (right - left) * pos);
+                for (int ch = 0; ch < channels; ch++)
+                    buffer[ch, f] = sample;
+                pos += step;
+            }
+            // Normalize trailing whole-step accumulation so
+            // ResampleFracPos stays in [0, 1) — keeps the needed-samples
+            // calculation honest on the next Process call.
+            while (pos >= 1.0)
+            {
+                pos -= 1.0;
+                left = right;
+                idx++;
+                right = idx < needed ? mono[idx] : left;
+            }
+            bridge.LastInputSample = left;
+            bridge.ResampleFracPos = pos;
             return frames;
         }
 

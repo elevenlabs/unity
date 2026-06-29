@@ -698,13 +698,6 @@ namespace ElevenLabs.Native.Tests
                 );
 
                 // Push enough audio to clear the engine-driven prefill threshold.
-                // Edit-Mode batchmode runs without a live audio device, so
-                // AudioSource.Play() against the generator logs an error from
-                // Unity's audio backend ("Realtime generators must obey system
-                // sampling rate"). The generator-component binding itself
-                // still succeeds — that's the wiring under test — so we
-                // whitelist the expected log via LogAssert.Expect.
-                ExpectGeneratorSamplingRateError();
                 int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                 output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
 
@@ -759,10 +752,7 @@ namespace ElevenLabs.Native.Tests
                     // Drive a chunk past the prefill threshold so the
                     // AgentAudioGeneratorComponent gets bound to
                     // AudioSource.generator; the controller defers
-                    // engine.Start until enough audio is queued. Whitelist
-                    // the batchmode-only sampling-rate error (see the
-                    // matching note in CreateAsync_CreatesOwnHost_… above).
-                    ExpectGeneratorSamplingRateError();
+                    // engine.Start until enough audio is queued.
                     int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                     output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
                     Assert.IsNotNull(
@@ -817,10 +807,7 @@ namespace ElevenLabs.Native.Tests
                 Assert.IsTrue(supplied.loop);
 
                 // Trigger the deferred generator bind so we can verify Close
-                // unbinds it again below. Whitelist the batchmode-only
-                // sampling-rate error (see the matching note in
-                // CreateAsync_CreatesOwnHost_… above).
-                ExpectGeneratorSamplingRateError();
+                // unbinds it again below.
                 int triggerSamples = output.ComputePrefillThresholdSamples() + 256;
                 output.PushAudio(LittleEndianConstant(triggerSamples, short.MaxValue));
                 Assert.IsNotNull(supplied.generator);
@@ -1326,28 +1313,6 @@ namespace ElevenLabs.Native.Tests
                     return src;
             }
             return null;
-        }
-
-        // Edit-Mode batchmode has no live audio device, so AudioSource.Play()
-        // against an IAudioGenerator logs an error from Unity's audio backend
-        // ("Realtime generators must obey system sampling rate") before the
-        // generator instance is fully allocated. The binding side-effect
-        // (audioSource.generator = component) still lands — which is the
-        // wiring we're regression-locking — so we whitelist the expected
-        // message via LogAssert.Expect. Most generator-engine tests sidestep
-        // this by staying below the prefill threshold (see
-        // UnityGeneratorAudioOutputEngineTests' "deliberately avoid calling
-        // …Start in most tests" remark); the three CreateAsync_… tests in
-        // this file genuinely exercise the trigger and so opt in to the
-        // whitelist.
-        private static void ExpectGeneratorSamplingRateError()
-        {
-            UnityEngine.TestTools.LogAssert.Expect(
-                UnityEngine.LogType.Error,
-                new System.Text.RegularExpressions.Regex(
-                    ".*Realtime generators must obey system sampling rate.*"
-                )
-            );
         }
 
         // Helpers ----------------------------------------------------------

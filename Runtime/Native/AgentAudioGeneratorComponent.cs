@@ -65,10 +65,45 @@ namespace ElevenLabs.Native
         /// <see cref="LookupByHandle"/> after <see cref="Dispose"/>.</summary>
         public int Handle { get; }
 
-        /// <summary>Input sample rate the producer feeds, in Hz. Returned
-        /// to Unity from <see cref="AgentAudioControl.Configure"/> so
-        /// Unity resamples our mono input to the device's output rate.</summary>
+        /// <summary>Input sample rate the producer feeds, in Hz (e.g. 16000
+        /// when the server negotiates <c>pcm_16000</c> via the
+        /// <c>conversation_initiation_metadata</c> handshake).</summary>
         public int InputSampleRate { get; }
+
+        // Device output sample rate, in Hz — revealed to us when Unity
+        // invokes AgentAudioControl.Configure (control thread) and consumed
+        // by AgentAudioRealtime.Process (audio thread) to drive the
+        // input→device-rate resampler. Volatile because the cross-thread
+        // publish is a single int store; no value-ordering dependency
+        // beyond "Process sees the most recently published value".
+        // Realtime generators must declare a Setup rate matching the
+        // device's output rate (per Unity's "Realtime generators must obey
+        // system sampling rate" requirement), so the bridge resamples its
+        // negotiated input rate up/down to whatever Unity hands us — keeps
+        // both ends of the pipeline runtime-flexible.
+        private int _deviceSampleRate;
+
+        /// <summary>Device output sample rate, in Hz, as revealed by
+        /// <see cref="AgentAudioControl.Configure"/>. Zero until the first
+        /// <c>Configure</c> fire; the realtime struct falls back to a 1:1
+        /// pass-through (no resampling) for that window.</summary>
+        public int DeviceSampleRate
+        {
+            get => Volatile.Read(ref _deviceSampleRate);
+            set => Volatile.Write(ref _deviceSampleRate, value);
+        }
+
+        /// <summary>Last mono input sample emitted by the resampler — the
+        /// "left endpoint" of the next interpolation interval. Touched
+        /// only on the audio thread (no concurrency).</summary>
+        public float LastInputSample;
+
+        /// <summary>Fractional position in [0, 1) carried across
+        /// <see cref="AgentAudioRealtime.Process"/> calls — how far we've
+        /// stepped past <see cref="LastInputSample"/> toward the next
+        /// mono sample. Touched only on the audio thread (no
+        /// concurrency).</summary>
+        public double ResampleFracPos;
 
         /// <summary>Shared SPSC PCM ring; written by the producer side
         /// (today: the drain callback on the audio thread; step 5/6: the
