@@ -67,27 +67,39 @@ recording flow turns out to be flaky.
 
 ### 1. Vendor the sample
 
-- [ ] Create `Samples/GettingStarted/` with these files copied from the
-      live `Getting Started/` project, scoped to just what's needed to walk
-      up to a cube and talk to it:
-  - [ ] `GettingStarted.unity` — condensed scene (PlayerRobot, ground plane,
-        one or two TalkingBox cubes positioned where the original wall
-        lights are, skybox). Strip out collectibles, stairs, moving
-        platforms, ambient audio prefabs unless they're load-bearing for
-        the walk-up demo.
-  - [ ] `Scripts/TalkingBox.cs` — copy verbatim from the live project,
-        wrap in a `Samples` namespace.
-  - [ ] `Scripts/TalkingBoxAgentConfig.cs` — copy verbatim, same namespace.
-  - [ ] `Prefabs/TalkingBox.prefab` — a cube with `SphereCollider`
-        (`isTrigger=true`), `AudioSource`, `TalkingBox` component, all wired.
-        This is what the doc tells users to drag in.
-  - [ ] `ElevenLabs.Agents.Samples.GettingStarted.asmdef` — namespaced
-        assembly definition matching the QuickStart pattern.
-  - [ ] `README.md` — sample-local readme matching the QuickStart sample's
-        shape (what it demonstrates, how to set up the config asset, how to
-        press Play).
-- [ ] Add `Samples/GettingStarted` to [`package.json`](../../package.json)'s
-      `samples` array and `files` array.
+- [x] Create `Samples/GettingStarted/` with these files, scoped to just
+      what's needed to walk up to a cube and talk to it:
+  - [x] `Scenes/GettingStarted.unity` — condensed scene built from
+        primitives (ground plane, directional light, two TalkingBox
+        cubes, a player capsule with [`SimplePlayerController`](../../Samples/GettingStarted/Scripts/SimplePlayerController.cs)).
+        Authored via Unity batchmode in a staging folder, then copied
+        into the package so the GUIDs in the scene reference the
+        sample's shipped scripts and materials. The original live
+        project's PlayerRobot and Wall_Light prefabs were not vendored
+        — they're Unity Getting-Started template assets and would
+        bloat the sample. The capsule + WASD/mouse-look controller
+        delivers the same walk-up flow with zero external dependencies.
+  - [x] `Scripts/TalkingBox.cs` — adapted from the live project, wrapped
+        in the `ElevenLabs.Agents.Samples.GettingStarted` namespace.
+  - [x] `Scripts/TalkingBoxAgentConfig.cs` — same.
+  - [x] `Scripts/SimplePlayerController.cs` — minimal WASD + mouse-look
+        controller (added beyond the plan because we couldn't ship the
+        PlayerRobot prefab).
+  - [x] `Prefabs/TalkingBox.prefab` — cube with `SphereCollider`
+        (`isTrigger=true`), `AudioSource`, `TalkingBox` component, all
+        wired, referencing the shipped `TalkingBox_Yellow` material.
+  - [x] `Materials/TalkingBox_Yellow.mat`, `TalkingBox_Red.mat`,
+        `Ground.mat` — URP Lit materials shipped with the sample so the
+        prefab and scene don't depend on the consumer project's
+        default-material GUIDs.
+  - [x] `ElevenLabs.Agents.Samples.GettingStarted.asmdef`.
+  - [x] `README.md`.
+- [x] Add `Samples/GettingStarted` to [`package.json`](../../package.json)'s
+      `samples` array and `files` array. Added
+      `com.unity.modules.physics` to the package's `dependencies` while
+      we were there — the sample uses `SphereCollider` /
+      `CharacterController`, and the previous TestProject manifest
+      didn't transitively pull physics in.
 - [ ] Decide what to do with `Samples/QuickStart/`. Options: keep as a
       minimal "no graphics, just transcript" debug sample; fold into
       GettingStarted; or delete. Lean toward keeping — it's the smallest
@@ -98,6 +110,17 @@ recording flow turns out to be flaky.
       location (they're under `files` today via `Samples.meta`; the package
       manifest only ships `Samples/QuickStart` explicitly, so they may
       already be excluded — verify).
+- [ ] **Follow-up — move `Samples/` → `Samples~/`.** Today the
+      package's sample sources live at `Samples/` (no tilde), so they're
+      visible to the AssetDatabase of any consumer project. When the
+      user imports a sample via Package Manager, Unity copies it into
+      `Assets/Samples/...` — both copies now exist, with the same
+      asmdef name, which produces a hard "Assembly with name X already
+      exists" error and GUID-conflict warnings on every imported
+      asset. Renaming to `Samples~/` is the Unity convention to hide
+      the sources from AssetDatabase while keeping Package Manager
+      able to copy them on demand. Affects QuickStart too; out of
+      scope for task 1.
 
 ### 2. Write `Docs~/GETTING_STARTED.md`
 

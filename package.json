@@ -29,10 +29,17 @@
     "Plugins.meta",
     "Samples/QuickStart",
     "Samples/QuickStart.meta",
+    "Samples/GettingStarted",
+    "Samples/GettingStarted.meta",
     "COMPATIBILITY.md",
     "CONTRIBUTING.md"
   ],
   "samples": [
+    {
+      "displayName": "GettingStarted",
+      "description": "Walk-up-and-talk demo: trigger-based session lifecycle, dynamic variables, spatial audio, and a per-frame volume-driven bob.",
+      "path": "Samples/GettingStarted"
+    },
     {
       "displayName": "QuickStart",
       "description": "Minimal scene showing how to open a Conversation session and render the live transcript.",
@@ -42,6 +49,7 @@
   "dependencies": {
     "com.unity.modules.audio": "1.0.0",
     "com.unity.modules.imgui": "1.0.0",
+    "com.unity.modules.physics": "1.0.0",
     "com.unity.modules.unitywebrequest": "1.0.0",
     "com.unity.nuget.newtonsoft-json": "3.2.1"
   }
