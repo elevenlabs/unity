@@ -2,7 +2,8 @@
     "name": "ElevenLabs.Agents.Samples.GettingStarted",
     "rootNamespace": "ElevenLabs.Agents.Samples.GettingStarted",
     "references": [
-        "ElevenLabs.Agents.Core"
+        "ElevenLabs.Agents.Core",
+        "Unity.InputSystem"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

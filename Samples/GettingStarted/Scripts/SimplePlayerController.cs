@@ -1,6 +1,9 @@
 #nullable enable
 
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace ElevenLabs.Agents.Samples.GettingStarted
 {
@@ -11,6 +14,16 @@ namespace ElevenLabs.Agents.Samples.GettingStarted
     /// PlayerRobot prefab. Drop on a capsule with a non-trigger
     /// <see cref="CharacterController"/> and a child camera at head height.
     /// </summary>
+    /// <remarks>
+    /// Works under either input backend — the new <c>Input System Package</c>
+    /// (active by default in Unity 6 templates) or the legacy <c>Input Manager</c>.
+    /// Selection is done at compile time via Unity's <c>ENABLE_INPUT_SYSTEM</c>
+    /// and <c>ENABLE_LEGACY_INPUT_MANAGER</c> defines so the sample compiles
+    /// on a fresh project regardless of which mode the consumer picks. The
+    /// asmdef references <c>Unity.InputSystem</c>, which is shipped by the
+    /// <c>com.unity.inputsystem</c> package — declared as a package
+    /// dependency so the import is automatic.
+    /// </remarks>
     [RequireComponent(typeof(CharacterController))]
     public sealed class SimplePlayerController : MonoBehaviour
     {
@@ -19,8 +32,12 @@ namespace ElevenLabs.Agents.Samples.GettingStarted
         private float moveSpeed = 4f;
 
         [SerializeField]
-        [Tooltip("Mouse-look sensitivity, degrees per pixel of mouse delta.")]
-        private float mouseSensitivity = 2f;
+        [Tooltip(
+            "Mouse-look sensitivity. The new Input System reports raw pixel deltas, "
+                + "which are roughly 10× larger than the legacy 'Mouse X/Y' axis values, "
+                + "so this is scaled internally to keep both backends feeling similar."
+        )]
+        private float mouseSensitivity = 0.15f;
 
         [SerializeField]
         [Tooltip(
@@ -67,9 +84,11 @@ namespace ElevenLabs.Agents.Samples.GettingStarted
 
         private void Update()
         {
+            (Vector2 move, Vector2 look) = ReadInput();
+
             // Mouse look — yaw rotates the body, pitch rotates the camera.
-            float yaw = Input.GetAxisRaw("Mouse X") * mouseSensitivity;
-            float pitchDelta = Input.GetAxisRaw("Mouse Y") * mouseSensitivity;
+            float yaw = look.x * mouseSensitivity;
+            float pitchDelta = look.y * mouseSensitivity;
             transform.Rotate(0f, yaw, 0f, Space.Self);
             if (cameraPivot != null)
             {
@@ -77,10 +96,8 @@ namespace ElevenLabs.Agents.Samples.GettingStarted
                 cameraPivot.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
             }
 
-            // Horizontal movement in body-local space.
-            float h = Input.GetAxisRaw("Horizontal");
-            float v = Input.GetAxisRaw("Vertical");
-            Vector3 move = (transform.right * h + transform.forward * v).normalized * moveSpeed;
+            Vector3 step =
+                (transform.right * move.x + transform.forward * move.y).normalized * moveSpeed;
 
             // Gravity. CharacterController.isGrounded latches false for one
             // frame between steps, so a tiny resting velocity keeps the
@@ -90,8 +107,48 @@ namespace ElevenLabs.Agents.Samples.GettingStarted
             else
                 _verticalVelocity -= gravity * Time.deltaTime;
 
-            move.y = _verticalVelocity;
-            _controller.Move(move * Time.deltaTime);
+            step.y = _verticalVelocity;
+            _controller.Move(step * Time.deltaTime);
+        }
+
+        // Returns (move, look) for the current frame, picking the input
+        // backend at compile time. `move` is WASD as a [-1, 1] x/y vector;
+        // `look` is the mouse delta this frame.
+        private static (Vector2 move, Vector2 look) ReadInput()
+        {
+            Vector2 move = Vector2.zero;
+            Vector2 look = Vector2.zero;
+
+#if ENABLE_INPUT_SYSTEM
+            Keyboard? kb = Keyboard.current;
+            if (kb != null)
+            {
+                if (kb.wKey.isPressed)
+                    move.y += 1f;
+                if (kb.sKey.isPressed)
+                    move.y -= 1f;
+                if (kb.dKey.isPressed)
+                    move.x += 1f;
+                if (kb.aKey.isPressed)
+                    move.x -= 1f;
+            }
+            Mouse? mouse = Mouse.current;
+            if (mouse != null)
+                look = mouse.delta.ReadValue();
+#endif
+
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (move == Vector2.zero)
+                move = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+            if (look == Vector2.zero)
+            {
+                // Legacy mouse axes are scaled deltas, ~10× smaller than raw
+                // pixels — multiply so the same mouseSensitivity feels similar.
+                look = new Vector2(Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y")) * 10f;
+            }
+#endif
+
+            return (move, look);
         }
     }
 }
