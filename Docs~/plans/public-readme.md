@@ -124,12 +124,12 @@ recording flow turns out to be flaky.
 
 ### 2. Write `Docs~/GETTING_STARTED.md`
 
-- [ ] Prereqs section: Unity 6.3 LTS, free ElevenLabs account, an agent
+- [x] Prereqs section: Unity 6.3 LTS, free ElevenLabs account, an agent
       created in the dashboard with authentication disabled.
-- [ ] **Option A — start from the SDK sample (recommended).** Import
+- [x] **Option A — start from the SDK sample (recommended).** Import
       `GettingStarted` via UPM Samples, open the scene, press Play.
       ~3 steps end-to-end.
-- [ ] **Option B — add to your own project.** Walkthrough:
+- [x] **Option B — add to your own project.** Walkthrough:
   1. Install the SDK (UPM git URL).
   2. WebGL-only collapsible section: Use WebAssembly.Table + API
      Compatibility .NET Standard 2.1.
@@ -145,9 +145,9 @@ recording flow turns out to be flaky.
   7. Make sure the player GameObject has a non-trigger collider (the
      Unity Getting-Started template's PlayerRobot already does).
   8. Press Play, walk into the cube.
-- [ ] "What to try next" section: change `mood`, add a second box with a
+- [x] "What to try next" section: change `mood`, add a second box with a
       different `color`, link to client-tool docs once they exist.
-- [ ] Link back to [`COMPATIBILITY.md`](../../COMPATIBILITY.md) and
+- [x] Link back to [`COMPATIBILITY.md`](../../COMPATIBILITY.md) and
       [`ERROR_HANDLING.md`](../ERROR_HANDLING.md) at the end.
 
 ### 3. Rewrite `README.md`
@@ -166,8 +166,10 @@ recording flow turns out to be flaky.
 
 ### 4. Add `Docs~/ERROR_HANDLING.md`
 
-- [ ] Move the README's current "Error types" section verbatim.
-- [ ] No structural changes — that section is in good shape; it's just
+- [x] Move the README's current "Error types" section verbatim. README
+      now has a one-paragraph "Error handling" pointer in its place; full
+      rewrite still pending under task 3.
+- [x] No structural changes — that section is in good shape; it's just
       misplaced.
 
 ### 5. Track follow-ups as issues
