@@ -1,22 +1,37 @@
 # ElevenAgents Unity SDK
 
-The ElevenAgents SDK for Unity.
+Drop ElevenLabs conversational AI agents into a Unity scene. Walk up to a cube, it greets you in character; walk out, the session ends — all driven by the same `Conversation` API on standalone, mobile, the Editor, and WebGL.
 
-## Requirements
+<!-- Landing media: 30s screen recording of the GettingStarted sample (walk up → greet → walk out, with audio). Tracked separately; drop the file in here once recorded. -->
 
-- Unity 6.3 LTS or later (6000.3.0f1+)
-- Player Settings → Player → Other Settings → **Api Compatibility Level** = .NET Standard 2.1 or higher
+## Install
 
-### Additional WebGL requirements
+In Unity, open **Window → Package Manager → + → Install package from git URL…** and paste:
 
-- Player Settings → WebGL → Publishing Settings → **Use WebAssembly.Table** enabled
+```text
+https://github.com/elevenlabs/unity.git
+```
 
-See [COMPATIBILITY.md](./COMPATIBILITY.md) for the rationale behind each requirement and the failure modes you'll hit if a setting is wrong.
+The package targets Unity 6.3 LTS (6000.3.0f1+). See [`COMPATIBILITY.md`](./COMPATIBILITY.md) for the full requirement matrix and the Player Settings flips WebGL needs.
+
+## Get started
+
+The **[Getting Started walkthrough](./Docs~/GETTING_STARTED.md)** is the on-ramp: install, create an agent, drop a talking cube into a scene, press Play. ~10 minutes end-to-end with two routes — import the sample as-is, or paste the components into your own scene.
 
 ## Samples
 
-The package ships an importable **QuickStart** sample — a single scene with a MonoBehaviour that opens a session, wires the lifecycle and transcript events, and tears down on scene unload. Import via the Unity Package Manager UI (ElevenAgents → Samples → QuickStart → Import), open the imported `QuickStart.unity` scene, and create a `QuickStartConfig` asset under any `Resources/` folder with your agent id. Full setup in [`Samples/QuickStart/README.md`](./Samples/QuickStart/README.md).
+Import via **Window → Package Manager → ElevenAgents → Samples**.
 
-## Error handling
+| Sample | What it shows |
+| --- | --- |
+| **[GettingStarted](./Samples/GettingStarted/README.md)** | Walk-up-and-talk demo: trigger-based session lifecycle, per-instance dynamic variables, spatial audio, and a volume-driven bob. This is the headline. |
+| **[QuickStart](./Samples/QuickStart/README.md)** | Smallest possible smoke test — one GameObject, one MonoBehaviour, transcript via `OnGUI`. Use when you want the API surface without any scene dressing. |
 
-The SDK keeps the user-facing exception surface intentionally small. Catch exceptions from awaitable methods, and subscribe to `Conversation.ErrorOccurred` for runtime errors during an open session. Full surface — exception types, the `ErrorOccurred` event, and a mapping from the `@elevenlabs/client` JS SDK — in [`Docs~/ERROR_HANDLING.md`](./Docs~/ERROR_HANDLING.md).
+## Documentation
+
+- [`Docs~/GETTING_STARTED.md`](./Docs~/GETTING_STARTED.md) — the 10-minute walkthrough.
+- [`COMPATIBILITY.md`](./COMPATIBILITY.md) — supported Unity versions, platform matrix, WebGL-specific Player Settings, and the cross-platform vs. native-only audio API table.
+- [`Docs~/ERROR_HANDLING.md`](./Docs~/ERROR_HANDLING.md) — exception surface, `Conversation.ErrorOccurred`, and the mapping from the `@elevenlabs/client` JS SDK.
+- [`Docs~/ARCHITECTURE.md`](./Docs~/ARCHITECTURE.md) — internal layout (transports, audio pipeline, codegen) for contributors.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to build, test, and submit changes.
+- [`CHANGELOG.md`](./CHANGELOG.md) — release notes.

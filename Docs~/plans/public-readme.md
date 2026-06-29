@@ -61,6 +61,11 @@ not the conversation, which undersells it. Options:
 Default: option 1, recorded once the sample is in place. Revisit if the
 recording flow turns out to be flaky.
 
+**Resolution (2026-06-29):** README rewrite landed without media —
+deferred to the existing "Record landing media" follow-up (task 5).
+Plan stays on option 1; the README has an HTML comment marking where
+the recording lands once captured.
+
 ---
 
 ## Task list
@@ -100,16 +105,17 @@ recording flow turns out to be flaky.
       we were there — the sample uses `SphereCollider` /
       `CharacterController`, and the previous TestProject manifest
       didn't transitively pull physics in.
-- [ ] Decide what to do with `Samples/QuickStart/`. Options: keep as a
-      minimal "no graphics, just transcript" debug sample; fold into
-      GettingStarted; or delete. Lean toward keeping — it's the smallest
-      possible smoke test and that's valuable.
-- [ ] Decide what to do with `Samples/BridgeSmokeTest/`,
+- [x] Decide what to do with `Samples/QuickStart/`. **Keep** as the
+      minimal "no graphics, just transcript" debug sample. It's the
+      smallest possible smoke test and the README's samples table now
+      lists it alongside `GettingStarted` as the minimal counterpart.
+- [x] Decide what to do with `Samples/BridgeSmokeTest/`,
       `Samples/ConversationSmokeTest/`, `Samples/StandaloneSmokeTest/`.
-      These exist for our integration tests. Likely move to a non-shipped
-      location (they're under `files` today via `Samples.meta`; the package
-      manifest only ships `Samples/QuickStart` explicitly, so they may
-      already be excluded — verify).
+      **Already excluded** from the shipped package — verified by
+      reading `package.json`'s `files` array (only `Samples/QuickStart`
+      and `Samples/GettingStarted` are listed) and its `samples` array
+      (same two). No action needed; the smoke tests live in-repo for
+      our integration tests but never reach UPM consumers.
 - [ ] **Follow-up — move `Samples/` → `Samples~/`.** Today the
       package's sample sources live at `Samples/` (no tilde), so they're
       visible to the AssetDatabase of any consumer project. When the
@@ -152,17 +158,22 @@ recording flow turns out to be flaky.
 
 ### 3. Rewrite `README.md`
 
-- [ ] Lead with 1–2 sentence pitch + landing media (see open question).
-- [ ] Install section: UPM via git URL. One-liner pointing to the
+- [x] Lead with 1–2 sentence pitch. Landing media **deferred** to a
+      follow-up (see open question + task 5) — the README has an HTML
+      comment marking where the recording lands once captured.
+- [x] Install section: UPM via git URL. One-liner pointing to the
       Compatibility doc for Player Settings details.
-- [ ] "Get started" → link to [`Docs~/GETTING_STARTED.md`](../GETTING_STARTED.md).
-- [ ] "Samples" → short table of the shipped samples
-      (GettingStarted as the headline, QuickStart as the minimal one if
-      kept).
-- [ ] "Documentation" → links to Architecture, Compatibility, Error
+- [x] "Get started" → link to [`Docs~/GETTING_STARTED.md`](../GETTING_STARTED.md).
+- [x] "Samples" → short table of the shipped samples
+      (GettingStarted as the headline, QuickStart as the minimal one).
+- [x] "Documentation" → links to Architecture, Compatibility, Error
       handling, Contributing, Changelog.
-- [ ] Move "Error types" section → [`Docs~/ERROR_HANDLING.md`](../ERROR_HANDLING.md).
-- [ ] Delete "Mapping from the `@elevenlabs/client` JS SDK" section.
+- [x] Move "Error types" section → [`Docs~/ERROR_HANDLING.md`](../ERROR_HANDLING.md).
+      (Landed in an earlier commit; the trimmed-README pointer was
+      replaced wholesale by the rewrite.)
+- [x] Delete "Mapping from the `@elevenlabs/client` JS SDK" section.
+      (Same — was already gone from the README before the rewrite; the
+      mapping table lives in `ERROR_HANDLING.md`.)
 
 ### 4. Add `Docs~/ERROR_HANDLING.md`
 
