@@ -38,6 +38,18 @@ namespace ElevenLabs.Native.Tests
     /// the engine-side contract is observable independent of whether
     /// <c>ReadFromRing</c> also silence-fills internally.
     /// </para>
+    /// <para>
+    /// Cadence target: defaults model <see cref="UnityAudioOutputEngine"/>
+    /// (the legacy streaming-<see cref="UnityEngine.AudioClip"/> path that
+    /// production currently wires). The new
+    /// <see cref="UnityGeneratorAudioOutputEngine"/> path has structurally
+    /// zero sync pre-fill and a ~187.5 Hz ongoing cadence (measured in
+    /// <see cref="ElevenLabs.Native.PlayMode.Tests.UnityGeneratorAudioOutputEngineCharacterizationTest"/>);
+    /// tests modeling that path set <c>SyncPrefillCallbackCount = 0</c> and
+    /// override <see cref="OngoingCallbackPeriodSeconds"/>. Step 6 of
+    /// <c>Docs~/plans/audio-generator-engine.md</c> swaps the production
+    /// wiring; the defaults should be revisited at that point.
+    /// </para>
     /// </remarks>
     internal sealed class FakeAudioOutputEngine : IAudioOutputEngine
     {
