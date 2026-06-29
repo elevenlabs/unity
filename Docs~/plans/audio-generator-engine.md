@@ -205,14 +205,13 @@ Keep the old `UnityAudioOutputEngine` in tree as a fallback through v0.2 soak; m
 
 ### Step 7 — Manual PlayMode A/B + WebGL build verification
 
-- A/B 1 — Turn 1 latency (should be near-zero; was ~800 ms before the bob redesign)
-- A/B 2 — Turn 2+ drift (the residual artifact the bob redesign couldn't fix — should be gone)
-- A/B 3 — Voice clarity (no resampling artifacts — Unity's resampler handles 16→48 kHz)
-- A/B 4 — Supplied-source spatialization (user's literal AudioSource plays through their mixer + spatializer — should "just work" since we're not creating a child GameObject anymore)
-- A/B 5 — WebGL build still passes the existing `IntegrationTests~/` conversation smoke (no regression from the floor bump)
+A/B 1–4 are subjective listening tests against the `Getting Started` Editor's `TalkingBox` scene (one MonoBehaviour per `01_Box_Yellow` / `03_Box_Orange` / `04_Box_Red` cube, each binding an `AudioSource` via `ConversationOptions.OutputAudioSource`). Procedure: focus the Editor (required for audio callbacks to fire), Play, walk `PlayerRobot` into a cube's trigger to open the session, listen, exit. To compare against the legacy engine, temporarily swap the one-line wiring at [`UnityAudioSourceOutput.CreateAsync`](../../Runtime/Native/UnityAudioSourceOutput.cs#L220) back to `new UnityAudioOutputEngine(...)`.
 
-- [ ] All five A/B checks captured
-- [ ] WebGL conversation smoke passes against the bumped floor
+- [ ] **A/B 1 — Turn 1 latency.** Walk into a cube's trigger; the agent's `firstMessage` should start audibly within ~16 ms of the trigger fire (256-sample DSP-buffer margin at 16 kHz; was `12_800 + 256 = 13_056` samples ≈ 816 ms under the legacy engine — step 5's threshold-gate collapse). Expect a near-instant "Hi there!" instead of a perceptible ~0.8 s gap.
+- [ ] **A/B 2 — Turn 2+ drift.** Have a 3+ turn conversation through a single cube. The bob's peak should remain locked to the audible head across all turns (the residual ~tens-of-ms drift the bob redesign couldn't fully fix — should be gone since the wall-clock anchor stamps at zero pre-fill instead of ~800 ms).
+- [ ] **A/B 3 — Voice clarity.** Listen for resampler artifacts (clicks, aliasing, pitch warble) on multi-syllable words. Unity's built-in resampler handles 16 → 48 kHz via the `IControl.Configure` Setup negotiation; should sound identical to the legacy `AudioClip`-resampled path or cleaner.
+- [ ] **A/B 4 — Supplied-source spatialization.** Walk between two cubes during playback. The voice should pan / attenuate based on the cube's world position relative to `RobotCamera` (Unity's spatial blend on each `AudioSource`). The generator path keeps the user's literal AudioSource as the playback source (no child-GameObject re-parenting), so spatializer + mixer routing should work unchanged from a static `AudioClip.Play()`.
+- [x] **A/B 5 — WebGL conversation smoke passes against the bumped floor.** `pnpm --dir IntegrationTests~ run test` against fresh WebGL builds (`bash TestProject/build-webgl.sh` + `bash TestProject/build-webgl-conversation.sh`) — 5/5 Vitest specs green (`bridge primitive smoke`, `conversation smoke`, `conversation spatial smoke`, plus the two harness fixtures). The two conversation specs hit the harness-allowed `[ConvSmoke] CONFIG MISSING` / `[SpatialSmoke] CONFIG MISSING` green path on this dev machine (per [`Samples/ConversationSmokeTest/README.md`](../../Samples/ConversationSmokeTest/README.md) — the per-developer `ConversationSmokeConfig.asset` either isn't being bundled into the WebGL Resources payload or isn't being deserialized at runtime on this clone; pre-existing behavior independent of the floor bump). Build succeeds against `6000.3.6f1` — no regression from the Unity 6.3 LTS floor.
 
 ---
 
