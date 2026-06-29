@@ -133,7 +133,7 @@ namespace ElevenLabs.Native
             double cutoff = outputRate >= inputRate ? 1.0 : (double)outputRate / inputRate;
             cutoff *= 0.95;
 
-            const double beta = 8.0; // Kaiser β=8 → ~60 dB stopband
+            const double beta = 12.0; // Kaiser β=12 → ~85-90 dB stopband (combined with L=32 taps)
             double i0Beta = BesselI0(beta);
             int half = KernelTaps / 2;
             float[] kernel = new float[PhaseCount * KernelTaps];
@@ -226,12 +226,15 @@ namespace ElevenLabs.Native
         /// concurrency).</summary>
         public double ResampleFracPos;
 
-        /// <summary>Resampler kernel length (taps per phase). Sized to
-        /// give ~60 dB stopband with a Kaiser β=8 window — well below
-        /// the perceptual floor for speech, while keeping per-output
-        /// cost at 16 multiply-adds. Power of two simplifies the carry
-        /// arithmetic.</summary>
-        public const int KernelTaps = 16;
+        /// <summary>Resampler kernel length (taps per phase). At Kaiser
+        /// β=12, 32 taps gives ~85-90 dB stopband — below any speech
+        /// perceptual floor. The earlier L=16 / β=8 (~60 dB) left a
+        /// faint sibilant-correlated "rattle" audible on the live agent
+        /// per spectrogram (mirror-image leakage in the 8-18 kHz band);
+        /// L=32 / β=12 drops that leakage by an additional ~25-30 dB.
+        /// Per-output cost: 32 multiply-adds, still trivial on the
+        /// audio thread (~1.5 M ops/sec at 48 kHz output).</summary>
+        public const int KernelTaps = 32;
 
         /// <summary>Resampler phase resolution. Nearest-phase lookup
         /// (vs interpolating between phases) introduces a max error of
