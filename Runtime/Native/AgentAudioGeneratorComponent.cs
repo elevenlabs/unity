@@ -86,30 +86,172 @@ namespace ElevenLabs.Native
         /// <summary>Device output sample rate, in Hz, as revealed by
         /// <see cref="AgentAudioControl.Configure"/>. Zero until the first
         /// <c>Configure</c> fire; the realtime struct falls back to a 1:1
-        /// pass-through (no resampling) for that window.</summary>
+        /// pass-through (no resampling) for that window. The setter
+        /// rebuilds the polyphase resampler kernel (control thread; not
+        /// concurrent with Process per Unity's IAudioGenerator threading
+        /// contract) and the <see cref="Volatile.Write"/> below acts as
+        /// the release fence so the audio thread sees the freshly built
+        /// kernel + carry buffer once it observes a positive
+        /// device rate.</summary>
         public int DeviceSampleRate
         {
             get => Volatile.Read(ref _deviceSampleRate);
-            set => Volatile.Write(ref _deviceSampleRate, value);
+            set
+            {
+                if (value == Volatile.Read(ref _deviceSampleRate))
+                    return;
+                if (value > 0 && value != InputSampleRate)
+                {
+                    ResamplerKernel = BuildResamplerKernel(InputSampleRate, value);
+                    ResamplerCarry = new float[KernelTaps / 2];
+                    ResampleFracPos = 0.0;
+                }
+                else
+                {
+                    ResamplerKernel = null;
+                    ResamplerCarry = null;
+                    ResampleFracPos = 0.0;
+                }
+                Volatile.Write(ref _deviceSampleRate, value);
+            }
         }
 
-        /// <summary>The 3 most recently consumed input samples — the
-        /// left half of the cubic-Hermite interpolation window carried
-        /// across <see cref="AgentAudioRealtime.Process"/> calls.
-        /// <see cref="Prev0"/> is the most recent (its position is just
-        /// past the conceptual fractional cursor); <see cref="Prev2"/> is
-        /// the oldest. Touched only on the audio thread (no
-        /// concurrency).</summary>
-        public float Prev0;
-        public float Prev1;
-        public float Prev2;
+        /// <summary>
+        /// Build a Kaiser-windowed sinc polyphase FIR kernel for the
+        /// given <paramref name="inputRate"/> → <paramref name="outputRate"/>
+        /// pair. Returns a flat <see cref="PhaseCount"/> × <see cref="KernelTaps"/>
+        /// coefficient table laid out row-major (each row sums to ~1.0
+        /// for DC gain). Cutoff is set just below the minimum Nyquist
+        /// with a small safety margin so the transition band falls
+        /// inside our budget.
+        /// </summary>
+        internal static float[] BuildResamplerKernel(int inputRate, int outputRate)
+        {
+            // Cutoff in INPUT-rate units (1.0 = input Nyquist). For
+            // upsampling we're bandwidth-limited by the input; for
+            // downsampling we need to anti-alias to the lower output
+            // Nyquist. Apply a 0.95 margin to avoid putting energy
+            // right at the cutoff (sinc lobes are uglier near 1.0).
+            double cutoff = outputRate >= inputRate ? 1.0 : (double)outputRate / inputRate;
+            cutoff *= 0.95;
+
+            const double beta = 8.0; // Kaiser β=8 → ~60 dB stopband
+            double i0Beta = BesselI0(beta);
+            int half = KernelTaps / 2;
+            float[] kernel = new float[PhaseCount * KernelTaps];
+
+            for (int p = 0; p < PhaseCount; p++)
+            {
+                double phase = (double)p / PhaseCount;
+                double rowSum = 0.0;
+                int rowBase = p * KernelTaps;
+                for (int n = 0; n < KernelTaps; n++)
+                {
+                    // Tap position t (in input-sample units) is the
+                    // signed offset between the output position
+                    // (`phase` past the anchor input sample) and the
+                    // input sample at tap n. With anchor at conceptual
+                    // index `half - 1` and tap n covering input indices
+                    // 0..L-1, t = (half - 1 - n) + phase. Note the sign:
+                    // larger n → more negative t (looking further to
+                    // the right of the anchor).
+                    double t = half - 1 - n + phase;
+                    double sincArg = Math.PI * t * cutoff;
+                    double sincVal = Math.Abs(sincArg) < 1e-9 ? 1.0 : Math.Sin(sincArg) / sincArg;
+                    // Kaiser window over support [-half, +half - 1].
+                    // window_arg in [-1, 1]; zero at the kernel edges.
+                    double winArg = t / half;
+                    double window;
+                    if (winArg >= 1.0 || winArg <= -1.0)
+                    {
+                        window = 0.0;
+                    }
+                    else
+                    {
+                        double argSq = 1.0 - winArg * winArg;
+                        window = BesselI0(beta * Math.Sqrt(argSq)) / i0Beta;
+                    }
+                    double coeff = cutoff * sincVal * window;
+                    kernel[rowBase + n] = (float)coeff;
+                    rowSum += coeff;
+                }
+                // DC-normalize each row so a constant input passes
+                // through with unity gain.
+                if (rowSum > 1e-9)
+                {
+                    float invSum = (float)(1.0 / rowSum);
+                    for (int n = 0; n < KernelTaps; n++)
+                        kernel[rowBase + n] *= invSum;
+                }
+            }
+
+            return kernel;
+        }
+
+        /// <summary>
+        /// Modified Bessel function of the first kind, order 0 — the
+        /// normalizing kernel inside Kaiser windows. Converges fast for
+        /// the modest β values we use; bounded iterations.
+        /// </summary>
+        internal static double BesselI0(double x)
+        {
+            double y = x / 2.0;
+            double t = 1.0;
+            double sum = 1.0;
+            for (int k = 1; k < 50; k++)
+            {
+                t *= y / k;
+                double inc = t * t;
+                sum += inc;
+                if (inc < 1e-15 * sum)
+                    break;
+            }
+            return sum;
+        }
+
+        /// <summary>Polyphase windowed-sinc resampler kernel: a flat
+        /// [<see cref="PhaseCount"/> × <see cref="KernelTaps"/>] table of
+        /// coefficients laid out row-major (phase-major). Built by
+        /// <see cref="BuildResamplerKernel"/> on the control thread when
+        /// <see cref="DeviceSampleRate"/> is set; read by
+        /// <see cref="AgentAudioRealtime.Process"/> on the audio thread
+        /// via the volatile-published <c>DeviceSampleRate</c> as the
+        /// release fence (the kernel ref is visible to any thread that
+        /// subsequently reads <c>DeviceSampleRate</c> with acquire
+        /// semantics).</summary>
+        public float[]? ResamplerKernel;
+
+        /// <summary>The <see cref="KernelTaps"/> / 2 most recently
+        /// consumed input samples — the left half of each output
+        /// sample's interpolation window, carried across
+        /// <see cref="AgentAudioRealtime.Process"/> calls so the kernel
+        /// always has a full <see cref="KernelTaps"/>-tap support
+        /// regardless of where the fractional cursor lands. Index 0 is
+        /// the oldest; index <see cref="KernelTaps"/>/2 − 1 is the most
+        /// recent. Touched only on the audio thread (no concurrency).</summary>
+        public float[]? ResamplerCarry;
 
         /// <summary>Fractional position in [0, 1) carried across
         /// <see cref="AgentAudioRealtime.Process"/> calls — how far we've
-        /// stepped past <see cref="Prev0"/> toward the next freshly
-        /// drained mono sample. Touched only on the audio thread (no
+        /// stepped past the last consumed input sample toward the next
+        /// freshly drained one. Touched only on the audio thread (no
         /// concurrency).</summary>
         public double ResampleFracPos;
+
+        /// <summary>Resampler kernel length (taps per phase). Sized to
+        /// give ~60 dB stopband with a Kaiser β=8 window — well below
+        /// the perceptual floor for speech, while keeping per-output
+        /// cost at 16 multiply-adds. Power of two simplifies the carry
+        /// arithmetic.</summary>
+        public const int KernelTaps = 16;
+
+        /// <summary>Resampler phase resolution. Nearest-phase lookup
+        /// (vs interpolating between phases) introduces a max error of
+        /// half a phase × max(|h'|), which at <see cref="PhaseCount"/>
+        /// = 256 is well below the kernel's own stopband — extra phase
+        /// resolution would just bloat the table without audible
+        /// benefit.</summary>
+        public const int PhaseCount = 256;
 
         /// <summary>Shared SPSC PCM ring; written by the producer side
         /// (today: the drain callback on the audio thread; step 5/6: the
