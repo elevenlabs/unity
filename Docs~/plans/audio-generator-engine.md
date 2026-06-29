@@ -81,9 +81,9 @@ Three of these were resolvable from official Unity docs in step 0; the remaining
 - **Drain-callback bridging.** Our existing `IAudioOutputEngine.Start(FormatConfig, Func<float[], int> drainCallback)` takes a managed `Func<float[], int>`. A `[BurstCompile]`'d `IRealtime` struct couldn't capture a managed delegate, but since we're shipping un-Bursted (above), the struct *can* hold a managed reference — to the SPSC ring (step 2) at minimum, possibly the delegate itself. Cleanest shape: the struct reads from the shared ring directly; the control side wires the producer into the ring at `Start`. Locked in during step 3.
 - **`ControlContext.builtIn` vs custom contexts.** Manual example uses `ControlContext.builtIn` everywhere; the [`AllocateGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.ControlContext.AllocateGenerator.html) ref mentions creating contexts "purely in code." We'll use `builtIn` (it's the AudioSource-integrated context — the only one that makes sense for our supplied-source ergonomics).
 
-### Carried forward to step 1 as empirical sanity checks
+### Empirical sanity checks (folded into step 1, confirmed 2026-06-29)
 
-The step 0 plan listed a unity-mcp-driven 20-line MonoBehaviour probe as a belt-and-braces check that the docs match reality. With unity-mcp currently revoked in this environment, those sanity checks are folded into step 1's characterization test (`UnityGeneratorAudioOutputEngineCharacterizationTest`) — it already builds a minimal `IAudioGenerator`+`IRealtime` and runs it in PlayMode, which is the same verification at a slightly higher tier. Specifically: confirm `audioSource.generator = component` assignment binds (not just inspector), confirm `Process` fires after `audioSource.Play()`, confirm clip-vs-generator coexistence.
+The step 0 plan listed a unity-mcp-driven 20-line MonoBehaviour probe as a belt-and-braces check that the docs match reality. With unity-mcp revoked at the start of step 1, those sanity checks were folded into the characterization test (`UnityGeneratorAudioOutputEngineCharacterizationTest`) and confirmed once the user re-approved MCP mid-step. All three landed green: `audioSource.generator = component` runtime assignment binds, `Process` fires after `Play()` (187.6 Hz cadence; zero sync pre-fill), and the generator takes priority over a coexisting streaming `AudioClip` during playback. See step 1's "Measured values" table for the full data.
 
 ## WebGL — confirmed out of reach in 6.3
 
@@ -120,9 +120,26 @@ Mirror [`UnityAudioOutputEngineCharacterizationTest`](../../Tests/Runtime/Native
 - Loose-band assertions; `Assert.Inconclusive` fallback for batchmode
 - Log values for fake calibration
 
-- [ ] Characterization test file written + .meta stamped via test runner
-- [ ] PlayMode run captures empirical values via unity-mcp
-- [ ] Plan updated with measured values; open questions resolved
+- [x] Characterization test file written + .meta stamped via test runner ([`Tests/Runtime/Native/UnityGeneratorAudioOutputEngineCharacterizationTest.cs`](../../Tests/Runtime/Native/UnityGeneratorAudioOutputEngineCharacterizationTest.cs))
+- [x] PlayMode run captures empirical values via unity-mcp (re-approved on the live `Getting Started` Editor; `TestRunnerApi.Execute` queued the PlayMode test, results read from `~/Library/Logs/Unity/Editor-prev.log`)
+- [x] Plan updated with measured values; open questions resolved (see below)
+
+**Measured values (2026-06-29, macOS 26.5.1 arm64, Unity 6000.3.6f1, 48 kHz/2-channel system audio device, `Getting Started` Editor in PlayMode):**
+
+| Quantity | Observed | Notes |
+|---|---|---|
+| `Process` fires synchronously inside `AudioSource.Play()` | **0** | Confirms the IAudioGenerator path has zero structural pre-fill — the core driver of this plan. Compare ~8 PCMReaderCallback fires × ~100 ms = ~800 ms pre-fill burst in the streaming-`AudioClip` path ([`streaming-audioclip-prefill-depth.md`](../unity-issues/streaming-audioclip-prefill-depth.md)). |
+| Ongoing `Process` cadence | **187.6 Hz** (938 fires / 5 s) | One fire per DSP buffer: 256 frames @ 48 kHz output device ≈ 5.33 ms / 187.5 Hz. Matches the prediction. |
+| `ChannelBuffer.frameCount` | **256 (constant)** | Standard Unity 6 DSP buffer size on this hardware. |
+| `ChannelBuffer.channelCount` | **2** | Stereo system output — Unity adapts Setup's mono declaration to device speaker mode. |
+| `audioSource.generator = component` (runtime assignment) | **Sticks; Process fires after `Play()`** | Confirms the [`AudioSource.generator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AudioSource-generator.html) public setter is runtime-usable, not just an inspector picker. |
+| Clip vs generator coexistence | **Generator takes priority during playback** | Clip's `PCMReaderCallback` fired 50 times during `AudioClip.Create()` (the streaming pre-fill burst — same number `UnityAudioOutputEngineCharacterizationTest` measures for the legacy path) but 0 times during the 5-second playback window. Snapshot+restore of `audioSource.clip` is sufficient — no need to actively null it on `Start`. |
+
+**Open questions resolved in step 1:**
+
+- **~~Coexistence with `AudioSource.clip`.~~ Resolved:** generator takes priority during playback. Production engine just needs the existing snapshot/restore pattern for `clip` (no active null-out needed). The 50 create-time fires are the streaming-clip's own pre-fill property — the generator path never creates a streaming clip, so this is moot for production.
+- **~~Drain-callback bridging.~~ Resolved:** the realtime struct accesses shared state via `Interlocked`/`Volatile` on an enclosing class's static fields (in the test) — for production, the same shape works with a heap-allocated handle to the SPSC ring captured by the control struct at `Configure` time and shared with the realtime via a field. Locked in for step 3.
+- **~~`ControlContext.builtIn` vs custom contexts.~~ Resolved:** step 0 already concluded `builtIn`; step 1 confirms it works end-to-end with `AudioSource.generator` binding.
 
 ### Step 2 — SPSC ring buffer (audio-thread safe)
 
