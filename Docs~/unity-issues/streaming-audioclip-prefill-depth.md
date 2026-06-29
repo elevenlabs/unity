@@ -202,15 +202,16 @@ better structural fit for real-time PCM streaming than either
   speaker mode), giving SDK authors a first-class hook into the audio
   pipeline without the streaming-`AudioClip` indirection.
 
-We haven't evaluated whether the pre-fill behaviour described above
-applies to `GeneratorInstance` as well, but the surface area suggests
-it shouldn't: there's no `lengthSamples` / streaming-buffer
+The pre-fill behaviour described above is unlikely to apply to
+`GeneratorInstance`: there's no `lengthSamples` / streaming-buffer
 intermediary, and `Process()` is documented as the realtime callback
-itself. If true, this would supersede both the v0.1 wall-clock
-workaround and the v0.2 `OnAudioFilterRead` engine for projects on
-Unity 6.3+. The SDK currently targets Unity 6 LTS (6000.0+), so any
-adoption would need to coexist with the existing path until the
-floor moves to 6.3.
+itself. This SDK has committed to that path as the v0.2 audio output —
+tracked at [`Docs~/plans/audio-generator-engine.md`](../plans/audio-generator-engine.md) —
+which entails bumping the SDK's minimum Unity version from 6.0 LTS to
+6.3 LTS. The original `OnAudioFilterRead` workaround
+([`Docs~/plans/audio-output-filter-engine.md`](../plans/audio-output-filter-engine.md))
+is paused but kept on file in case the floor bump turns out to be
+non-viable for downstream users.
 
 ## Asks for Unity
 
