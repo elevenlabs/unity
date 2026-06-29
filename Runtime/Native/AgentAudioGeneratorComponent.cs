@@ -93,15 +93,21 @@ namespace ElevenLabs.Native
             set => Volatile.Write(ref _deviceSampleRate, value);
         }
 
-        /// <summary>Last mono input sample emitted by the resampler — the
-        /// "left endpoint" of the next interpolation interval. Touched
-        /// only on the audio thread (no concurrency).</summary>
-        public float LastInputSample;
+        /// <summary>The 3 most recently consumed input samples — the
+        /// left half of the cubic-Hermite interpolation window carried
+        /// across <see cref="AgentAudioRealtime.Process"/> calls.
+        /// <see cref="Prev0"/> is the most recent (its position is just
+        /// past the conceptual fractional cursor); <see cref="Prev2"/> is
+        /// the oldest. Touched only on the audio thread (no
+        /// concurrency).</summary>
+        public float Prev0;
+        public float Prev1;
+        public float Prev2;
 
         /// <summary>Fractional position in [0, 1) carried across
         /// <see cref="AgentAudioRealtime.Process"/> calls — how far we've
-        /// stepped past <see cref="LastInputSample"/> toward the next
-        /// mono sample. Touched only on the audio thread (no
+        /// stepped past <see cref="Prev0"/> toward the next freshly
+        /// drained mono sample. Touched only on the audio thread (no
         /// concurrency).</summary>
         public double ResampleFracPos;
 

@@ -215,6 +215,12 @@ End-to-end rate flexibility preserved: the server picks `agent_output_audio_form
 
 Edit-Mode tests: 449/449 pass via `pnpm --dir TestProject run test` after the fix + whitelist removal.
 
+**Cubic Hermite upgrade — added 2026-06-29.** Second A/B 1 attempt (post-rate-fix) confirmed pitch correctness but surfaced a constant background "dust" on speech. Diagnosis: linear interpolation when upsampling 16 → 48 kHz leaves spectral mirror images centered at the source Nyquist (8 kHz); those images fall at 8–16 kHz, in the audible band, and read as harsh sibilant haze on voice. Bumping the prefill threshold was considered but ruled out by the user-reported symptom (constant, not burst-correlated → not underrun).
+
+Fix: replaced linear (2-tap) with cubic Hermite (Catmull-Rom, 4-tap) interpolation in `AgentAudioRealtime.Process`. The state carried across Process calls grew from `{LastInputSample, ResampleFracPos}` to `{Prev0, Prev1, Prev2, ResampleFracPos}` — the 3 most recently consumed input samples become the left half of the interpolation window, with `Prev0` adjacent to the fractional cursor. Per-output-sample cost: 4 mono reads, 6 multiplies, 4 adds in nested-Horner form (`y(t) = ((a*t + b)*t + c)*t + p1`). Audio-thread dirt cheap. Attenuates the 8–16 kHz image band by ~12–20 dB vs linear — the standard "good enough" upsampler for speech bandwidth. Windowed-sinc would be cleaner still but overkill given our source bandwidth.
+
+Edit-Mode tests: 449/449 still pass.
+
 - [ ] **A/B 1 — Turn 1 latency.** Walk into a cube's trigger; the agent's `firstMessage` should start audibly within ~16 ms of the trigger fire (256-sample DSP-buffer margin at 16 kHz; was `12_800 + 256 = 13_056` samples ≈ 816 ms under the legacy engine — step 5's threshold-gate collapse). Expect a near-instant "Hi there!" instead of a perceptible ~0.8 s gap.
 - [ ] **A/B 2 — Turn 2+ drift.** Have a 3+ turn conversation through a single cube. The bob's peak should remain locked to the audible head across all turns (the residual ~tens-of-ms drift the bob redesign couldn't fully fix — should be gone since the wall-clock anchor stamps at zero pre-fill instead of ~800 ms).
 - [ ] **A/B 3 — Voice clarity.** Listen for resampler artifacts (clicks, aliasing, pitch warble) on multi-syllable words. Unity's built-in resampler handles 16 → 48 kHz via the `IControl.Configure` Setup negotiation; should sound identical to the legacy `AudioClip`-resampled path or cleaner.

@@ -101,78 +101,114 @@ namespace ElevenLabs.Native
                 return frames;
             }
 
-            // Resample path: linear-interpolate the bridge's
-            // negotiated-input-rate samples up/down to the device's output
-            // rate. We do this on the audio thread (vs the producer side)
-            // so the network-decode path stays at whatever rate the server
-            // negotiated — if Unity ever lifts the realtime-generator rate
-            // requirement, the resampler drops out without touching the
-            // producer.
+            // Resample path: cubic Hermite (Catmull-Rom) interpolation
+            // from the bridge's negotiated-input-rate samples up/down to
+            // the device's output rate. We do this on the audio thread
+            // (vs the producer side) so the network-decode path stays at
+            // whatever rate the server negotiated — if Unity ever lifts
+            // the realtime-generator rate requirement, the resampler
+            // drops out without touching the producer.
             //
-            // Linear interpolation is the same fidelity bar the
-            // OnAudioFilterRead plan would have set; for typical
-            // upsampling (16 kHz → 48 kHz speech) the artifact floor is
-            // well below the source's bandwidth limit. Downsampling
-            // without an anti-alias prefilter would be lossier, but the
-            // realistic case is upsampling (server outputs ≤ device rate).
+            // Hermite over linear: linear interpolation leaves harsh
+            // mirror images near the source Nyquist (8 kHz when
+            // upsampling 16 → 48), audible as "dust" on speech.
+            // Catmull-Rom cubic is the standard "good enough" upsampler
+            // for speech — it attenuates the image band by ~12-20 dB at
+            // the cost of 4 multiplies + 4 adds per output sample (still
+            // dirt cheap on the audio thread). Windowed-sinc would be
+            // cleaner still but overkill for our bandwidth.
+            //
+            // Layout: the conceptual interpolation buffer is
+            //   [..., Prev2, Prev1, Prev0, mono[0], mono[1], ...]
+            // with ResampleFracPos giving the fractional offset past
+            // Prev0. We copy the 3 prev samples into the first 3 slots
+            // of MonoScratch so the loop can index a contiguous buffer
+            // without conditional carry-vs-fresh branches.
             double step = (double)inputRate / deviceRate;
             double startFrac = bridge.ResampleFracPos;
-            // Figure out how many input mono samples we need to satisfy
-            // `frames` output frames. The last output frame's source
-            // position is startFrac + (frames - 1) * step; we need
-            // ceil(that) + 1 mono samples for the right endpoint of the
-            // final interpolation (+1 because mono[0] is the right
-            // endpoint when fractional position is in [0, 1)).
-            int needed = (int)Math.Ceiling(startFrac + (frames - 1) * step) + 1;
+
+            // Carry: prepend Prev2/Prev1/Prev0 into mono[0..2].
+            mono[0] = bridge.Prev2;
+            mono[1] = bridge.Prev1;
+            mono[2] = bridge.Prev0;
+
+            // Figure out how many FRESH input samples to drain into
+            // mono[3..]. The last output frame's source position past
+            // Prev0 is startFrac + (frames - 1) * step. The cubic kernel
+            // reads 2 samples to the right of its left anchor (p2, p3),
+            // so we need ceil(that) + 2 fresh samples past Prev0.
+            int needed = (int)Math.Ceiling(startFrac + (frames - 1) * step) + 2;
             if (needed < 1)
                 needed = 1;
-            if (needed > mono.Length)
-                needed = mono.Length;
-            int gotR = bridge.Drain(mono.AsSpan(0, needed));
-            float left = bridge.LastInputSample;
+            int drainCapacity = mono.Length - 3;
+            if (needed > drainCapacity)
+                needed = drainCapacity;
+            int gotR = bridge.Drain(mono.AsSpan(3, needed));
             // Pad-on-underrun with last-sample-hold (avoids click on
-            // underrun vs zero-fill). Cap to the requested window so the
-            // interpolation loop reads only valid slots.
+            // underrun vs zero-fill). Pad source is the last good fresh
+            // sample, or Prev0 if no fresh samples arrived.
             if (gotR < needed)
             {
-                float pad = gotR > 0 ? mono[gotR - 1] : left;
+                float pad = gotR > 0 ? mono[3 + gotR - 1] : bridge.Prev0;
                 for (int i = gotR; i < needed; i++)
-                    mono[i] = pad;
+                    mono[3 + i] = pad;
             }
+            int monoEnd = 3 + needed; // one past the last valid mono index
 
-            // Walk the interpolation interval forward one output frame at
-            // a time. `pos` tracks the fractional offset between `left`
-            // and `right`; when it crosses 1.0, slide the interval by one
-            // input sample.
-            float right = mono[0];
             double pos = startFrac;
-            int idx = 0;
             for (int f = 0; f < frames; f++)
             {
-                while (pos >= 1.0)
-                {
-                    pos -= 1.0;
-                    left = right;
-                    idx++;
-                    right = idx < needed ? mono[idx] : left;
-                }
-                float sample = (float)(left + (right - left) * pos);
+                // Interpolation window: 4 taps centered around the
+                // output position. p1 is the left anchor; output is
+                // between p1 and p2 at fractional `t`.
+                int floorPos = (int)Math.Floor(pos);
+                double t = pos - floorPos;
+                int i1 = 2 + floorPos; // anchor in mono coords
+                int i0 = i1 - 1;
+                int i2 = i1 + 1;
+                int i3 = i1 + 2;
+                // Clamp the right edges in case underrun truncated the
+                // drain (i1 always >= 1 since floorPos >= 0 + state
+                // invariants, but the right taps can run past monoEnd).
+                if (i2 >= monoEnd)
+                    i2 = monoEnd - 1;
+                if (i3 >= monoEnd)
+                    i3 = monoEnd - 1;
+                float p0 = mono[i0];
+                float p1 = mono[i1];
+                float p2 = mono[i2];
+                float p3 = mono[i3];
+                // Catmull-Rom Hermite (nested form):
+                //   y(t) = ((a*t + b)*t + c)*t + p1
+                // with a, b, c as below. Computed in double for
+                // round-off margin; cast to float once at the end.
+                double a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+                double b = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+                double c = -0.5 * p0 + 0.5 * p2;
+                float sample = (float)(((a * t + b) * t + c) * t + p1);
                 for (int ch = 0; ch < channels; ch++)
                     buffer[ch, f] = sample;
                 pos += step;
             }
-            // Normalize trailing whole-step accumulation so
-            // ResampleFracPos stays in [0, 1) — keeps the needed-samples
-            // calculation honest on the next Process call.
-            while (pos >= 1.0)
-            {
-                pos -= 1.0;
-                left = right;
-                idx++;
-                right = idx < needed ? mono[idx] : left;
-            }
-            bridge.LastInputSample = left;
-            bridge.ResampleFracPos = pos;
+
+            // Update carry: the new Prev0 is the last sample at the
+            // "anchor" position the next call should start from — i.e.,
+            // mono[2 + floor(pos)]. Prev1/Prev2 fall out one and two
+            // positions earlier. Final fractional carry = pos - floor(pos).
+            int finalFloor = (int)Math.Floor(pos);
+            int prev0Idx = 2 + finalFloor;
+            if (prev0Idx >= monoEnd)
+                prev0Idx = monoEnd - 1;
+            int prev1Idx = prev0Idx - 1;
+            if (prev1Idx < 0)
+                prev1Idx = 0;
+            int prev2Idx = prev0Idx - 2;
+            if (prev2Idx < 0)
+                prev2Idx = 0;
+            bridge.Prev0 = mono[prev0Idx];
+            bridge.Prev1 = mono[prev1Idx];
+            bridge.Prev2 = mono[prev2Idx];
+            bridge.ResampleFracPos = pos - finalFloor;
             return frames;
         }
 
