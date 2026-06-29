@@ -72,20 +72,28 @@ The Fake test seam ([`FakeAudioOutputEngine`](../../Tests/Editor/Native/FakeAudi
 
 ## Open questions to settle during step 0 + step 1
 
-- **Does `IAudioGenerator` work on WebGL?** Almost certainly not (FMOD vs Web Audio split), but verify by checking the Unity 6.3 release notes and trying a build. If unsupported, WebGL keeps its `web-audio-sink.ts` path — easy preprocessor gate.
-- **Binding mechanism for `audioSource.generator`.** The manual example sets `m_AudioSource = GetComponent<AudioSource>()` but never assigns `m_AudioSource.generator = this` — suggesting Unity binds via a different path (inspector picker via `[IAudioGenerator.Serializable]`? `AudioSource.generator` is a settable property per the [API ref](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.IAudioGenerator.html)?). Settle empirically in step 1.
-- **Coexistence with `AudioSource.clip`.** When `audioSource.generator` is set, does `audioSource.clip` get ignored or do they layer? The user's supplied AudioSource may have a clip assigned — does setting the generator override or coexist?
-- **Burst dependency.** [`[BurstCompile]`](https://docs.unity3d.com/Packages/com.unity.burst@latest) is in the example but not strictly required for `IRealtime` — confirm whether plain managed C# works (slower but no extra package). If Burst is mandatory, we add a `com.unity.burst` dependency to `package.json`; if optional, we ship without it and let downstream projects opt in. Burst is Unity-official and already pulled in transitively by Unity's own packages, so the cost is probably negligible.
-- **Drain-callback bridging.** Our existing `IAudioOutputEngine.Start(FormatConfig, Func<float[], int> drainCallback)` takes a managed `Func<float[], int>`. The `IRealtime` struct can't capture a managed delegate (would defeat Burst). Bridge via a static map: `_engineInstanceId → drainCallback`, struct holds the int ID, Process method looks up + calls. Or: the struct just reads from the shared ring directly, and the control side wires the producer into the ring. The latter is cleaner if the ring API is right.
-- **`ControlContext.builtIn` vs custom contexts.** Manual example uses `ControlContext.builtIn` everywhere; the [`AllocateGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.ControlContext.AllocateGenerator.html) ref mentions creating contexts "purely in code." We probably use `builtIn` (it's the AudioSource-integrated context).
+Three of these were resolvable from official Unity docs in step 0; the remaining two need code-shape decisions in step 3.
 
-## WebGL — stretch goal, almost certainly out of reach
+- **~~Does `IAudioGenerator` work on WebGL?~~ Resolved (step 0):** **No.** Per Unity's own [audio-team Q3 2025 status update](https://discussions.unity.com/t/audio-status-update-q3-2025/1681867): *"Scriptable Processors don't work on WebGL. We are investigating how to achieve feature parity, but it's a larger body of work."* WebGL keeps its `web-audio-sink.ts` path — preprocessor-gated as designed.
+- **~~Binding mechanism for `audioSource.generator`.~~ Resolved (step 0):** **Public settable property — assign from code.** Per the [`AudioSource.generator` API ref](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AudioSource-generator.html): `public Audio.IAudioGenerator generator;` with a public set accessor. The 6.3 "What's New" describes the inspector picker (the manual example's path), but the property is also settable at runtime — which is the path we need (we attach the component dynamically). We'll snapshot the pre-session value on construction and restore it on `Dispose`, mirroring today's `clip`/`loop`/`volume` snapshot pattern.
+- **~~Burst dependency.~~ Resolved (step 0):** **Optional.** Per the [`GeneratorInstance.IRealtime` API ref](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.GeneratorInstance.IRealtime.html): *"implementations can annotate this with `Unity.Burst.BurstCompileAttribute` to have it compiled with Burst"* — Burst is a performance optimization, not a hard requirement. We ship the realtime struct without `[BurstCompile]` to keep `com.unity.burst` out of `package.json` dependencies (one fewer transitive package for consumers), with a TODO to add the attribute behind an optional `BURST` define if measurements ever require it. The struct shape stays Burst-compatible (value-type, no managed refs) so the toggle is one-line in the future.
+- **Coexistence with `AudioSource.clip`.** When `audioSource.generator` is set, does `audioSource.clip` get ignored or do they layer? The user's supplied AudioSource may have a clip assigned — does setting the generator override or coexist? Settle empirically in step 1's characterization test (snapshot the user's `clip` regardless — that's our existing pattern — and verify the generator takes priority during `Play()`).
+- **Drain-callback bridging.** Our existing `IAudioOutputEngine.Start(FormatConfig, Func<float[], int> drainCallback)` takes a managed `Func<float[], int>`. A `[BurstCompile]`'d `IRealtime` struct couldn't capture a managed delegate, but since we're shipping un-Bursted (above), the struct *can* hold a managed reference — to the SPSC ring (step 2) at minimum, possibly the delegate itself. Cleanest shape: the struct reads from the shared ring directly; the control side wires the producer into the ring at `Start`. Locked in during step 3.
+- **`ControlContext.builtIn` vs custom contexts.** Manual example uses `ControlContext.builtIn` everywhere; the [`AllocateGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.ControlContext.AllocateGenerator.html) ref mentions creating contexts "purely in code." We'll use `builtIn` (it's the AudioSource-integrated context — the only one that makes sense for our supplied-source ergonomics).
 
-Unity's WebGL audio backend doesn't expose a scriptable pipeline (per the writeup at [`Docs~/unity-issues/webgl-scriptable-audio-pipeline.md`](../unity-issues/webgl-scriptable-audio-pipeline.md)). `AudioClip.PCMReaderCallback`, `OnAudioFilterRead`, `AudioRenderer`, `AudioListener.GetOutputData` are all unsupported there. The generator surface almost certainly falls in the same bucket — it's a FMOD-side concept, and WebGL uses Web Audio.
+### Carried forward to step 1 as empirical sanity checks
 
-**WebGL stays on the existing `web-audio-sink.ts` path.** Step 0 verifies this assumption (Unity 6.3 release notes search + a WebGL build of a minimal generator). If it's miraculously supported, that's a follow-up plan; not blocking this one.
+The step 0 plan listed a unity-mcp-driven 20-line MonoBehaviour probe as a belt-and-braces check that the docs match reality. With unity-mcp currently revoked in this environment, those sanity checks are folded into step 1's characterization test (`UnityGeneratorAudioOutputEngineCharacterizationTest`) — it already builds a minimal `IAudioGenerator`+`IRealtime` and runs it in PlayMode, which is the same verification at a slightly higher tier. Specifically: confirm `audioSource.generator = component` assignment binds (not just inspector), confirm `Process` fires after `audioSource.Play()`, confirm clip-vs-generator coexistence.
 
-If unsupported: the SDK ships two output engines, gated by `#if UNITY_WEBGL && !UNITY_EDITOR` (or the equivalent preprocessor pattern already used in [`UnityAudioSourceOutput.cs`](../../Runtime/Native/UnityAudioSourceOutput.cs)). Same shape as today's split.
+## WebGL — confirmed out of reach in 6.3
+
+Unity's WebGL audio backend doesn't expose a scriptable pipeline (per the writeup at [`Docs~/unity-issues/webgl-scriptable-audio-pipeline.md`](../unity-issues/webgl-scriptable-audio-pipeline.md)). `AudioClip.PCMReaderCallback`, `OnAudioFilterRead`, `AudioRenderer`, `AudioListener.GetOutputData` are all unsupported there. The scriptable-processor surface falls in the same bucket — it's a FMOD-side concept, and WebGL uses Web Audio.
+
+**Confirmed in step 0** via Unity's [audio-team Q3 2025 status update](https://discussions.unity.com/t/audio-status-update-q3-2025/1681867):
+
+> Scriptable Processors don't work on WebGL. We are investigating how to achieve feature parity, but it's a larger body of work.
+
+**WebGL stays on the existing `web-audio-sink.ts` path.** The SDK ships two output engines, gated by `#if UNITY_WEBGL && !UNITY_EDITOR` (or the equivalent preprocessor pattern already used in [`UnityAudioSourceOutput.cs`](../../Runtime/Native/UnityAudioSourceOutput.cs)). Same shape as today's split. If Unity ships scriptable processors on WebGL in a future LTS, that's a follow-up plan; not blocking this one.
 
 ---
 
@@ -93,14 +101,14 @@ If unsupported: the SDK ships two output engines, gated by `#if UNITY_WEBGL && !
 
 ### Step 0 — Floor bump + scope verification
 
-- [ ] Update [`README.md`](../../README.md) min-version line
-- [ ] Update [`COMPATIBILITY.md`](../../COMPATIBILITY.md) Unity version section (drop the obsolete 2023.1 framing; add Unity 6.3 rationale + audio-generator link)
-- [ ] Update [`package.json`](../../package.json) `unity` field (`6000.0` → `6000.3`)
-- [ ] Add `[Unreleased]` entry to [`CHANGELOG.md`](../../CHANGELOG.md) for the breaking floor bump
-- [ ] Check CI workflows under `.github/workflows/` for any pinned Unity version; bump if needed
-- [ ] Verify WebGL doesn't support `IAudioGenerator` (release notes search + minimal WebGL build attempt). Document the finding in this plan
-- [ ] Verify `[BurstCompile]` is optional vs required for `GeneratorInstance.IRealtime`. If required, add `com.unity.burst` as a `package.json` dependency
-- [ ] Confirm `AudioSource.generator` binding mechanism (set via property assignment, picker, or inspector?). Probe via unity-mcp using a 20-line MonoBehaviour driver from the [example](https://docs.unity3d.com/6000.3/Documentation/Manual/audio-scriptable-processors-example-creating-a-generator.html)
+- [x] Update [`README.md`](../../README.md) min-version line
+- [x] Update [`COMPATIBILITY.md`](../../COMPATIBILITY.md) Unity version section (drop the obsolete 2023.1 framing; add Unity 6.3 rationale + audio-generator link)
+- [x] Update [`package.json`](../../package.json) `unity` field (`6000.0` → `6000.3`)
+- [x] Add `[Unreleased]` entry to [`CHANGELOG.md`](../../CHANGELOG.md) for the breaking floor bump
+- [x] Check CI workflows under `.github/workflows/` for any pinned Unity version; bump if needed — already pinned to `6000.3.6f1` in both `unity-tests.yml` and `integration.yml`; no change needed
+- [x] Verify WebGL doesn't support `IAudioGenerator` — **confirmed unsupported** per Unity audio-team [Q3 2025 status update](https://discussions.unity.com/t/audio-status-update-q3-2025/1681867) ("Scriptable Processors don't work on WebGL"). WebGL stays on `web-audio-sink.ts`; the SDK ships two engines gated by preprocessor (same shape as today's split)
+- [x] Verify `[BurstCompile]` is optional vs required for `GeneratorInstance.IRealtime` — **confirmed optional** per [`GeneratorInstance.IRealtime`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.GeneratorInstance.IRealtime.html) docs ("implementations *can* annotate this with `Unity.Burst.BurstCompileAttribute`"). We ship without `com.unity.burst` as a hard dep; keep the struct Burst-compatible so it's a one-line toggle later
+- [x] Confirm `AudioSource.generator` binding mechanism — **confirmed public settable property** per [`AudioSource.generator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/AudioSource-generator.html) (`public Audio.IAudioGenerator generator { get; set; }`). Runtime `audioSource.generator = component` assignment is supported alongside the inspector picker. Empirical PlayMode confirmation deferred to step 1's characterization test (unity-mcp connection was revoked during this session, so the docs-only confirmation stands; step 1 is the belt-and-braces check)
 
 ### Step 1 — Characterization test (PlayMode)
 

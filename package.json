@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "displayName": "ElevenAgents",
   "description": "AI voice agents from ElevenLabs",
-  "unity": "6000.0",
+  "unity": "6000.3",
   "changelogUrl": "https://github.com/elevenlabs/unity/blob/main/CHANGELOG.md",
   "documentationUrl": "https://github.com/elevenlabs/unity#readme",
   "licensesUrl": "https://github.com/elevenlabs/unity/blob/main/LICENSE",

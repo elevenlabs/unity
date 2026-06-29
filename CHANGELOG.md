@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Minimum Unity version bumped from `6000.0` to `6000.3` (Unity 6.3 LTS). Required for the new native audio output engine built on [`Audio.IAudioGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.IAudioGenerator.html) / [`Audio.GeneratorInstance`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.GeneratorInstance.html), which eliminates the streaming-`AudioClip` pre-fill latency that older Unity versions imposed structurally. Unity 6.3 LTS is supported through December 2027.
+
 ## [0.1.0] - Unreleased
 
 ### Added

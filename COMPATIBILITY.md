@@ -4,9 +4,13 @@ Hard requirements for using the ElevenAgents SDK in a Unity project.
 
 ## Unity version
 
-**Unity 2023.1 or later** (Unity 6 LTS 6000.3.6f1 tested).
+**Unity 6.3 LTS (6000.3.0f1) or later** (tested against `6000.3.6f1`).
 
-The async bridge API uses Unity's [`Awaitable` / `AwaitableCompletionSource<T>`](https://docs.unity3d.com/2023.1/Documentation/ScriptReference/Awaitable.html), which was introduced in Unity 2023.1.
+### Why Unity 6.3?
+
+The SDK's native audio output engine is built on Unity 6.3's scriptable-audio surface — [`Audio.IAudioGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.IAudioGenerator.html) + [`Audio.GeneratorInstance`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.GeneratorInstance.html). This eliminates a structural ~800 ms pre-fill latency we used to work around with streaming `AudioClip`s (back-story: [`Docs~/unity-issues/streaming-audioclip-prefill-depth.md`](Docs~/unity-issues/streaming-audioclip-prefill-depth.md)) and gives us first-party audio-thread safety via Burst-compileable realtime structs. Unity 6.3 LTS shipped on 2025-12-04 with support through December 2027.
+
+The async bridge API also uses Unity's [`Awaitable` / `AwaitableCompletionSource<T>`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Awaitable.html), which Unity 6.3 includes by virtue of its 2023.1+ scripting baseline.
 
 ## API compatibility level
 

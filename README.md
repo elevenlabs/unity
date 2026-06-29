@@ -4,7 +4,7 @@ The ElevenAgents SDK for Unity.
 
 ## Requirements
 
-- Unity 2023.1 or later (Unity 6 LTS recommended)
+- Unity 6.3 LTS or later (6000.3.0f1+)
 - Player Settings → Player → Other Settings → **Api Compatibility Level** = .NET Standard 2.1 or higher
 
 ### Additional WebGL requirements
