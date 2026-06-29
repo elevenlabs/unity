@@ -165,10 +165,10 @@ New files under `Runtime/Native/`:
 
 Supplied-source ergonomics: add `AgentAudioGeneratorComponent` as a sibling component to the user's supplied AudioSource. Bind via `audioSource.generator = component`. Capture pre-session `generator` value for restoration on `Dispose` (same snapshot/restore pattern as today's engine for `clip`/`loop`/`volume`).
 
-- [ ] Engine class with all `IAudioOutputEngine` methods
-- [ ] Generator MonoBehaviour wires `IAudioGenerator` correctly
-- [ ] Realtime + Control structs Burst-compile (or build clean without Burst per step 0 finding)
-- [ ] Owned-host + supplied-source paths both compile and behave (manually validated)
+- [x] Engine class with all `IAudioOutputEngine` methods ([`Runtime/Native/UnityGeneratorAudioOutputEngine.cs`](../../Runtime/Native/UnityGeneratorAudioOutputEngine.cs)) — same constructor/lifecycle as [`UnityAudioOutputEngine`](../../Runtime/Native/UnityAudioOutputEngine.cs) plus `generator` field added to the supplied-source snapshot set
+- [x] Generator MonoBehaviour wires `IAudioGenerator` correctly ([`Runtime/Native/AgentAudioGeneratorComponent.cs`](../../Runtime/Native/AgentAudioGeneratorComponent.cs)) — `CreateInstance` pairs `AgentAudioRealtime` + `AgentAudioControl` via `ControlContext.AllocateGenerator`; co-located in the same file as `AgentAudioGeneratorBridge` (heap-allocated shared state)
+- [x] Realtime + Control structs build clean without Burst ([`Runtime/Native/AgentAudioRealtime.cs`](../../Runtime/Native/AgentAudioRealtime.cs), [`Runtime/Native/AgentAudioControl.cs`](../../Runtime/Native/AgentAudioControl.cs)) — `[BurstCompile]` left off per step 0's finding. Unity's `IControl<TRealtime>` constraint is `unmanaged`, which forbids inline managed refs in the struct, so the structs hold an `int` handle and resolve the bridge via `AgentAudioGeneratorBridge.LookupByHandle` (lock-free `ConcurrentDictionary` read on the audio thread). Promoting to `[BurstCompile]` later is still a one-line flip since the struct shape stays value-typed
+- [x] Owned-host + supplied-source paths both compile clean and the existing 440-test Edit-Mode suite still passes (`pnpm --dir TestProject run test`) — step 6 will swap production wiring; step 4 re-runs the fake-driven suite against the new engine via constructor injection for behavioural validation
 
 ### Step 4 — Re-run Fake-driven test suite
 
