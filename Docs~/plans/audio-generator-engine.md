@@ -151,8 +151,8 @@ Standalone helper at `Runtime/Native/AudioPcmRing.cs` (or extend the existing ri
 - Lock-free using atomic read/write indices (`Interlocked.Read` / `Interlocked.Exchange` if `NativeArray<long>` for the indices)
 - Edit-Mode unit tests at `Tests/Editor/Native/AudioPcmRingTests.cs`: empty read, full write overflow, cross-boundary read/write, producer/consumer race smoke
 
-- [ ] Ring implementation
-- [ ] Unit tests cover empty/full/boundary/race cases
+- [x] Ring implementation ([`Runtime/Native/AudioPcmRing.cs`](../../Runtime/Native/AudioPcmRing.cs)) — `NativeArray<float>`-backed SPSC ring, drop-on-overflow producer, non-blocking consumer, `Interlocked.Read`/`Exchange` on monotonic `long` indices (64-bit atomicity across 32-bit targets)
+- [x] Unit tests cover empty/full/boundary/race cases ([`Tests/Editor/Native/AudioPcmRingTests.cs`](../../Tests/Editor/Native/AudioPcmRingTests.cs)) — 12 tests, all green via `pnpm --dir TestProject run test` (440/440 passing). Race smoke streams a monotonic counter through producer/consumer threads for ~1 s and asserts the consumer received the full produced prefix in order with no gaps
 
 ### Step 3 — `UnityGeneratorAudioOutputEngine : IAudioOutputEngine` + companion structs
 
