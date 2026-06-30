@@ -1,5 +1,7 @@
 # ElevenAgents Unity SDK
 
+> [!CAUTION] ⚠️ **Early-stage SDK.** This package is under active development and APIs may change without notice. If you hit a bug or rough edge, please [open a GitHub issue](https://github.com/elevenlabs/unity/issues/new) - your reports directly shape what we fix next.
+
 Drop ElevenLabs voice agents into a Unity scene. Walk up to a cube, it greets you in character; walk out, the session ends — all driven by the same `Conversation` API on standalone, mobile, the Editor, and WebGL.
 
 <!-- Landing media: 30s screen recording of the GettingStarted sample (walk up → greet → walk out, with audio). Tracked separately; drop the file in here once recorded. -->
@@ -22,10 +24,10 @@ The **[Getting Started walkthrough](./Docs~/GETTING_STARTED.md)** is the on-ramp
 
 Import via **Window → Package Manager → ElevenAgents → Samples**.
 
-| Sample | What it shows |
-| --- | --- |
-| **[GettingStarted](./Samples~/GettingStarted/README.md)** | Walk-up-and-talk demo: trigger-based session lifecycle, per-instance dynamic variables, spatial audio, and a volume-driven bob. This is the headline. |
-| **[QuickStart](./Samples~/QuickStart/README.md)** | Smallest possible smoke test — one GameObject, one MonoBehaviour, transcript via `OnGUI`. Use when you want the API surface without any scene dressing. |
+| Sample                                                    | What it shows                                                                                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[GettingStarted](./Samples~/GettingStarted/README.md)** | Walk-up-and-talk demo: trigger-based session lifecycle, per-instance dynamic variables, spatial audio, and a volume-driven bob. This is the headline.   |
+| **[QuickStart](./Samples~/QuickStart/README.md)**         | Smallest possible smoke test — one GameObject, one MonoBehaviour, transcript via `OnGUI`. Use when you want the API surface without any scene dressing. |
 
 ## Documentation
 
