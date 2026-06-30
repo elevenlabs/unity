@@ -32,9 +32,12 @@ components and forward the values from the existing event handlers.
 
 ## Setup
 
-1. **Import the sample** via Window → Package Manager → ElevenAgents →
-   Samples → QuickStart → Import. The files land under
-   `Assets/Samples/ElevenAgents/<version>/QuickStart/`.
+Assumes the SDK is already installed in a Unity 6.3 LTS project — see the
+[main README](../../README.md#install) for the one-line git URL install.
+
+1. **Import the sample** via Window → Package Manager → ElevenAgents (in the
+   left-hand package list) → Samples → QuickStart → Import. The files land
+   under `Assets/Samples/ElevenAgents/<version>/QuickStart/`.
 
 2. **Create your config asset**:
    - Right-click in the Project view → Create → ElevenLabs → Samples →
