@@ -119,7 +119,7 @@ New file `Runtime/Native/UnityFilterAudioOutputEngine.cs`. Mirrors [`UnityAudioO
 
 ### Step 4 — Re-run Fake-driven test suite against the new engine
 
-The `IAudioOutputEngine` seam is implementation-agnostic; the existing Fake-driven tests under `Tests/Editor/Native/UnityAudioSourceOutputTests.cs` should pass without modification. The two `[Ignore]`d regression tests from [`audio-output-testability.md`](audio-output-testability.md) likely also pass — pre-fill drops from 12,800 samples to ~256, well within their existing wall-clock window.
+The `IAudioOutputEngine` seam is implementation-agnostic; the existing Fake-driven tests under `Tests/Editor/Native/UnityAudioSourceOutputTests.cs` should pass without modification. The two previously-`[Ignore]`d regression tests likely also pass — pre-fill drops from 12,800 samples to ~256, well within their existing wall-clock window.
 
 If anything fails: either the Fake's defaults need a parallel `FilterFakeAudioOutputEngine` (separate file, same pattern, calibrated to step 1's findings) OR the engine's behaviour diverges from the contract in a way that exposes a real bug. Diagnose and decide.
 

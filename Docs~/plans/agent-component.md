@@ -422,7 +422,7 @@ The component is the spine; small companions show how to wire it. These ship as 
 3. **Push-to-Talk** — button-driven session, mic muted unless held. Demonstrates `ElevenLabsAgentPushToTalk`.
 4. **Client tools** — agent controls a scene light via a `SimpleToolBinding`; the same scene shows a typed `RegisterTool<>` for a more complex tool with a typed reply.
 5. **Microphone visualiser** — `OnInputVolumeChanged` drives a UI bar.
-6. **Dynamic variables** — three `ElevenLabsAgent`s in one scene, same agent id, different dynamic variables (the original `TalkingBox` motivation from [`dynamic-variables.md`](./dynamic-variables.md)).
+6. **Dynamic variables** — three `ElevenLabsAgent`s in one scene, same agent id, different dynamic variables (the original `TalkingBox` motivation for the dynamic-variables feature).
 
 Each sample ships as a scaffold script per [Sample scenes become scaffold scripts](#sample-scenes-become-scaffold-scripts), not as a committed `.unity` file. The Getting-Started repo can then upgrade `TalkingBox.cs` to use the component and shrink to ~30 lines (most of which is the pulse animation, which doesn't belong in the SDK).
 

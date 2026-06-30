@@ -2,15 +2,12 @@
 
 ## Context
 
-[`plan-b.md`](./plan-b.md) covers the C#/JS architectural pivot but says
-nothing about how the SDK is shipped to consumers — it only notes that "the
-RFC's distribution plan … stays the same." That distribution plan lives in
-[`initial-rfc.md`](./initial-rfc.md) (the "Distribution" section), and so
-far the only execution against it is **HP.8** in
-[`generic-bridge-primitives.md`](./generic-bridge-primitives.md): the
-`package.json` `"files"` allowlist that scopes the npm-pack payload to
-`Runtime/ Editor/ Tests/ Plugins/ CONTRIBUTING.md` (npm auto-includes
-`package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`).
+The bridge architecture work landed without addressing how the SDK is
+shipped to consumers. The RFC's preferred distribution sequence (git URL →
+scoped registry → Asset Store) and the existing `package.json` `"files"`
+allowlist (scopes the npm-pack payload to `Runtime/ Editor/ Tests/
+Plugins/ CONTRIBUTING.md`; npm auto-includes `package.json`, `README.md`,
+`CHANGELOG.md`, `LICENSE`) are the inputs to this plan.
 
 This plan fills the gap. It captures the three distribution channels the
 RFC ranks (git URL → scoped registry → Asset Store), the

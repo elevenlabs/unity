@@ -14,7 +14,7 @@ Transport-layer failures on native builds (mid-session WebSocket close, DNS erro
 
 ## `ErrorOccurred` event
 
-`Conversation.ErrorOccurred` is the catch-all signal for errors that surface **after** `StartSessionAsync` has returned. The current payload is a `string` (human-readable message); it will widen to a structured `ErrorArgs` record once the upstream `error` wire frame stabilises (tracked in [`Docs~/plans/method-event-parity-investigation.md`](./plans/method-event-parity-investigation.md#resolved-gap-error-type-hierarchy)).
+`Conversation.ErrorOccurred` is the catch-all signal for errors that surface **after** `StartSessionAsync` has returned. The current payload is a `string` (human-readable message); it will widen to a structured `ErrorArgs` record once the upstream `error` wire frame stabilises (tracked in [#11](https://github.com/elevenlabs/unity/issues/11)).
 
 It fires for:
 

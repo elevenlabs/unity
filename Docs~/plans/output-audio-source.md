@@ -28,12 +28,12 @@ The principle, stated positively: **a Unity dev should never have to pick a diff
 
 Two facts shape the rewrite:
 
-1. **The `@elevenlabs/client` SDK already accepts custom output sinks.** [`attachConnectionToOutput`](../../Bridge~/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.d.ts) only requires `{ playAudio(chunk: ArrayBuffer): void }` — no upstream changes are needed to intercept PCM. The "needs upstream PCM intercept hook" claim in [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) is stale and should be patched as part of executing this plan. (`initial-rfc.md` is a historical RFC and is not edited.)
+1. **The `@elevenlabs/client` SDK already accepts custom output sinks.** [`attachConnectionToOutput`](../../Bridge~/node_modules/@elevenlabs/client/dist/utils/attachConnectionToOutput.d.ts) only requires `{ playAudio(chunk: ArrayBuffer): void }` — no upstream changes are needed to intercept PCM. The "needs upstream PCM intercept hook" claim in [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) is stale and should be patched as part of executing this plan.
 2. **`AudioClip.PCMReaderCallback` is not supported on WebGL.** Per [Unity's WebGL audio docs](https://docs.unity3d.com/Manual/webgl-audio.html) the "scriptable audio pipeline is not supported"; `OnAudioFilterRead` is explicitly unsupported too; `AudioRenderer` is similarly absent. This rules out the obvious-looking simplification of reusing `UnityAudioSourceOutput` on WebGL, and means that **any Unity audio API that reads or emits scripted samples (`AudioSource.GetOutputData`, `AudioListener.GetOutputData`, `PCMReaderCallback`, `OnAudioFilterRead`) silently returns nothing on WebGL when applied to an SDK-supplied source.** The platform-level constraint is captured in [`Docs~/unity-issues/webgl-scriptable-audio-pipeline.md`](../unity-issues/webgl-scriptable-audio-pipeline.md) so the next dev who hits it doesn't have to retrace.
 
 The path therefore: keep `UnityAudioSourceOutput` for native, build a Web Audio-based emulation layer on WebGL that exposes the *same* `ConversationOptions.OutputAudioSource` API. Users get a coherent cross-platform contract; FMOD-specific concepts (mixer groups, reverb zones, custom rolloff curves) degrade gracefully on WebGL with a one-time warning.
 
-WebRTC-on-WebGL remains v0.3 work (LiveKit owns the audio pipeline via remote `AudioTrack` rather than `audio` events — a `WebRTCAudioAdapter` is genuinely needed there; see [`initial-rfc.md`](./initial-rfc.md) §132).
+WebRTC-on-WebGL remains v0.3 work (LiveKit owns the audio pipeline via remote `AudioTrack` rather than `audio` events — a `WebRTCAudioAdapter` is genuinely needed there).
 
 ### Corollary: don't use raw Unity audio APIs against the supplied `AudioSource`
 
@@ -320,12 +320,12 @@ Extend with an optional second variant that supplies a pre-built `AudioSource` a
 - A note in `BridgedWebRTCConnection.GetCoupledOutput()` that `OutputAudioSource` is intentionally ignored on the WebRTC arm until v0.3.
 - One-time warnings for FMOD-only properties on the WebGL path.
 - Test coverage across native Edit Mode, Bridge~ Vitest, C# Edit Mode, and `IntegrationTests~` browser harness.
-- [x] Patch [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) to remove the stale "needs upstream PCM intercept hook" framing — the upstream surface always supported a custom `playAudio` sink. (`initial-rfc.md` left as-is — historical RFC.) *Done 2026-06-25 — section rewritten around the now-shipped Web Audio graph; the prior "Unity-routed mode (v0.3)" framing is gone, WebRTC-on-WebGL remains the lone v0.3 audio item.*
+- [x] Patch [`ARCHITECTURE.md`](../ARCHITECTURE.md#audio-routing) to remove the stale "needs upstream PCM intercept hook" framing — the upstream surface always supported a custom `playAudio` sink. *Done 2026-06-25 — section rewritten around the now-shipped Web Audio graph; the prior "Unity-routed mode (v0.3)" framing is gone, WebRTC-on-WebGL remains the lone v0.3 audio item.*
 - [x] Document the WebGL `AudioSource` property fidelity gaps in [`COMPATIBILITY.md`](../../COMPATIBILITY.md) under a new "WebGL audio output limitations" subsection: which FMOD-only properties are silently ignored vs. warn-once, and the Inverse-rolloff → Logarithmic fallback. Cross-link from the WebGL output controller's XML docs and from `ConversationOptions.OutputAudioSource`'s `<remarks>`. *Done 2026-06-25 — new section added to [`COMPATIBILITY.md`](../../COMPATIBILITY.md#webgl-audio-output-limitations) with the fidelity matrix + cross-platform read-API table; `ConversationOptions.OutputAudioSource` XML doc updated to reflect that WebGL has landed and to cite the new section; the `WebAudioBackedOutput` XML doc's pre-existing reference to it now resolves.*
 
 ### Out of scope (deferred)
 
-- WebRTC-on-WebGL — feeding the supplied `AudioSource` from a LiveKit `RemoteAudioTrack`. Requires the `WebRTCAudioAdapter` work described in [`initial-rfc.md`](./initial-rfc.md) §132. v0.3.
+- WebRTC-on-WebGL — feeding the supplied `AudioSource` from a LiveKit `RemoteAudioTrack`. Requires a `WebRTCAudioAdapter`. v0.3.
 - Microphone-side equivalent (`InputAudioSource` / route mic capture *from* a Unity `AudioSource`). Different design (Unity microphone capture already happens on the C# side), parked until there's demand.
 - Full AudioMixer parity on WebGL. Would require a Web Audio mixer-group emulation layer with limited demand evidence. v0.3+ if at all.
 - Custom rolloff `AnimationCurve` support on WebGL. Doable by sampling the curve C#-side and pushing a LUT to a custom worklet processor; deferred until a user asks.

@@ -138,10 +138,9 @@ handles across the boundary.
 - **`JsFunction`** — C# handle to a remote JS function (typically returned from a `JsObject` method, e.g. a `removeListener` returned by `addListener`); call sync or async, dispose.
 - **`BridgeCallback`** — C# delegate exposed to JS as a callable. Wrap a delegate, pass it as a method argument; JS sees a plain function. When JS calls it, SendMessage routes back to the bridge and the wrapped delegate runs on Unity's main thread.
 
-See [`plans/generic-bridge-primitives.md`](./plans/generic-bridge-primitives.md)
-for the detailed design and protocol. Adding a method to the JS SDK requires
-**no new bridge code** — the C# façade just calls a new method name through
-the existing `JsObject` primitive.
+Adding a method to the JS SDK requires **no new bridge code** — the C#
+façade just calls a new method name through the existing `JsObject`
+primitive.
 
 ## Audio routing
 
@@ -192,8 +191,7 @@ the full design and rationale live in
 WebRTC-on-WebGL is the one path still outstanding: LiveKit owns the audio
 pipeline via a remote `AudioTrack`, so feeding the supplied `AudioSource`
 needs a Unity-specific `WebRTCAudioAdapter` that exposes decoded PCM frames
-to the same Web Audio sink. Tracked under v0.3 in
-[`plans/initial-rfc.md`](./plans/initial-rfc.md) §132.
+to the same Web Audio sink. Tracked under v0.3.
 
 Latency cost on WebGL: zero on the audio path, ~1 Unity frame on
 control-plane operations and property mirroring (acceptable — network

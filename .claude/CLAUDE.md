@@ -121,10 +121,7 @@ for the full setup and CI provisioning notes.
 Unity **6000.3.6f1** (Unity 6 LTS) is installed locally at
 `/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app`. The embedded host
 project lives at `TestProject/` at the repo root (non-tilde name — Unity
-batchmode rejects `~`-suffixed project paths; see "Phase 3 prelude — Unity
-host project" in
-[`Docs~/plans/generic-bridge-primitives.md`](../Docs~/plans/generic-bridge-primitives.md)
-for the full design log).
+batchmode rejects `~`-suffixed project paths).
 
 Open via Unity Hub (point it at `TestProject/`) or headless:
 
@@ -186,9 +183,8 @@ pnpm --dir TestProject run test
 
 After that command, `git status` will show the new `.meta` files as
 untracked. Commit them alongside their source files for any path covered by
-the package payload (see HP.9 in
-[`Docs~/plans/generic-bridge-primitives.md`](../Docs~/plans/generic-bridge-primitives.md)
-for which `.meta` files are tracked vs. ignored).
+the package payload (see the top-level `.gitignore` for which paths are
+excluded).
 
 ## Language conventions
 
@@ -220,10 +216,8 @@ call `dynCall_<sig>(_EL_<Var>, ...)`. The Rolldown plugin
 [`Bridge~/build/substitute-make-dyncall.ts`](../Bridge~/build/substitute-make-dyncall.ts)
 rewrites those call sites to the `{{{ makeDynCall(...) }}}` macro at bundle
 time, so the committed `.jslib` files under `Plugins/WebGL/` only contain
-the non-deprecated form. Rationale and ground rules:
-[`Docs~/plans/dyncall-migration.md`](../Docs~/plans/dyncall-migration.md).
-The `verify:primitives` / `verify:connection` scripts will catch drift if
-someone bypasses the plugin.
+the non-deprecated form. The `verify:primitives` / `verify:connection`
+scripts will catch drift if someone bypasses the plugin.
 
 ## Project plans
 

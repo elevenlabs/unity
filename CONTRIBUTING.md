@@ -74,7 +74,7 @@ IntegrationTests~/  Vitest + Playwright tests that drive the two WebGL builds pr
                     TestProject/ from a headless Chromium. Runs entirely outside Unity.
 
 Docs~/            Design documents and RFCs. Read these before making architectural changes;
-                  Docs~/plans/plan-b.md is the current architectural reference.
+                  Docs~/ARCHITECTURE.md is the current architectural reference.
 ```
 
 ## C# tooling
