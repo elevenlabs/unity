@@ -474,14 +474,23 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
-        public void GetVolume_AudibleHead_ClampsAtWritePos_HoldsRmsAtTailDuringUnderrun()
+        public void GetVolume_AudibleHead_CatchesUpToWritePos_ReturnsZeroAndResetsAnchor()
         {
-            // Once the wall clock has elapsed more samples than have been
-            // queued, audibleRingPos should clamp at _writePosLinear — the
-            // RMS window pins to the tail of buffered audio (the last
-            // samples that would have played) until a new chunk arrives.
-            // Without the clamp we'd sweep into zero-initialised ring slots
-            // (silence) past the queue.
+            // Once the wall clock has elapsed past every sample queued, the
+            // audible head has caught up to _writePosLinear — the speaker has
+            // finished real audio and is on silence. GetVolume must return 0
+            // (not pin RMS at the chunk tail like a clamp would) AND reset
+            // the audible-head anchor so the next turn's first real-sample
+            // drain in ReadFromRing re-stamps cleanly.
+            //
+            // Holding at the tail was the bug behind the "second-turn bob
+            // jumps to the new chunk's tail" PlayMode report: between
+            // organic turns (no Interrupt → no ClearRing) the anchor stayed
+            // pinned to turn 1's start, the clamp held RMS at the
+            // _writePosLinear edge, and turn 2's PushAudio just moved that
+            // edge forward by a whole chunk's worth — so the bob jumped
+            // straight to the unplayed tail instead of tracking the audible
+            // signal.
             int sampleRate = 16_000;
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate));
             long fakeNow = 2_000_000L;
@@ -492,18 +501,103 @@ namespace ElevenLabs.Native.Tests
             output.ReadFromRing(new float[1]); // tiny drain to stamp the anchor
 
             // Advance the fake clock by 10 seconds — far past whatever the
-            // ring has queued. Without clamping, audibleRingPos would walk
-            // off the end of the queued region.
+            // ring has queued. The audible head sweeps off the end and
+            // GetVolume reports silence + resets the anchor.
             fakeNow += (long)(10.0 * StopwatchFrequency);
             float rms = output.Test_ComputeWallClockRms();
 
-            // Should land at the tail of the loud chunk → near 1, not 0 or
-            // garbage. Window = [_writePosLinear - windowSamples, _writePosLinear)
-            // = [240, 320) — all LOUD.
-            Assert.Greater(
+            Assert.AreEqual(
+                0f,
                 rms,
+                1e-6,
+                "Audible head past _writePosLinear means the speaker is on silence "
+                    + $"— GetVolume must return 0, not pin RMS at the chunk tail ({rms})."
+            );
+            // Anchor reset is observable via the stampTicks==0 short-circuit:
+            // a subsequent call must also return 0 immediately, even if more
+            // wall-clock elapses, because there are no new real drains.
+            fakeNow += (long)(0.5 * StopwatchFrequency);
+            Assert.AreEqual(
+                0f,
+                output.Test_ComputeWallClockRms(),
+                1e-6,
+                "Anchor must have been reset on catch-up — subsequent GetVolume "
+                    + "calls during the silence gap should keep short-circuiting."
+            );
+        }
+
+        [Test]
+        public void GetVolume_OrganicTurnTransition_RestampsOnFirstDrainOfNextTurn()
+        {
+            // Regression for the second-turn-misalignment bug: with no
+            // Interrupt between turns (organic turn boundary — agent
+            // finishes turn 1, silence, then turn 2 begins), the audible-
+            // head anchor must reset so turn 2's first real-sample drain
+            // in ReadFromRing re-stamps with the current wall clock and
+            // ring position. Without the reset, the stale turn-1 anchor
+            // leaves the wall-clock model saturated past _writePosLinear,
+            // and turn 2's bob jumps to the new chunk's tail instead of
+            // sweeping from its head.
+            int sampleRate = 16_000;
+            var fake = new FakeAudioOutputEngine
+            {
+                SyncPrefillCallbackCount = 0,
+                OngoingCallbackBatchSize = 160, // 10 ms at 16 kHz
+                OngoingCallbackPeriodSeconds = 0.333,
+            };
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", sampleRate), fake);
+            long fakeNow = 7_000_000L;
+            output.TimestampProvider = () => fakeNow;
+
+            // Turn 1: push a LOUD chunk, fire one drain so the anchor stamps,
+            // and advance just enough wall-clock to sweep the audible head
+            // PAST the chunk tail. This mimics the natural end of turn 1 —
+            // ring fully consumed by the engine, no Interrupt called.
+            int turn1Samples = sampleRate * 40 / 1000; // 40 ms = 640
+            output.PushAudio(LittleEndianConstant(turn1Samples, short.MaxValue));
+            fake.Tick(0.333); // first real drain → stamps anchor at preDrainPos=0, t=fakeNow
+            fakeNow += (long)(1.0 * StopwatchFrequency); // wall clock past every queued sample
+
+            // GetVolume here returns 0 AND resets the anchor — this is the
+            // step that makes turn 2's first real drain re-stamp.
+            Assert.AreEqual(
+                0f,
+                output.Test_ComputeWallClockRms(),
+                1e-6,
+                "End of turn 1: audible head past _writePosLinear → bob drops to 0 "
+                    + "and the anchor resets so turn 2 can re-stamp."
+            );
+
+            // Silence gap between turns — additional wall-clock + a stray
+            // silence-only drain (the audio thread keeps firing). Neither
+            // should re-stamp because there are no real samples in the ring.
+            fakeNow += (long)(0.5 * StopwatchFrequency);
+            fake.Tick(0.333);
+
+            // Turn 2: push a LOUD chunk. The next real-sample drain must
+            // re-stamp the anchor with the current wall clock + current
+            // _readPosLinear (which sits at end-of-turn-1 since silence
+            // drains didn't advance it).
+            int turn2Samples = sampleRate * 100 / 1000; // 100 ms = 1,600
+            output.PushAudio(LittleEndianConstant(turn2Samples, short.MaxValue));
+            fake.Tick(0.333); // first real drain after the catch-up reset → re-stamps
+
+            // Advance 10 ms past the re-stamp → audibleRingPos sweeps 160
+            // samples into the turn-2 chunk → window lies inside the LOUD
+            // region → bob lights up. Without the catch-up reset this would
+            // still be saturated against the stale turn-1 anchor and pin RMS
+            // at the new chunk's tail (also LOUD here, but for the WRONG
+            // reason — the assertion below would pass even with the bug,
+            // which is why the resetting GetVolume call above is the
+            // load-bearing observation for this regression).
+            fakeNow += (long)(0.010 * StopwatchFrequency);
+            float rmsEarlyInTurn2 = output.Test_ComputeWallClockRms();
+            Assert.Greater(
+                rmsEarlyInTurn2,
                 0.9f,
-                $"Clamped RMS at queue tail should reflect the loud chunk ({rms})."
+                $"After the organic turn boundary, turn 2's first real drain must "
+                    + $"re-stamp the anchor so the bob tracks the audible head, not "
+                    + $"the stale turn-1 anchor's clamp ({rmsEarlyInTurn2})."
             );
         }
 

@@ -621,12 +621,25 @@ namespace ElevenLabs.Native
                     (elapsedTicks / StopwatchTicksPerSecond) * _format.SampleRate
                 );
                 long audibleRingPos = _playbackStartRingPos + elapsedSamples;
-                // Clamp at the write head — beyond that, no audio has been
-                // queued, so reading would sweep into zero-initialised ring
-                // slots (silence). Pinning at _writePosLinear keeps the RMS
-                // window at the tail of what's been buffered.
-                if (audibleRingPos > _writePosLinear)
-                    audibleRingPos = _writePosLinear;
+                // Audible head has caught up to (or passed) the last sample
+                // queued — the speaker has finished real audio and is on
+                // silence. Reset the anchor so the NEXT real-sample drain
+                // (i.e. the first chunk of the next turn) re-stamps with the
+                // current wall clock + read position, and short-circuit to 0
+                // rather than holding RMS at the tail of a chunk that's no
+                // longer audible. Without this, between organic turn
+                // boundaries (no Interrupt to call ClearRing) the anchor
+                // stays pinned to turn 1's start, the wall-clock has long
+                // since elapsed past every queued sample, and audibleRingPos
+                // clamps to _writePosLinear — making the bob jump to the
+                // tail of turn 2's pushed-but-not-yet-played samples instead
+                // of tracking what the speaker is actually playing.
+                if (audibleRingPos >= _writePosLinear)
+                {
+                    _playbackStartStampTicks = 0;
+                    _playbackStartRingPos = 0;
+                    return 0f;
+                }
                 long windowStart = audibleRingPos - windowSamples;
                 long minReadable = _writePosLinear - _ringCapacity;
                 if (minReadable < 0)
