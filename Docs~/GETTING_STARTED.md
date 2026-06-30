@@ -16,10 +16,15 @@ Both routes assume the [prereqs](#prereqs) below are in place.
 
 ## Prereqs
 
-1. **Unity 6.3 LTS or later** (6000.3.0f1+). The SDK uses scriptable-audio
-   APIs that landed in Unity 6.3 — earlier versions won't compile against it.
-   See [`COMPATIBILITY.md`](../COMPATIBILITY.md) for the full requirement
-   matrix.
+1. **Unity 6.3 LTS or later** (6000.3.0f1+), with a project open. The SDK
+   uses scriptable-audio APIs that landed in Unity 6.3 — earlier versions
+   won't compile against it. See [`COMPATIBILITY.md`](../COMPATIBILITY.md)
+   for the full requirement matrix.
+
+   If you don't already have one, create a fresh project from Unity Hub:
+   **New project → Universal 3D** (or any other 3D template) → Unity 6.3
+   LTS → **Create project**. The sample drops into an empty scene, so any
+   3D-capable template works.
 
 2. **A free ElevenLabs account.** Sign up at
    [elevenlabs.io](https://elevenlabs.io); the free tier includes enough
