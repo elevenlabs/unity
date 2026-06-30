@@ -1,6 +1,6 @@
 # QuickStart
 
-A minimal scene that opens an ElevenLabs conversational AI session, renders
+A minimal scene that opens an ElevenLabs voice agent session, renders
 the live transcript to a small UI, and closes cleanly on exit. Use this as the
 starting point for your own scene — it shows the smallest set of API calls
 needed to bring an agent into your game.
@@ -44,9 +44,13 @@ Assumes the SDK is already installed in a Unity 6.3 LTS project — see the
      QuickStart Config.
    - Move the asset into any folder named `Resources` somewhere under
      `Assets/` (e.g. `Assets/Resources/QuickStartConfig.asset`).
-   - Fill in `Agent Id` from your ElevenLabs dashboard. Leave `Signed Url`
-     blank for public agents; fill it in for private agents that require a
-     pre-signed URL.
+   - Fill in `Agent Id` — grab one from the
+     [ElevenLabs dashboard](https://elevenlabs.io/app/agents), or have
+     your AI coding assistant create one via the
+     [`agents` skill](https://github.com/elevenlabs/skills/tree/main/agents)
+     (`npx skills add elevenlabs/skills`). Leave `Signed Url` blank for
+     public agents; fill it in for private agents that require a pre-signed
+     URL.
 
 3. **Open the imported scene** (`QuickStart.unity`) and press Play. The
    scene contains a single GameObject named `QuickStart` carrying the

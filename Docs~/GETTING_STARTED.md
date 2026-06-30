@@ -25,9 +25,19 @@ Both routes assume the [prereqs](#prereqs) below are in place.
    [elevenlabs.io](https://elevenlabs.io); the free tier includes enough
    credit to run this walkthrough.
 
-3. **An agent.** In the ElevenLabs dashboard, go to **Conversational AI →
-   Agents → Create**. The defaults are fine for this walkthrough, with two
-   tweaks:
+3. **An agent.** Two ways to create one:
+
+   - **In the [ElevenLabs dashboard](https://elevenlabs.io/app/agents):**
+     go to **Agents → Create**. The defaults are fine.
+   - **From your AI coding assistant:** install the
+     [`agents` skill](https://github.com/elevenlabs/skills/tree/main/agents)
+     from [`elevenlabs/skills`](https://github.com/elevenlabs/skills)
+     (`npx skills add elevenlabs/skills`) and ask the assistant to create
+     one. This is the agentic route — useful when you want the assistant
+     to wire up system prompts, dynamic variables, or tools alongside the
+     Unity-side code.
+
+   Whichever route, the agent needs two tweaks for this walkthrough:
    - **Security → Authentication: off.** This walkthrough uses the public
      WebSocket transport, which doesn't sign URLs. Agents with auth on need
      `SignedUrl` instead and aren't covered here.

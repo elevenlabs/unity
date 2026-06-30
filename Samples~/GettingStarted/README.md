@@ -41,9 +41,13 @@ the end-to-end on-ramp (this sample is **Option A** there).
      Talking Box Agent Config.
    - Move the asset into any folder named `Resources` somewhere under
      `Assets/` (e.g. `Assets/Resources/TalkingBoxAgentConfig.asset`).
-   - Fill in `Agent Id` from your ElevenLabs dashboard. The agent must
-     have **authentication disabled** in its security settings for the
-     unsigned WebSocket transport to work.
+   - Fill in `Agent Id` — grab one from the
+     [ElevenLabs dashboard](https://elevenlabs.io/app/agents), or have
+     your AI coding assistant create one via the
+     [`agents` skill](https://github.com/elevenlabs/skills/tree/main/agents)
+     (`npx skills add elevenlabs/skills`). The agent must have
+     **authentication disabled** in its security settings for the unsigned
+     WebSocket transport to work.
    - To use the per-box `voiceIdOverride` field, the agent must also have
      **tts.voice_id overrides enabled** in the dashboard.
 

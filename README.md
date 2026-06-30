@@ -1,6 +1,6 @@
 # ElevenAgents Unity SDK
 
-Drop ElevenLabs conversational AI agents into a Unity scene. Walk up to a cube, it greets you in character; walk out, the session ends — all driven by the same `Conversation` API on standalone, mobile, the Editor, and WebGL.
+Drop ElevenLabs voice agents into a Unity scene. Walk up to a cube, it greets you in character; walk out, the session ends — all driven by the same `Conversation` API on standalone, mobile, the Editor, and WebGL.
 
 <!-- Landing media: 30s screen recording of the GettingStarted sample (walk up → greet → walk out, with audio). Tracked separately; drop the file in here once recorded. -->
 
