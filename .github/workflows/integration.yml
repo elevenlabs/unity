@@ -43,6 +43,10 @@ jobs:
             buildMethod: ElevenLabs.WebGL.Editor.HostBuild.BuildConversation
             outputPath: TestProject/Build/WebGLConversationSmoke
             artifactName: webgl-conversation-smoke-build
+          - name: conversation-spatial
+            buildMethod: ElevenLabs.WebGL.Editor.HostBuild.BuildConversationSpatial
+            outputPath: TestProject/Build/WebGLConversationSpatialSmoke
+            artifactName: webgl-conversation-spatial-smoke-build
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -121,6 +125,12 @@ jobs:
         with:
           name: webgl-conversation-smoke-build
           path: TestProject/Build/WebGLConversationSmoke
+
+      - name: Download conversation-spatial WebGL build
+        uses: actions/download-artifact@v7
+        with:
+          name: webgl-conversation-spatial-smoke-build
+          path: TestProject/Build/WebGLConversationSpatialSmoke
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
