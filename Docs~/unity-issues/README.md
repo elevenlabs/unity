@@ -27,6 +27,14 @@ See the "Reporting Unity issues" section of
   — UnityLinker silently drops package-internal `link.xml` files when
   the package is referenced as a local file-path package whose root is
   the embedded host project's parent.
+- [`microphone-no-voice-processing-toggle.md`](./microphone-no-voice-processing-toggle.md)
+  — `Microphone.Start` opens the mic device in the OS's default
+  capture role on every native platform, explicitly opting out of the
+  built-in voice-processing chain (AEC / NS / AGC) every mainstream
+  OS ships. Forces every Unity voice SDK — Photon Voice, Vivox,
+  Dissonance, this one — to ship a native plugin that re-implements
+  `Microphone.Start` against the OS-native APIs purely to flip a flag
+  Unity doesn't expose.
 - [`streaming-audioclip-prefill-depth.md`](./streaming-audioclip-prefill-depth.md)
   — `AudioClip.Create(stream=true, pcmreadercallback=…)` reserves
   ~800 ms of pre-fill ahead of the speaker (12,800 samples at 16 kHz
