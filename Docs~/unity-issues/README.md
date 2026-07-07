@@ -35,6 +35,12 @@ See the "Reporting Unity issues" section of
   Dissonance, this one — to ship a native plugin that re-implements
   `Microphone.Start` against the OS-native APIs purely to flip a flag
   Unity doesn't expose.
+- [`stale-dsp-rate-bluetooth-profile-change.md`](./stale-dsp-rate-bluetooth-profile-change.md)
+  — After a Bluetooth headset flips A2DP ↔ HFP (triggered by
+  `Microphone.Start` opening its mic), Unity's DSP can keep running at
+  the stale 16 kHz HFP rate while the device consumes at 44.1/48 kHz —
+  every sound plays ~3× fast/pitch-shifted until `AudioSettings.Reset`
+  or an editor restart.
 - [`streaming-audioclip-prefill-depth.md`](./streaming-audioclip-prefill-depth.md)
   — `AudioClip.Create(stream=true, pcmreadercallback=…)` reserves
   ~800 ms of pre-fill ahead of the speaker (12,800 samples at 16 kHz
