@@ -414,6 +414,88 @@ namespace ElevenLabs.Native.Tests
             AssertSawtoothStream(secondTurn, startIndex: secondTurnStart, expectedCount: 3200);
         }
 
+        // Interrupt fade ----------------------------------------------------
+        //
+        // The fade path (Play Mode in production; driven here through the
+        // NextFrameAsyncProvider / UnscaledTimeProvider seams) owns the
+        // post-fade ClearRing. These tests pin the two contracts around
+        // that ownership: audio condemned by an interrupt must never play
+        // once new audio arrives (even though cancelling the fade skips
+        // its ClearRing), and an undisturbed fade must flush and restore
+        // volume on its own.
+
+        [Test]
+        public void PushAudio_DuringInterruptFade_FlushesInterruptedAudioBeforeNewChunk()
+        {
+            var engine = new FakeAudioOutputEngine { SyncPrefillCallbackCount = 0 };
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16000), engine);
+            output.NextFrameAsyncProvider = MakeFramePump(new Queue<AwaitableCompletionSource>());
+
+            // Agent utterance, partially played when the user barges in.
+            output.PushAudio(SawtoothChunk(0, 1600));
+            float[] dest = new float[256];
+            Assert.AreEqual(256, output.ReadFromRing(dest));
+
+            output.Interrupt(); // default 2000 ms fade via the frame seam
+            Assert.Greater(
+                output.Test_AvailableSamples,
+                0,
+                "Mid-fade, the condemned remainder is still queued (it fades out audibly)."
+            );
+
+            // The agent's next reply arrives before the fade completes.
+            // It must not queue behind the interrupted utterance's
+            // remainder — and that remainder must never play at the
+            // restored full volume.
+            const long secondTurnStart = 105_000;
+            output.PushAudio(SawtoothChunk(secondTurnStart, 800));
+            List<float> drained = DrainAll(output);
+            AssertSawtoothStream(drained, startIndex: secondTurnStart, expectedCount: 800);
+        }
+
+        [Test]
+        public void InterruptFade_RunsToCompletion_ClearsRingAndRestoresUserVolume()
+        {
+            var engine = new FakeAudioOutputEngine { SyncPrefillCallbackCount = 0 };
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16000), engine);
+            var framePump = new Queue<AwaitableCompletionSource>();
+            output.NextFrameAsyncProvider = MakeFramePump(framePump);
+            float now = 0f;
+            output.UnscaledTimeProvider = () => now;
+
+            output.SetVolume(0.8f);
+            output.PushAudio(SawtoothChunk(0, 1600));
+            output.Interrupt(); // 2000 ms fade
+
+            // Mid-fade: volume lerps toward zero, condemned audio still
+            // queued (it's what the fade plays out).
+            now = 1f;
+            framePump.Dequeue().SetResult();
+            Assert.AreEqual(0.4f, engine.Volume, 1e-3);
+            Assert.Greater(output.Test_AvailableSamples, 0);
+
+            // Fade end: ring flushed, user volume restored.
+            now = 2.1f;
+            framePump.Dequeue().SetResult();
+            Assert.AreEqual(0, output.Test_AvailableSamples);
+            Assert.AreEqual(0.8f, engine.Volume, 1e-3);
+        }
+
+        // Frame-ticker seam for the fade tests: each fade-loop iteration
+        // enqueues a fresh manually-completed source; cancelling the fade
+        // token cancels the pending frame awaitable the way the real
+        // Awaitable.NextFrameAsync(token) does.
+        private static Func<System.Threading.CancellationToken, Awaitable> MakeFramePump(
+            Queue<AwaitableCompletionSource> pump
+        ) =>
+            token =>
+            {
+                var source = new AwaitableCompletionSource();
+                token.Register(() => source.TrySetCanceled());
+                pump.Enqueue(source);
+                return source.Awaitable;
+            };
+
         // Interrupt --------------------------------------------------------
 
         [Test]

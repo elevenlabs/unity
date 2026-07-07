@@ -164,8 +164,29 @@ namespace ElevenLabs.Native
         > WaitForSecondsAsyncProvider { get; set; } =
             static (sec, ct) => Awaitable.WaitForSecondsAsync(sec, ct);
 
+        // Test seam: frame ticker for the interrupt fade loop. Production
+        // leaves this null and uses Awaitable.NextFrameAsync (which only
+        // ticks during Play Mode — Interrupt falls back to a synchronous
+        // flush in Edit Mode when the seam is unset). Tests inject a
+        // manually-pumped awaitable so the fade path runs deterministically
+        // without the Unity frame loop.
+        internal Func<CancellationToken, Awaitable>? NextFrameAsyncProvider { get; set; }
+
+        // Test seam: wall-clock source for fade progress. Defaults to
+        // Time.unscaledTime in production; tests advance it manually so
+        // fade completion is deterministic.
+        internal Func<float> UnscaledTimeProvider { get; set; } = static () => Time.unscaledTime;
+
         private float _userVolume = 1f;
         private CancellationTokenSource? _fadeCts;
+
+        // True while an interrupt fade owns the deferred ClearRing: the
+        // samples queued at Interrupt time are condemned — they may fade
+        // out audibly, but must never play at restored volume or queue
+        // ahead of the next reply. Set when the fade starts; cleared by
+        // ClearRing (whether the fade reaches it or PushAudio flushes
+        // early on the fade's behalf).
+        private bool _interruptFlushPending;
         private CancellationTokenSource? _prefillTimeoutCts;
         private int _disposed;
 
@@ -280,6 +301,13 @@ namespace ElevenLabs.Native
             // level. Mirrors MediaDeviceOutput.playAudio's
             // cancelScheduledValues + gain reset before queueing the chunk.
             CancelFade();
+            // Cancelling an in-flight interrupt fade skips its deferred
+            // ClearRing, so flush the condemned samples here on its
+            // behalf — otherwise the interrupted utterance's unplayed
+            // remainder would resume at full volume and queue ahead of
+            // this new chunk.
+            if (_interruptFlushPending)
+                ClearRing();
             _engine.Volume = _userVolume;
             // Write the chunk to the ring BEFORE flipping playback on. Unity
             // pre-fills the streaming clip's internal buffer the moment
@@ -517,7 +545,7 @@ namespace ElevenLabs.Native
                 return;
             int duration = resetDurationMs ?? DefaultInterruptDurationMs;
             CancelFade();
-            if (duration <= 0 || !Application.isPlaying)
+            if (duration <= 0 || (!Application.isPlaying && NextFrameAsyncProvider == null))
             {
                 // Immediate-cut request, or Edit Mode
                 // (Awaitable.NextFrameAsync only ticks during Play Mode) —
@@ -526,6 +554,7 @@ namespace ElevenLabs.Native
                 _engine.Volume = _userVolume;
                 return;
             }
+            _interruptFlushPending = true;
             _fadeCts = new CancellationTokenSource();
             _ = RunFadeAsync(duration, _fadeCts.Token);
         }
@@ -535,14 +564,18 @@ namespace ElevenLabs.Native
             try
             {
                 float startVolume = _engine.Volume;
-                float startTime = Time.unscaledTime;
+                float startTime = UnscaledTimeProvider();
                 float duration = durationMs / 1000f;
                 while (true)
                 {
-                    await Awaitable.NextFrameAsync(token);
+                    await (
+                        NextFrameAsyncProvider != null
+                            ? NextFrameAsyncProvider(token)
+                            : Awaitable.NextFrameAsync(token)
+                    );
                     if (token.IsCancellationRequested || !_engine.IsAvailable)
                         return;
-                    float elapsed = Time.unscaledTime - startTime;
+                    float elapsed = UnscaledTimeProvider() - startTime;
                     if (elapsed >= duration)
                     {
                         _engine.Volume = 0f;
@@ -630,6 +663,7 @@ namespace ElevenLabs.Native
         // the next chunk plays from silence instead of catching up.
         internal void ClearRing()
         {
+            _interruptFlushPending = false;
             lock (_bufferLock)
             {
                 _readPos = 0;
