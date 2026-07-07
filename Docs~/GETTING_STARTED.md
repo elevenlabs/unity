@@ -1,5 +1,9 @@
 # Getting started
 
+<a href="https://youtu.be/7AvhsB67gV4">
+  <img src="getting-started-demo.gif" alt="Watch a walk-through of the getting started guide below" width="100%">
+</a>
+
 A 10-minute walkthrough: install the SDK, create an agent, and put a talking
 cube in your scene that greets the player when they walk up to it.
 
