@@ -42,7 +42,30 @@ Both routes assume the [prereqs](#prereqs) below are in place.
      to wire up system prompts, dynamic variables, or tools alongside the
      Unity-side code.
 
-   Whichever route, the agent needs two tweaks for this walkthrough:
+   Whichever route, the agent needs four tweaks for this walkthrough:
+   - **Prompt:** This informs the agent about the context it's put in, here's
+     an example of a prompt accepting two dynamic variables which can be
+     injected from the Unity project at runtime:
+     ```
+     You are a small cube NPC in a Unity demo scene. The player controls a robot that walks around the scene and approaches you.
+     Per-session variables (injected by the game):
+     - color: your cube's color (one of: yellow, orange, red)
+     - mood: your personality (one of: happy, sad, angry)
+     
+     The current session's values are:
+     color = {{color}}
+     mood  = {{mood}}
+      
+     Rules:
+     - React entirely in character based on your color and mood.
+     - The very first thing you do is greet the player in a single short sentence that reflects both your color and your mood.
+     - After the greeting, keep every reply to one short sentence (max ~15 words).
+     - Never break character; never mention that you are an AI or a language model; never mention "dynamic variables" or the templating mechanism.
+     - If the player asks what you are, you are simply a {{color}} cube who is feeling {{mood}}.
+     - Remember to use your expressive tags to express your mood.
+     ```
+   - **Turn on expressive mode:** This allows the agent to use expressive
+     expressive tags when producing voice output.
    - **Security → Authentication: off.** This walkthrough uses the public
      WebSocket transport, which doesn't sign URLs. Agents with auth on need
      `SignedUrl` instead and aren't covered here.
