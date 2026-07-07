@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using ElevenLabs.Agents;
 using ElevenLabs.Native;
@@ -278,21 +279,139 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
-        public void PushAudio_Overrun_DropsOldestSamples()
+        public void PushAudio_BeyondInitialCapacity_GrowsRingWithoutDroppingSamples()
         {
-            // 1 Hz * 5 s ring = 5 samples. Push 7 → first two are dropped.
+            // 1 Hz * 5 s ring = 5 samples initial. Push 7 → the ring
+            // doubles to 10 and every sample survives in FIFO order.
             var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 1));
+            Assert.AreEqual(5, output.Test_RingCapacity);
             output.PushAudio(LittleEndian(1, 2, 3, 4, 5, 6, 7));
-            Assert.AreEqual(5, output.Test_AvailableSamples);
+            Assert.AreEqual(7, output.Test_AvailableSamples);
+            Assert.AreEqual(10, output.Test_RingCapacity);
+            Assert.AreEqual(0, output.Test_DroppedSampleCount);
 
-            float[] dest = new float[5];
-            output.ReadFromRing(dest);
-            // Oldest two (1, 2) dropped; ring now holds 3..7 in FIFO order.
-            Assert.AreEqual(3 / 32767f, dest[0], 1e-6);
-            Assert.AreEqual(4 / 32767f, dest[1], 1e-6);
-            Assert.AreEqual(5 / 32767f, dest[2], 1e-6);
-            Assert.AreEqual(6 / 32767f, dest[3], 1e-6);
-            Assert.AreEqual(7 / 32767f, dest[4], 1e-6);
+            float[] dest = new float[7];
+            Assert.AreEqual(7, output.ReadFromRing(dest));
+            for (int i = 0; i < 7; i++)
+                Assert.AreEqual((i + 1) / 32767f, dest[i], 1e-6);
+        }
+
+        [Test]
+        public void PushAudio_AtGrowthCeiling_DropsNewestAndWarnsOnce()
+        {
+            // 1 Hz: initial capacity 5, ceiling 60. Push 70 → the ring
+            // grows to the ceiling, holds the first 60 samples intact
+            // (playback stays contiguous), and the newest 10 are dropped
+            // with a single warning.
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 1));
+            UnityEngine.TestTools.LogAssert.Expect(
+                LogType.Warning,
+                new System.Text.RegularExpressions.Regex("Output ring reached its .* ceiling")
+            );
+            int[] samples = new int[70];
+            for (int i = 0; i < samples.Length; i++)
+                samples[i] = i + 1;
+            output.PushAudio(LittleEndian(samples));
+
+            Assert.AreEqual(60, output.Test_RingCapacity);
+            Assert.AreEqual(60, output.Test_AvailableSamples);
+            Assert.AreEqual(10, output.Test_DroppedSampleCount);
+
+            float[] dest = new float[60];
+            Assert.AreEqual(60, output.ReadFromRing(dest));
+            for (int i = 0; i < 60; i++)
+                Assert.AreEqual((i + 1) / 32767f, dest[i], 1e-6);
+
+            // A second overflowing push drops silently (warn-once) but
+            // keeps counting.
+            output.PushAudio(LittleEndian(samples));
+            output.PushAudio(LittleEndian(samples));
+            Assert.AreEqual(60, output.Test_AvailableSamples);
+            Assert.AreEqual(90, output.Test_DroppedSampleCount);
+        }
+
+        // Stream continuity ------------------------------------------------
+        //
+        // Regression coverage for the "agent jumps ahead" field report:
+        // the server streams a reply's TTS audio much faster than
+        // realtime, so any reply whose buffered depth exceeds the ring
+        // capacity (5 s) overflows before playback can drain it. The
+        // overflow policy advances the read head past queued-but-unplayed
+        // samples, audible as the agent skipping ahead mid-utterance.
+        // These tests encode the sample index into each pushed sample (a
+        // sawtooth over int16) and assert the drained stream is the
+        // complete, gap-free image of what was pushed.
+
+        [Test]
+        public void PushAudio_BurstBeyondRingCapacity_DoesNotDropQueuedAudio()
+        {
+            // 8 s of audio at 16 kHz delivered in one burst (the
+            // pathological limit of faster-than-realtime streaming)
+            // against the 5 s ring: no sample may be lost, in any order.
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16000));
+            const int totalSamples = 8 * 16000;
+            const int chunkSamples = 4000;
+            for (long start = 0; start < totalSamples; start += chunkSamples)
+                output.PushAudio(SawtoothChunk(start, chunkSamples));
+
+            List<float> drained = DrainAll(output);
+            AssertSawtoothStream(drained, startIndex: 0, expectedCount: totalSamples);
+        }
+
+        [Test]
+        public void PushAudio_FasterThanRealtimeDelivery_PlaysBackContiguously()
+        {
+            // Same failure mode as the burst test but with playback
+            // draining concurrently at realtime pace while delivery runs
+            // at 2× realtime — the shape of a live session. Buffered depth
+            // grows by one chunk per iteration until it crosses the ring
+            // capacity mid-utterance, so a drop-oldest overflow skips
+            // samples that were next in line for the speaker (a
+            // mid-playback jump rather than a truncated head).
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16000));
+            const int chunkSamples = 1600; // 100 ms at 16 kHz
+            const int totalChunks = 160; // 16 s utterance
+            var drained = new List<float>();
+            float[] dest = new float[chunkSamples];
+            long pushed = 0;
+            for (int i = 0; i < totalChunks; i += 2)
+            {
+                output.PushAudio(SawtoothChunk(pushed, chunkSamples));
+                pushed += chunkSamples;
+                output.PushAudio(SawtoothChunk(pushed, chunkSamples));
+                pushed += chunkSamples;
+                int n = output.ReadFromRing(dest);
+                for (int k = 0; k < n; k++)
+                    drained.Add(dest[k]);
+            }
+            drained.AddRange(DrainAll(output));
+            AssertSawtoothStream(drained, startIndex: 0, expectedCount: pushed);
+        }
+
+        [Test]
+        public void PushAudio_SecondUtteranceAfterSilenceGap_PlaysFromItsFirstSample()
+        {
+            // Guards the turn boundary itself: after the first utterance
+            // drains and the audio thread fires silence-only drains for a
+            // while, the next utterance must play from its first sample —
+            // nothing consumed, skipped, or replayed across the gap.
+            var output = new UnityAudioSourceOutput(new FormatConfig("pcm", 16000));
+            output.PushAudio(SawtoothChunk(0, 1600));
+            List<float> firstTurn = DrainAll(output);
+            AssertSawtoothStream(firstTurn, startIndex: 0, expectedCount: 1600);
+
+            // Between turns the ring is empty and drains return nothing.
+            float[] dest = new float[256];
+            for (int i = 0; i < 5; i++)
+                Assert.AreEqual(0, output.ReadFromRing(dest));
+
+            // Second turn uses a distinct index range so replayed
+            // first-turn samples can't masquerade as second-turn ones
+            // (105000 % SawtoothPeriod = 5000 ≠ any first-turn index).
+            const long secondTurnStart = 105_000;
+            output.PushAudio(SawtoothChunk(secondTurnStart, 3200));
+            List<float> secondTurn = DrainAll(output);
+            AssertSawtoothStream(secondTurn, startIndex: secondTurnStart, expectedCount: 3200);
         }
 
         // Interrupt --------------------------------------------------------
@@ -1421,6 +1540,96 @@ namespace ElevenLabs.Native.Tests
                 result[i * 2 + 1] = (byte)((s >> 8) & 0xff);
             }
             return result;
+        }
+
+        // Stream-continuity helpers ----------------------------------------
+
+        // Period of the index-encoding sawtooth. Long enough that a skip
+        // smaller than 1.25 s at 16 kHz can't alias back onto the expected
+        // value; encoded values span [-10000, 9999] so they stay inside
+        // int16 with headroom.
+        private const int SawtoothPeriod = 20000;
+
+        private static short SawtoothSample(long index) => (short)(index % SawtoothPeriod - 10000);
+
+        /// <summary>PCM16-LE chunk whose sample <c>i</c> encodes stream
+        /// index <c>startIndex + i</c>, so a drained stream can be checked
+        /// for dropped or reordered samples.</summary>
+        private static byte[] SawtoothChunk(long startIndex, int count)
+        {
+            byte[] result = new byte[count * 2];
+            for (int i = 0; i < count; i++)
+            {
+                short s = SawtoothSample(startIndex + i);
+                result[i * 2] = (byte)(s & 0xff);
+                result[i * 2 + 1] = (byte)((s >> 8) & 0xff);
+            }
+            return result;
+        }
+
+        private static float DecodedSawtooth(long index)
+        {
+            short s = SawtoothSample(index);
+            return s < 0 ? s / 32768f : s / 32767f;
+        }
+
+        /// <summary>Drain the ring to empty through
+        /// <see cref="UnityAudioSourceOutput.ReadFromRing"/> in
+        /// audio-thread-sized chunks, collecting only the real (non-
+        /// silence-fill) samples.</summary>
+        private static List<float> DrainAll(UnityAudioSourceOutput output)
+        {
+            var drained = new List<float>();
+            float[] dest = new float[256];
+            // Safety cap well above any test's pushed depth so a buggy
+            // ring can't spin the test runner forever.
+            for (int guard = 0; guard < 10_000; guard++)
+            {
+                int n = output.ReadFromRing(dest);
+                if (n == 0)
+                    return drained;
+                for (int i = 0; i < n; i++)
+                    drained.Add(dest[i]);
+            }
+            Assert.Fail("DrainAll exceeded its iteration guard — ring never reported empty.");
+            return drained; // unreachable
+        }
+
+        /// <summary>Assert <paramref name="drained"/> is the complete,
+        /// gap-free image of the sawtooth stream pushed from
+        /// <paramref name="startIndex"/>: exactly
+        /// <paramref name="expectedCount"/> samples, each one the encoded
+        /// successor of the previous. On a discontinuity, reports the
+        /// position and the apparent jump size.</summary>
+        private static void AssertSawtoothStream(
+            IReadOnlyList<float> drained,
+            long startIndex,
+            long expectedCount
+        )
+        {
+            for (int i = 0; i < drained.Count; i++)
+            {
+                float expected = DecodedSawtooth(startIndex + i);
+                if (Math.Abs(drained[i] - expected) < 1e-6f)
+                    continue;
+                float f = drained[i];
+                short observed = (short)Math.Round(f < 0 ? f * 32768f : f * 32767f);
+                short expectedShort = SawtoothSample(startIndex + i);
+                int jump =
+                    ((observed - expectedShort) % SawtoothPeriod + SawtoothPeriod) % SawtoothPeriod;
+                Assert.Fail(
+                    $"Playback stream discontinuity at drained sample {i}: expected encoded "
+                        + $"stream index {startIndex + i} (value {expectedShort}), observed "
+                        + $"value {observed} — stream jumped ahead by ~{jump} samples "
+                        + $"(mod {SawtoothPeriod})."
+                );
+            }
+            Assert.AreEqual(
+                expectedCount,
+                drained.Count,
+                $"Dropped {expectedCount - drained.Count} of {expectedCount} pushed samples — "
+                    + "queued agent audio was lost before it could play."
+            );
         }
     }
 }

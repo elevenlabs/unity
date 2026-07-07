@@ -48,11 +48,24 @@ namespace ElevenLabs.Native
     /// </remarks>
     internal sealed class UnityAudioSourceOutput : IOutputController
     {
-        // Five seconds of slack is generous enough for typical network jitter
-        // without growing the per-session footprint past ~480 KB at 24 kHz.
-        // The JS SDK's audioConcatProcessor doesn't cap its queue at all;
-        // we cap explicitly so a slow main thread can't pin memory.
+        // Initial ring depth. The server streams a reply's TTS audio much
+        // faster than realtime, so the ring must hold whatever depth the
+        // delivery burst builds up — a hard cap here silently dropped
+        // queued samples and made playback audibly jump ahead
+        // mid-utterance on any reply longer than the cap. The ring now
+        // grows on demand (amortized doubling, allocation only at growth,
+        // never shrinking mid-session) up to MaxRingBufferLengthSec. The
+        // JS SDK's audioConcatProcessor doesn't cap its queue at all; the
+        // ceiling exists so a pathological server can't pin unbounded
+        // memory.
         internal const float RingBufferLengthSec = 5f;
+
+        // Growth ceiling. At the ceiling the ring stops growing and
+        // PushAudio drops the NEWEST samples (keeping already-queued audio
+        // contiguous — a truncated tail beats a mid-playback jump) and
+        // warns once per session. 60 s ≈ 11.5 MB at 48 kHz worst case;
+        // typical sessions never grow past the initial 5 s.
+        internal const float MaxRingBufferLengthSec = 60f;
 
         // Default fade window when Interrupt is invoked without an override —
         // matches MediaDeviceOutput.interrupt(resetDuration = 2000) in
@@ -69,8 +82,9 @@ namespace ElevenLabs.Native
         internal const int AnalysisWindowMs = 5;
 
         private readonly FormatConfig _format;
-        private readonly int _ringCapacity;
-        private readonly float[] _ring;
+        private readonly int _maxRingCapacity;
+        private int _ringCapacity;
+        private float[] _ring;
         private readonly float[] _analysisBuffer;
         private readonly IAudioOutputEngine _engine;
 
@@ -94,6 +108,21 @@ namespace ElevenLabs.Native
         // sessions without wrapping.
         private long _readPosLinear;
         private long _writePosLinear;
+
+        // Linear position of ring slot 0's backing sample: the modular
+        // mapping is idx = (linearPos - _ringBaseLinear) % _ringCapacity.
+        // Zero until the first growth; re-based whenever EnsureRingCapacity
+        // swaps in a larger array (the retained samples are copied to the
+        // front of the new array, so the base moves up to the oldest
+        // retained linear position). Reset alongside the other anchors in
+        // ClearRing.
+        private long _ringBaseLinear;
+
+        // Samples dropped at the growth ceiling (drop-newest policy).
+        // Session-scoped diagnostics: exposed to tests via
+        // Test_DroppedSampleCount and surfaced via a warn-once log.
+        private long _droppedSampleCount;
+        private bool _overflowWarned;
 
         // Wall-clock timestamp (Stopwatch ticks) at the moment playback became
         // audible — set by ReadFromRing on its first call (which happens
@@ -176,6 +205,10 @@ namespace ElevenLabs.Native
                     $"UnityAudioSourceOutput supports PCM only at v0.1; got '{format.Format}'."
                 );
             _ringCapacity = Math.Max(1, (int)Math.Round(format.SampleRate * RingBufferLengthSec));
+            _maxRingCapacity = Math.Max(
+                _ringCapacity,
+                (int)Math.Round(format.SampleRate * MaxRingBufferLengthSec)
+            );
             _ring = new float[_ringCapacity];
             int windowSamples = Math.Max(1, format.SampleRate * AnalysisWindowMs / 1000);
             _analysisBuffer = new float[windowSamples];
@@ -257,26 +290,38 @@ namespace ElevenLabs.Native
             // first means the pre-fills land on real samples.
             lock (_bufferLock)
             {
+                // Faster-than-realtime delivery is the NORMAL case — the
+                // server streams a whole reply in a fraction of its
+                // duration — so an incoming chunk that doesn't fit means
+                // the ring must grow, not that anything may be dropped.
+                EnsureRingCapacity((long)_available + samples);
                 for (int i = 0; i < samples; i++)
                 {
+                    if (_available == _ringCapacity)
+                    {
+                        // Growth ceiling reached — drop the NEWEST samples
+                        // so everything already queued still plays
+                        // contiguously (a truncated tail beats an audible
+                        // mid-playback jump). Warn once per session.
+                        _droppedSampleCount += samples - i;
+                        if (!_overflowWarned)
+                        {
+                            _overflowWarned = true;
+                            Debug.LogWarning(
+                                "[ElevenLabs] Output ring reached its "
+                                    + $"{MaxRingBufferLengthSec:0}s ceiling; dropping the "
+                                    + "newest agent audio samples. Playback stays "
+                                    + "contiguous but the tail of this response is lost."
+                            );
+                        }
+                        break;
+                    }
                     short s = (short)(pcm[i * 2] | (pcm[i * 2 + 1] << 8));
                     float f = DecodeInt16Sample(s);
                     _ring[_writePos] = f;
                     _writePos = (_writePos + 1) % _ringCapacity;
                     _writePosLinear++;
-                    if (_available < _ringCapacity)
-                    {
-                        _available++;
-                    }
-                    else
-                    {
-                        // Overrun — drop the oldest sample by advancing the
-                        // read pointer. A buffer overflow at the SDK's
-                        // chunk cadence usually means the audio thread isn't
-                        // keeping up, not that the agent is too fast.
-                        _readPos = (_readPos + 1) % _ringCapacity;
-                        _readPosLinear++;
-                    }
+                    _available++;
                 }
             }
             // First real chunk: trigger engine.Start() (AudioClip.Create +
@@ -538,6 +583,49 @@ namespace ElevenLabs.Native
             _fadeCts = null;
         }
 
+        // Grow the ring so it can hold at least neededSamples (amortized
+        // doubling, clamped to _maxRingCapacity). Must be called under
+        // _bufferLock. Steady state is allocation-free: growth fires only
+        // while a reply's buffered depth exceeds every capacity seen so
+        // far, so a session performs at most a handful of allocations
+        // (5 s → 10 s → 20 s → …) during its first long reply and none
+        // after. The copy linearizes the retained samples to the front of
+        // the new array and re-bases _ringBaseLinear so the linear-position
+        // mapping (idx = (linearPos - base) % capacity) stays valid for
+        // both the drain path and ComputeWallClockRms's history window.
+        private void EnsureRingCapacity(long neededSamples)
+        {
+            if (neededSamples <= _ringCapacity || _ringCapacity >= _maxRingCapacity)
+                return;
+            long newCapacity = _ringCapacity;
+            while (newCapacity < neededSamples)
+                newCapacity *= 2;
+            if (newCapacity > _maxRingCapacity)
+                newCapacity = _maxRingCapacity;
+            float[] newRing = new float[newCapacity];
+            // Retain everything still addressable in the old array: the
+            // unplayed backlog plus as much played history as the old
+            // capacity kept around (ComputeWallClockRms reads a short
+            // window behind the audible head, which can trail the drain
+            // head by the engine's buffering depth).
+            long retainStart = Math.Max(_ringBaseLinear, _writePosLinear - _ringCapacity);
+            int retainCount = (int)(_writePosLinear - retainStart);
+            for (int i = 0; i < retainCount; i++)
+            {
+                long linearPos = retainStart + i;
+                newRing[i] = _ring[(int)((linearPos - _ringBaseLinear) % _ringCapacity)];
+            }
+            _ring = newRing;
+            _ringCapacity = (int)newCapacity;
+            _ringBaseLinear = retainStart;
+            // _readPosLinear >= retainStart always holds: the unplayed
+            // backlog (_writePosLinear - _readPosLinear) never exceeds the
+            // old capacity, so the read head sits inside the retained
+            // range.
+            _readPos = (int)(_readPosLinear - retainStart);
+            _writePos = retainCount % _ringCapacity;
+        }
+
         // Drop every queued sample. Called when the agent is interrupted so
         // the next chunk plays from silence instead of catching up.
         internal void ClearRing()
@@ -549,6 +637,7 @@ namespace ElevenLabs.Native
                 _available = 0;
                 _readPosLinear = 0;
                 _writePosLinear = 0;
+                _ringBaseLinear = 0;
                 Array.Clear(_ring, 0, _ring.Length);
                 Array.Clear(_analysisBuffer, 0, _analysisBuffer.Length);
                 _analysisWritePos = 0;
@@ -642,8 +731,8 @@ namespace ElevenLabs.Native
                 }
                 long windowStart = audibleRingPos - windowSamples;
                 long minReadable = _writePosLinear - _ringCapacity;
-                if (minReadable < 0)
-                    minReadable = 0;
+                if (minReadable < _ringBaseLinear)
+                    minReadable = _ringBaseLinear;
                 for (int i = 0; i < windowSamples; i++)
                 {
                     long linearPos = windowStart + i;
@@ -660,9 +749,9 @@ namespace ElevenLabs.Native
                         // After the audible head — hasn't been played yet.
                         continue;
                     }
-                    int idx = (int)(linearPos % _ringCapacity);
-                    if (idx < 0)
-                        idx += _ringCapacity;
+                    // linearPos >= minReadable >= _ringBaseLinear per the
+                    // guards above, so the offset is non-negative.
+                    int idx = (int)((linearPos - _ringBaseLinear) % _ringCapacity);
                     float s = _ring[idx];
                     sumSquares += s * s;
                 }
@@ -793,6 +882,14 @@ namespace ElevenLabs.Native
         // Test-only inspectors — let tests assert on the ring state without
         // promoting the fields themselves to internal mutables.
         internal int Test_RingCapacity => _ringCapacity;
+        internal long Test_DroppedSampleCount
+        {
+            get
+            {
+                lock (_bufferLock)
+                    return _droppedSampleCount;
+            }
+        }
         internal int Test_AvailableSamples
         {
             get
