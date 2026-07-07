@@ -337,6 +337,44 @@ namespace ElevenLabs.Native.Tests
             }
         }
 
+        // --- Audio configuration changes ----------------------------------
+
+        [Test]
+        public void HandleAudioConfigurationChanged_BeforeStart_LogsButDoesNotThrow()
+        {
+            // Unity provides no way to raise OnAudioConfigurationChanged
+            // manually, so Edit-Mode coverage drives the internal handler
+            // directly. Before Start there's no component bound — the
+            // handler must log the transition and no-op the restart. (The
+            // started-path re-Play is one guarded line, verified in Play
+            // Mode: Unity stops AudioSources on audio reinit.)
+            var engine = new UnityGeneratorAudioOutputEngine();
+            try
+            {
+                UnityEngine.TestTools.LogAssert.Expect(
+                    UnityEngine.LogType.Log,
+                    new System.Text.RegularExpressions.Regex("Audio configuration changed")
+                );
+                Assert.DoesNotThrow(() => engine.HandleAudioConfigurationChanged(true));
+            }
+            finally
+            {
+                engine.Dispose();
+            }
+        }
+
+        [Test]
+        public void HandleAudioConfigurationChanged_AfterDispose_SilentNoOp()
+        {
+            // A late event delivery after Dispose (possible if Unity is
+            // mid-dispatch when the session tears down) must neither log
+            // nor touch the destroyed AudioSource.
+            var engine = new UnityGeneratorAudioOutputEngine();
+            engine.Dispose();
+            Assert.DoesNotThrow(() => engine.HandleAudioConfigurationChanged(true));
+            UnityEngine.TestTools.LogAssert.NoUnexpectedReceived();
+        }
+
         [Test]
         public void Dispose_OwnedHost_DestroysHostGameObject()
         {

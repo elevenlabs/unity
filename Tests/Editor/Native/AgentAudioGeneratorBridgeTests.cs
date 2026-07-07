@@ -16,6 +16,39 @@ namespace ElevenLabs.Native.Tests
     public class AgentAudioGeneratorBridgeTests
     {
         [Test]
+        public void DeviceSampleRate_PublishesRateTransitionLog_OncePerChange()
+        {
+            // Rate observability regression guard: diagnosing the stale-
+            // DSP-rate pitch shift (Docs~/unity-issues/
+            // stale-dsp-rate-bluetooth-profile-change.md) required a live
+            // editor session because nothing logged the negotiated rates.
+            var bridge = new AgentAudioGeneratorBridge(
+                inputSampleRate: 16000,
+                ringCapacity: 100,
+                scratchFrames: 64
+            );
+            try
+            {
+                UnityEngine.TestTools.LogAssert.Expect(
+                    UnityEngine.LogType.Log,
+                    new System.Text.RegularExpressions.Regex(
+                        @"input 16000 Hz → device 48000 Hz \(resampling\)"
+                    )
+                );
+                bridge.DeviceSampleRate = 48000;
+                Assert.IsNotNull(bridge.ResamplerKernel);
+
+                // Republishing the same rate must not log again.
+                bridge.DeviceSampleRate = 48000;
+                UnityEngine.TestTools.LogAssert.NoUnexpectedReceived();
+            }
+            finally
+            {
+                bridge.Dispose();
+            }
+        }
+
+        [Test]
         public void PeekOrPull_RingNearlyFull_NeverLosesCallbackSamples()
         {
             // Capacity 100 with a 64-sample refill scratch: pre-filling 90

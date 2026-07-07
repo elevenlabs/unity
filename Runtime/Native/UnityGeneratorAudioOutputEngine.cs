@@ -96,6 +96,10 @@ namespace ElevenLabs.Native
         // DontDestroyOnLoad means external code can't destroy it.
         private bool _destructionWarned;
 
+        // Delegate instance kept so Dispose unsubscribes exactly what Start
+        // subscribed. Non-null only between Start and Dispose.
+        private AudioSettings.AudioConfigurationChangeHandler? _configChangeHandler;
+
         /// <summary>
         /// Construct the engine, set up an <see cref="AudioSource"/>
         /// (creating a hidden host <see cref="GameObject"/> when none is
@@ -257,6 +261,36 @@ namespace ElevenLabs.Native
             _component.Initialize(_bridge);
             _audioSource.generator = _component;
             _audioSource.Play();
+
+            // Unity reinitializes the audio system when the output device
+            // changes (e.g. a Bluetooth headset flipping A2DP ↔ HFP when a
+            // conversation opens its microphone) — and STOPS every playing
+            // AudioSource when it does, which would silently mute the agent
+            // for the rest of the session. Watch for the event, log the
+            // rate transition (see Docs~/unity-issues/
+            // stale-dsp-rate-bluetooth-profile-change.md), and restart
+            // playback. Unity raises this on the main thread.
+            _configChangeHandler = HandleAudioConfigurationChanged;
+            AudioSettings.OnAudioConfigurationChanged += _configChangeHandler;
+        }
+
+        // Internal (vs private) so Edit-Mode tests can drive the guards
+        // directly — Unity provides no way to raise the event manually.
+        internal void HandleAudioConfigurationChanged(bool deviceWasChanged)
+        {
+            if (_disposed != 0 || _audioSource == null)
+                return;
+            Debug.Log(
+                "[ElevenLabs] Audio configuration changed "
+                    + $"(deviceWasChanged={deviceWasChanged}); output sample rate is now "
+                    + $"{AudioSettings.outputSampleRate} Hz. Restarting agent audio playback."
+            );
+            // The generator stays bound across the reinit; Unity rebuilds
+            // the generator graph and re-fires AgentAudioControl.Configure
+            // with the new device rate, so the bridge resampler re-adapts
+            // on its own — only the Play state needs help.
+            if (_component != null && !_audioSource.isPlaying)
+                _audioSource.Play();
         }
 
         public void Stop()
@@ -283,6 +317,11 @@ namespace ElevenLabs.Native
         {
             if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
                 return;
+            if (_configChangeHandler != null)
+            {
+                AudioSettings.OnAudioConfigurationChanged -= _configChangeHandler;
+                _configChangeHandler = null;
+            }
             if (_audioSource != null)
             {
                 try

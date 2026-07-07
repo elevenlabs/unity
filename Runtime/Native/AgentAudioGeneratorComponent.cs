@@ -100,7 +100,8 @@ namespace ElevenLabs.Native
             {
                 if (value == Volatile.Read(ref _deviceSampleRate))
                     return;
-                if (value > 0 && value != InputSampleRate)
+                bool resampling = value > 0 && value != InputSampleRate;
+                if (resampling)
                 {
                     ResamplerKernel = BuildResamplerKernel(InputSampleRate, value);
                     ResampleFracPos = 0.0;
@@ -110,6 +111,17 @@ namespace ElevenLabs.Native
                     ResamplerKernel = null;
                     ResampleFracPos = 0.0;
                 }
+                // Rate observability: a stale or surprising device rate is
+                // otherwise invisible (see Docs~/unity-issues/
+                // stale-dsp-rate-bluetooth-profile-change.md — diagnosing a
+                // 3× pitch shift took a live-editor session because nothing
+                // logged the negotiated rates). Configure runs on Unity's
+                // control thread; Debug.Log is thread-safe.
+                UnityEngine.Debug.Log(
+                    $"[ElevenLabs] Agent audio output: input {InputSampleRate} Hz → "
+                        + $"device {value} Hz "
+                        + $"({(resampling ? "resampling" : "1:1 pass-through")})."
+                );
                 Volatile.Write(ref _deviceSampleRate, value);
             }
         }
