@@ -386,6 +386,17 @@ namespace ElevenLabs.Native
             Func<float[], int>? cb = _drainCallback;
             if (cb == null)
                 return peeked;
+            // Never pull more than the ring can absorb: the callback hands
+            // samples over destructively (the host ring's read cursor
+            // advances as it fills the scratch), so anything Ring.Write
+            // couldn't fit would vanish from the playback stream. The pull
+            // only fires when the ring is nearly drained — and the engine
+            // sizes the ring at least one full scratch deep — so this
+            // guard never trips under production tuning; it turns a future
+            // re-tune (scratch grown past the ring's headroom) into a
+            // deferred refill instead of silently dropped audio.
+            if (Ring.Available < _refillScratch.Length)
+                return peeked;
             int got;
             try
             {
