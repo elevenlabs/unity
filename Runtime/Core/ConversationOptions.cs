@@ -50,7 +50,7 @@ namespace ElevenLabs.Agents
         /// On native, audio plays through the supplied <see cref="AudioSource"/>
         /// with full FMOD fidelity. SDK-owned overwrites: <c>clip</c>,
         /// <c>loop</c>, and <c>volume</c> are captured at session start and
-        /// restored on <see cref="Conversation.EndSessionAsync"/>. Everything
+        /// restored on <see cref="Conversation.EndSession"/>. Everything
         /// else (<c>spatialBlend</c>, <c>outputAudioMixerGroup</c>, rolloff
         /// curves, transform position) is preserved untouched.
         /// </para>
