@@ -292,8 +292,8 @@ namespace ElevenLabs.Agents
             {
                 throw new InvalidOperationException(
                     "No session factory is registered for the current platform. "
-                        + "Ensure ElevenLabs.Agents.WebGL (or the native impl in v0.2) is "
-                        + "included in your build target."
+                        + "Ensure the ElevenLabs.Agents.WebGL or ElevenLabs.Agents.Native "
+                        + "assembly is included in your build target."
                 );
             }
             return factory(options);

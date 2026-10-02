@@ -35,11 +35,6 @@ namespace ElevenLabs.WebGL.Bridged
     /// <c>attachDefaultAudio</c> call.
     /// </description></item>
     /// </list>
-    /// <para>
-    /// Phase 5.4 wires <see cref="Conversation.StartSessionAsync"/> to delegate
-    /// here under <c>#if UNITY_WEBGL</c>; until then this class is consumed
-    /// only by tests and any explicit WebGL launcher experiments.
-    /// </para>
     /// </remarks>
     internal sealed class BridgedSession
     {
