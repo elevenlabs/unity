@@ -14,9 +14,14 @@ on:
       - "Docs~/**"
       - "**.md"
       - ".claude/**"
+  pull_request_target:
+    paths-ignore:
+      - "Docs~/**"
+      - "**.md"
+      - ".claude/**"
 
 concurrency:
-  group: unity-tests-${{ github.ref }}
+  group: unity-tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -26,12 +31,21 @@ permissions:
 jobs:
   edit-mode:
     name: Edit Mode tests (Unity 6000.3.6f1)
-    # Fork PRs don't receive the UNITY_* secrets, so Unity activation would fail.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Fork PRs get no secrets under pull_request, so they run via pull_request_target behind fork-ci approval.
+    if: >-
+      github.repository == 'elevenlabs/unity' && (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository)
+      )
+    environment: ${{ github.event_name == 'pull_request_target' && 'fork-ci' || '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          persist-credentials: false
 
       # Reclaim ~25 GB so the Unity image (~7 GB compressed, ~20 GB
       # extracted) fits on ubuntu-latest's ~14 GB root partition.
@@ -50,7 +64,19 @@ jobs:
           df -h /
 
       - name: Cache Unity Library
+        if: github.event_name != 'pull_request_target'
         uses: actions/cache@v5
+        with:
+          path: TestProject/Library
+          key: Library-TestProject-EditMode-${{ hashFiles('TestProject/Packages/packages-lock.json', 'TestProject/ProjectSettings/ProjectSettings.asset') }}
+          restore-keys: |
+            Library-TestProject-EditMode-
+            Library-TestProject-
+
+      # Fork runs write caches into main's scope, so they only restore.
+      - name: Restore Unity Library
+        if: github.event_name == 'pull_request_target'
+        uses: actions/cache/restore@v5
         with:
           path: TestProject/Library
           key: Library-TestProject-EditMode-${{ hashFiles('TestProject/Packages/packages-lock.json', 'TestProject/ProjectSettings/ProjectSettings.asset') }}

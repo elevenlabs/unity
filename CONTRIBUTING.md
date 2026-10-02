@@ -280,7 +280,7 @@ immediately visible.
 - For anything beyond a small fix, open an [issue](https://github.com/elevenlabs/unity/issues/new/choose) first so the approach can be agreed before you invest in it.
 - Branch from `main`, run the verification layers your change touches (see [Running the full verification suite](#running-the-full-verification-suite)), and fill in the pull request template.
 - Add an entry under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) for user-facing changes, and call out any public API change in the PR description.
-- CI runs the lint lane (formatters, linters, typechecks, JS unit tests, generated-artefact drift) on every PR. The Unity lanes (Edit Mode tests, WebGL builds, browser integration tests) need Unity license secrets that GitHub doesn't expose to PRs from forks, so they're skipped there; maintainers verify them before merging.
+- CI runs the lint lane (formatters, linters, typechecks, JS unit tests, generated-artefact drift) on every PR. The Unity lanes (Edit Mode tests, WebGL builds, browser integration tests) run with Unity license secrets, so on PRs from forks they wait until a maintainer has reviewed the changes and approved the run.
 - Report security vulnerabilities privately per [`SECURITY.md`](.github/SECURITY.md), not in issues or PRs.
 
 By contributing you agree that your contributions are licensed under the repository's [MIT license](LICENSE).
