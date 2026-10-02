@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a new feature for the ElevenAgents Unity SDK
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to propose a new feature for the **ElevenAgents Unity SDK**. Please provide detailed information below to help us understand your proposal.
+
+        If the feature exists in another ElevenLabs SDK (such as `@elevenlabs/client`, Swift, or Android), mention it below. We aim for parity across SDKs.
+
+  - type: textarea
+    attributes:
+      label: Feature description
+      description: What is the feature, what problem does it solve, and how do you envision it working?
+      placeholder: |
+        - What is the feature?
+        - What problem does it solve?
+        - How do you envision it working?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Use case
+      description: Describe the game or app scenario where this feature would be useful, including the target platforms.
+  - type: textarea
+    attributes:
+      label: Alternatives considered
+      description: Other ways you've tried or considered solving the problem, and why they fall short.
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Any extra information, references, or screenshots that might help us understand your feature request.
+      placeholder: |
+        - Related issues or discussions:
+        - Equivalent API in another ElevenLabs SDK:
+        - Relevant links:

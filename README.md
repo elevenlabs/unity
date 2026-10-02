@@ -3,7 +3,7 @@
 > [!CAUTION]
 > ⚠️ **Early-stage SDK:** This package is under active development and APIs may change without notice. If you hit a bug or rough edge, please [open a GitHub issue](https://github.com/elevenlabs/unity/issues/new) - your reports directly shape what we fix next.
 
-Drop ElevenLabs voice agents into a Unity scene. Walk up to a cube, it greets you in character; walk out, the session ends — all driven by the same `Conversation` API on standalone, mobile, the Editor, and WebGL.
+Drop ElevenLabs voice agents into a Unity scene. Walk up to a cube, it greets you in character; walk out, the session ends — all driven by the same `Conversation` API in the Editor, desktop standalone players, and WebGL.
 
 <!-- Landing media: 30s screen recording of the GettingStarted sample (walk up → greet → walk out, with audio). Tracked separately; drop the file in here once recorded. -->
 
@@ -38,3 +38,13 @@ Import via **Window → Package Manager → ElevenAgents → Samples**.
 - [`Docs~/ARCHITECTURE.md`](./Docs~/ARCHITECTURE.md) — internal layout (transports, audio pipeline, codegen) for contributors.
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to build, test, and submit changes.
 - [`CHANGELOG.md`](./CHANGELOG.md) — release notes.
+
+## Support
+
+- Bugs and feature requests: [GitHub issues](https://github.com/elevenlabs/unity/issues/new/choose).
+- Security vulnerabilities: report privately per [`SECURITY.md`](./.github/SECURITY.md).
+- Agent configuration and platform questions: [ElevenAgents docs](https://elevenlabs.io/docs/eleven-agents/overview) or [Discord](https://discord.com/invite/elevenlabs).
+
+## License
+
+[MIT](./LICENSE)
