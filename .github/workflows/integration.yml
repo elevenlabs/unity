@@ -26,6 +26,8 @@ permissions:
 jobs:
   build-webgl:
     name: Build WebGL — ${{ matrix.scene.name }} (Unity 6000.3.6f1)
+    # Fork PRs don't receive the UNITY_* secrets, so Unity activation would fail.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     strategy:
       # Run both scenes in parallel on separate runners — each gets its own
