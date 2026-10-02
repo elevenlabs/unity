@@ -7,21 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Breaking:** Minimum Unity version bumped from `6000.0` to `6000.3` (Unity 6.3 LTS). Required for the new native audio output engine built on [`Audio.IAudioGenerator`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.IAudioGenerator.html) / [`Audio.GeneratorInstance`](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Audio.GeneratorInstance.html), which eliminates the streaming-`AudioClip` pre-fill latency that older Unity versions imposed structurally. Unity 6.3 LTS is supported through December 2027.
-
 ## [0.1.0] - Unreleased
 
 ### Added
 
-- Core session management (`StartSession`, `EndSession`)
-- WebSocket transport for native platforms (desktop, mobile, XR)
-- `@elevenlabs/client` bridge transport for WebGL
-- Audio capture and playback (default mode) across all platforms
-- Core conversation events: `OnConnect`, `OnDisconnect`, `OnMessage`, `OnError`, `OnStatusChange`, `OnModeChange`
-- WebGL bridge primitives: Promise-as-Task, Observer, JS-initiated Promise
-- UPM distribution via git URL
+- `Conversation` session API: `Conversation.StartSessionAsync(ConversationOptions)` / `EndSession()`, with `ConversationId`, `Status`, `Mode`, and `CanSendFeedback`. Async members return Unity's `Awaitable`.
+- `ConversationOptions`: `AgentId` / `SignedUrl` / `ConversationToken`, `ConnectionType` (WebSocket, or WebRTC on WebGL), `Input` / `Output` device config, `OutputAudioSource`, `DynamicVariables`, `Overrides`, `UserId`, `CustomLlmExtraBody`, `EnableDebugLogging`.
+- Events: `Connected`, `Disconnected`, `ErrorOccurred`, `StatusChanged`, `ModeChanged`, `CanSendFeedbackChanged`, `InitiationMetadataReceived`, `UserTranscriptReceived`, `AgentResponded`, `AgentResponseCorrected`, `AgentResponseCompleted`, `AgentChatResponsePartReceived`, `AudioReceived`, `Interrupted`, `VadScoreUpdated`, `GuardrailTriggered`, `UnhandledClientToolCall`, `AgentToolRequested`, `AgentToolResponded`, `MCPToolCallReceived`, `MCPConnectionStatusChanged`.
+- Messaging: `SendUserMessage`, `SendContextualUpdate`, `SendUserActivity`, `SendMultimodalMessage`, `UploadFileAsync`, `SendFeedback`, `SendMCPToolApprovalResult`.
+- Client tools: `RegisterTool<TParams, TResult>` (sync and `Awaitable` handlers), `UnregisterTool`, and `ClientToolException` for reporting tool errors to the agent.
+- Audio control: `SetVolume`, `SetMicMuted`, `ChangeInputDevice`, `ChangeOutputDevice`, `GetInputVolume` / `GetOutputVolume`, `GetInputByteFrequencyData` / `GetOutputByteFrequencyData`.
+- Native transport for the Editor and desktop standalone players: WebSocket via `ClientWebSocket`, microphone capture via `UnityEngine.Microphone`, and low-latency playback through Unity 6.3's `IAudioGenerator`, optionally through a supplied (spatial) `AudioSource`.
+- WebGL transport wrapping `@elevenlabs/client` (WebSocket and WebRTC). WebSocket audio plays through a Web Audio graph that mirrors the supplied `AudioSource`'s volume, position, and spatial settings.
+- WebGL JS↔C# bridge primitives: `JsBridge`, `JsObject`, `JsFunction`, `BridgeCallback`, `BridgeException`.
+- Protocol DTOs and typed event-args records (`ElevenLabs.Protocol`), generated from the Agents AsyncAPI spec.
+- Samples: GettingStarted (walk-up-and-talk with spatial audio, dynamic variables, and overrides) and QuickStart (minimal transcript).
+- UPM distribution via git URL. Requires Unity 6.3 LTS (`6000.3`) or later; depends on Input System 1.18.0 and Newtonsoft.Json 3.2.1.
 
 [Unreleased]: https://github.com/elevenlabs/unity/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/elevenlabs/unity/releases/tag/v0.1.0
