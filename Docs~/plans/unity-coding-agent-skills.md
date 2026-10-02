@@ -29,7 +29,7 @@ Five skills cover the surface a Unity developer reaches for, grouped by when the
 | Slug | Trigger phrasing | Body covers |
 |---|---|---|
 | `elevenlabs:unity-quickstart` | "Add ElevenLabs to my Unity project", "use ElevenLabs in Unity", "set up the ElevenLabs Unity SDK" | UPM install (Git URL or OpenUPM); `ELEVENLABS_API_KEY` for backend token-signing; minimal `Conversation.StartSessionAsync` example; pointer to either the component skill (drag-and-drop) or direct API (custom integrations) |
-| `elevenlabs:unity-agent-component` | "Drag-and-drop an ElevenLabs agent on a GameObject", "add an ElevenLabs agent component", "make my NPC talk with ElevenLabs" | Full `ElevenLabsAgent` component story; `ElevenLabsAgentSetup.Configure` + `AgentSetupOptions`; credential provider picking; `AudioSource` wiring; `RunSelfTestAsync` after scaffold. Heavy use of `Unity_RunCommand` to perform the setup |
+| `elevenlabs:unity-agent-component` | "Drag-and-drop an ElevenLabs agent on a GameObject", "add an ElevenLabs agent component", "make my NPC talk with ElevenLabs" | Full `ElevenLabsAgent` component story; `ElevenLabsAgentSetup.Configure` + `AgentSetupOptions`; credential provider picking; `AudioSource` wiring; `RunSelfTestAsync` after scaffold. Performs the setup through `unity command` against the live Editor |
 | `elevenlabs:unity-client-tools` | "Register a client tool in Unity", "let the ElevenLabs agent call my C# code", "make the agent control my scene" | Typed `RegisterTool<TParams, TResult>` patterns (sync + async overloads); designer-tier `SimpleToolBinding` list on the component; `ClientToolException` error pattern; the reply-vs-fire-and-forget tradeoff |
 
 ### Ship with v0.3+ (when there's content to migrate or when audio routing widens)
@@ -60,7 +60,7 @@ Matches `elevenlabs:sdk-migration`'s shape:
 ```yaml
 ---
 name: elevenlabs:unity-agent-component
-description: Drag-and-drop an ElevenLabs conversational agent onto a Unity GameObject. Use when adding voice AI to a Unity scene, configuring credential providers (public agent / signed URL / WebRTC token), wiring AudioSource for native playback, registering client tools, or scaffolding the setup via unity-mcp.
+description: Drag-and-drop an ElevenLabs conversational agent onto a Unity GameObject. Use when adding voice AI to a Unity scene, configuring credential providers (public agent / signed URL / WebRTC token), wiring AudioSource for native playback, registering client tools, or scaffolding the setup via the unity CLI.
 license: MIT
 compatibility: Requires Unity 6 LTS or later, the elevenlabs-unity package (>=0.2.0), and either a manually-configured agent id or a backend that returns signed URLs / conversation tokens.
 metadata: {"openclaw": {"requires": {"env": []}}}
@@ -78,7 +78,7 @@ Three deliberate choices to call out:
 The packages-repo skill body follows: short intro → numbered migration order → per-API section with Before/After code blocks. Translating that to the Unity skill set:
 
 - **Quickstart skill:** install → credential setup → minimal example → pointer to the next skill ("for drag-and-drop, see `elevenlabs:unity-agent-component`").
-- **Component skill:** when to use the component vs raw `Conversation` → `ElevenLabsAgentSetup.Configure` recipe with `Unity_RunCommand` block → credential provider picking → `AudioSource` wiring → `RunSelfTestAsync` to verify. References point to `agent-component.md` for the design rationale.
+- **Component skill:** when to use the component vs raw `Conversation` → `ElevenLabsAgentSetup.Configure` recipe as a `unity command` call → credential provider picking → `AudioSource` wiring → `RunSelfTestAsync` to verify. References point to `agent-component.md` for the design rationale.
 - **Client-tools skill:** typed vs designer-tier registration → sync/async overloads → error handling → reply contracts → reference to the upstream agent-side tool definition docs.
 - **Migration skill:** one section per version pair (v0.2→v0.3, v0.3→v0.4, …) with Before/After code blocks. The migration-order numbering matches the JS precedent exactly.
 - **Audio-routing skill:** decision tree (WebGL? want spatial audio? want mixer routing? → default-mode vs Unity-routed-mode) → opt-in code → mode-specific gotchas.
@@ -95,27 +95,23 @@ Each skill's `references/` is for content that would bloat the main body but the
 
 These are the patterns that distinguish Unity-skill content from the generic `elevenlabs/skills` body shape:
 
-**Explicit unity-mcp tool callouts.** The generic skills don't know `Unity_RunCommand` exists. The Unity skills lean in:
+**Explicit Unity CLI callouts.** The generic skills don't know a live Editor can be driven from the terminal. The Unity skills lean in on the [`unity` CLI](https://docs.unity.com/en-us/unity-cli) (or the same commands as MCP tools via `unity mcp`):
 
-> Use `Unity_RunCommand` to add and configure the component in one call:
-> ```csharp
-> internal class CommandScript : IRunCommand
-> {
->     public void Execute(ExecutionResult result)
->     {
->         var go = GameObject.Find("NPC");
->         var agent = ElevenLabsAgentSetup.Configure(go, new AgentSetupOptions(
->             Credentials: CredentialKind.PublicAgent,
->             AgentId: "agent_xxx",
->             AddAudioSource: true));
->         result.RegisterObjectCreation(agent);
->         result.Log("Configured {0}", agent);
->     }
-> }
+> Add and configure the component in one call, using the Pipeline command the SDK registers (see [agent-component.md → design consequence 6](./agent-component.md#concrete-design-consequences)):
+> ```bash
+> unity command elevenlabs_agent_configure --target NPC --credentials PublicAgent \
+>   --agent_id agent_xxx --add_audio_source true
 > ```
-> Verify with `Unity_GetConsoleLogs` for the `[ElevenLabsAgent:NPC] configured` line.
+> or, without the registered command, through `eval`:
+> ```bash
+> unity command eval 'var agent = ElevenLabs.Agents.ElevenLabsAgentSetup.Configure(
+>   UnityEngine.GameObject.Find("NPC"),
+>   new AgentSetupOptions(Credentials: CredentialKind.PublicAgent, AgentId: "agent_xxx", AddAudioSource: true));
+> return agent.DescribeConfiguration();'
+> ```
+> Verify with `unity command console --level log` for the `[ElevenLabsAgent:NPC] configured` line.
 
-The skill can degrade gracefully when unity-mcp isn't available — same recipe, but the AI walks the user through the Inspector clicks instead.
+The skill needs the project to have `com.unity.pipeline` (`unity pipeline install`). It can degrade gracefully when the CLI or package isn't available — same recipe, but the AI walks the user through the Inspector clicks instead.
 
 **C# idioms over JS/Python.** `Awaitable<T>` not `Promise`, `MonoBehaviour` lifecycle not React hooks, `[SerializeReference]` not class-component-with-state. The skill's example code is C# only.
 
@@ -152,9 +148,9 @@ Open question: does that hybrid model (source-of-truth here, distribution there)
 `elevenlabs/skills` ships an `evals/` directory at the repo root (trigger evals + functional evals). Mirroring that here means each skill carries:
 
 - **Trigger evals** — prompts that should fire the skill ("how do I add an ElevenLabs agent to Unity") vs prompts that should not ("how do I add an animation to a Unity GameObject"). Confirms the `description` field is well-tuned.
-- **Functional evals** — given the skill is loaded, does the AI produce working scaffolding code? For the component skill: does the produced `Unity_RunCommand` script actually compile and configure the component correctly when executed? This is the same shape as the existing `IntegrationTests~/` Playwright smokes, but for skill output.
+- **Functional evals** — given the skill is loaded, does the AI produce working scaffolding code? For the component skill: does the produced `unity command` recipe actually compile and configure the component correctly when executed? This is the same shape as the existing `IntegrationTests~/` Playwright smokes, but for skill output.
 
-Eval runner: tentatively reuse the `pnpm --dir IntegrationTests~/` infrastructure (Vitest already there; Playwright already there for running browser-side checks if a skill produces a WebGL flow). The Unity-side functional eval needs `Unity_RunCommand` to actually execute the produced script against `TestProject/`. That's a meaningful new test surface — probably its own follow-up plan once the first skill ships.
+Eval runner: tentatively reuse the `pnpm --dir IntegrationTests~/` infrastructure (Vitest already there; Playwright already there for running browser-side checks if a skill produces a WebGL flow). The Unity-side functional eval can execute the produced recipe headlessly against `TestProject/` with `unity run TestProject --command <name>` (or `eval_file` on a resident batch Editor), so no GUI Editor is needed. It's still a meaningful new test surface — probably its own follow-up plan once the first skill ships.
 
 For v0.2, ship skills without evals and add the eval suite incrementally; for v1.0, every shipped skill has both trigger and functional evals before promotion.
 

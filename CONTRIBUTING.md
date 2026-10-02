@@ -161,7 +161,9 @@ interface seams instead.
 stream Unity's log live). Failures are formatted for the VS Code problem matcher in
 [`.vscode/tasks.json`](.vscode/tasks.json). Requires Unity **6000.3.6f1** at the path
 `/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity` (or override via
-`$UNITY` / `--unity`).
+`$UNITY` / `--unity`). With the [`unity` CLI](https://docs.unity.com/en-us/unity-cli)
+installed, `unity test TestProject --mode EditMode -- -nographics` runs the same suite against
+whichever editor matches `ProjectVersion.txt` (`--allow-install` fetches it if missing).
 
 ### 4 — WebGL builds (Unity Test Runner via `HostBuild`) — `TestProject/build-*.sh`
 
