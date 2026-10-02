@@ -46,7 +46,7 @@ pnpm --dir Codegen~ run format:check         # Prettier
 pnpm --dir Codegen~ run lint                 # ESLint
 pnpm --dir Codegen~ run typecheck            # TypeScript
 pnpm --dir Codegen~ run generate             # Emit C# DTOs + CSharpier-format them
-pnpm --dir Codegen~ run round-trip           # Serialize/deserialize each DTO via System.Text.Json
+pnpm --dir Codegen~ run round-trip           # Serialize/deserialize each DTO via Newtonsoft.Json
 pnpm --dir Codegen~ run verify:protocol-dtos # Regenerate and assert no git drift
 ```
 
@@ -61,7 +61,7 @@ emit the models (same stack the JS SDK's codegen uses). On top of that:
   `{ type: string, const: foo }`, strip `enum` from string fields (keep them
   plain `string` instead of generating C# enums), break cycles introduced by
   the parser's reference-based inlining of recursive schemas.
-- Custom C# preset: PascalCase property names, `[JsonPropertyName("…")]`
+- Custom C# preset: PascalCase property names, `[JsonProperty("…")]`
   attributes, `const` schemas → `init`-only string literals, required reference
   types get `= null!` to silence CS8618.
 - Post-process: inject `: IncomingSocketEvent` / `: OutgoingSocketEvent` for

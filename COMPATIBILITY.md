@@ -20,7 +20,19 @@ The SDK reads JS→C# callback payloads on WebGL via [`Marshal.PtrToStringUTF8`]
 
 ## Platform support
 
-The public API (`Runtime/`) is cross-platform. WebGL is the most mature target today; native targets (desktop, mobile, XR) are implemented under `Runtime/Native/` and ship in the same package — the right implementation is selected at compile time per platform.
+The public API (`Runtime/Core/`) is cross-platform. Two transports ship in the package, and the one matching the active build target is registered automatically:
+
+| Target | Transport | Connection types | Status |
+|---|---|---|---|
+| WebGL | `@elevenlabs/client` via the JS bridge | WebSocket, WebRTC | Supported, CI-tested in Chromium |
+| Editor (Play Mode), desktop standalone (macOS, Windows, Linux) | Native (`ClientWebSocket`, `UnityEngine.Microphone`, `IAudioGenerator`) | WebSocket only — `ConnectionType.WebRTC` throws `NotSupportedException` | Supported |
+| iOS, Android, XR | Native | WebSocket only | Untested. The SDK doesn't request microphone permission itself. |
+
+Editor Play Mode while the active build target is WebGL isn't supported yet ([#16](https://github.com/elevenlabs/unity/issues/16)); switch the build target to a desktop platform to iterate in the Editor.
+
+## Package dependencies
+
+Installed automatically by the Package Manager: `com.unity.inputsystem` 1.18.0 and `com.unity.nuget.newtonsoft-json` 3.2.1.
 
 ## Additional WebGL setup
 
@@ -51,9 +63,9 @@ When you pass an `AudioSource` to `ConversationOptions.OutputAudioSource`, the f
 | `maxDistance` | `PannerNode.maxDistance` | Direct |
 | `rolloffMode` (Linear / Logarithmic) | `PannerNode.distanceModel` | `AudioRolloffMode.Custom` falls back to Logarithmic with a one-time warning |
 | `panStereo` | `StereoPannerNode.pan` | Effective when `spatialBlend < 1` |
-| `dopplerLevel` | Sampled per-frame velocity → `PannerNode` position pre-emphasis | Approximate |
+| `dopplerLevel` | ❌ Not supported | Forwarded but has no effect — Web Audio has no doppler control |
 | `outputAudioMixerGroup` | ❌ Not supported | One-time warning when first observed as non-null |
-| Custom rolloff `AnimationCurve` | ❌ Not supported | One-time warning; falls back to `rolloffMode` |
+| Custom rolloff `AnimationCurve` | ❌ Not supported | Falls back to Logarithmic (see `rolloffMode` above) |
 | `bypassEffects`, `bypassListenerEffects`, `bypassReverbZones` | ❌ Not supported | Silently ignored — no Web Audio analog |
 | `priority`, `spread`, `reverbZoneMix` | ❌ Not supported | Silently ignored |
 
@@ -70,6 +82,6 @@ Use the SDK's cross-platform reading APIs instead — they're tuned to return co
 | What you want | Native-only API (silent on WebGL) | Cross-platform SDK API |
 |---|---|---|
 | Scalar volume `[0, 1]` for an envelope / meter / bob | `audioSource.GetOutputData(buf); rms(buf);` | `conversation.GetOutputVolume()` |
-| Frequency-domain magnitudes | `AudioSource.GetSpectrumData(...)` | `conversation.GetByteFrequencyData(buf)` |
+| Frequency-domain magnitudes | `AudioSource.GetSpectrumData(...)` | `conversation.GetOutputByteFrequencyData(buf)` |
 
 The shipped samples under `Samples~/` follow this rule — copy from them.

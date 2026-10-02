@@ -11,20 +11,24 @@ Runtime/          C# source compiled into the shipped package
                   internal IConnection / IInputController / IOutputController abstractions
                   the platform impls satisfy, and the generated protocol DTOs under
                   Protocol/*.g.cs. No platform restrictions.
-  WebGL/          Editor + WebGL asmdef `ElevenLabs.Agents.WebGL`. Carries the bridge
-                  primitives (JsObject, JsFunction, BridgeCallback handle types + their
+  WebGL/          Bridge primitives (JsObject, JsFunction, BridgeCallback handle types + their
                   IJsObject / IJsFunction interface seams) and the Bridged/ folder of
                   IConnection / IInputController / IOutputController implementations that
-                  wrap @elevenlabs/client.
-  (Native/        Phase 7 — not yet present. Will mirror Runtime/WebGL/ as an
-                  excludePlatforms=WebGL asmdef carrying native IConnection /
-                  IInputController / IOutputController implementations.)
+                  wrap @elevenlabs/client. Compiled by the Editor + WebGL asmdef
+                  `ElevenLabs.Agents.WebGL`, which sits at `Runtime/` itself — so a new file
+                  dropped directly into `Runtime/` lands in that assembly.
+  Native/         excludePlatforms=WebGL asmdef `ElevenLabs.Agents.Native`: ClientWebSocket
+                  connection, UnityEngine.Microphone input, IAudioGenerator-based output
+                  (UnityAudioSourceOutput + the IAudioOutputEngine implementations), and
+                  NativeSessionLauncher.
 
-Editor/           Editor-only C# (HostBuild entry points for WebGL builds, inspectors,
-                  build post-processors, validation).
+Editor/           Editor-only C#: HostBuild entry points for the WebGL and standalone smoke
+                  builds, a build preprocessor that validates WebGL Player Settings, and the
+                  link.xml injector.
 
 Tests/
-  Editor/         Unity Test Runner tests (Edit Mode — run headlessly in CI).
+  Editor/         Edit Mode tests (run headlessly in CI). Native/ is its own asmdef.
+  Runtime/Native/ PlayMode characterization tests for Unity's audio APIs (run manually).
 
 Plugins/
   WebGL/          .jslib bundles — Unity's required location for WebGL native plugins.
@@ -70,7 +74,7 @@ TestProject/      Embedded dev Unity host project. Used to (a) run the Edit Mode
                   integration tests. Not shipped with the package. Most of Assets/ is
                   gitignored so a fresh clone always opens to a known-good state.
 
-IntegrationTests~/  Vitest + Playwright tests that drive the two WebGL builds produced by
+IntegrationTests~/  Vitest + Playwright tests that drive the WebGL builds produced by
                     TestProject/ from a headless Chromium. Runs entirely outside Unity.
 
 Docs~/            Design documents and RFCs. Read these before making architectural changes;
@@ -102,7 +106,7 @@ with **pnpm**. Run commands with `pnpm --dir <workspace> run <script>` from the 
 | Workspace | Purpose | Commands |
 |---|---|---|
 | [`Bridge~/`](Bridge~/) | JS↔C# primitives + connection bundles | `format:check`, `lint`, `typecheck`, `test`, `verify:primitives`, `verify:connection` |
-| [`Codegen~/`](Codegen~/) | Protocol DTO codegen from AsyncAPI spec | `format:check`, `lint`, `typecheck`, `generate`, `round-trip`, `verify:protocol-dtos` |
+| [`Codegen~/`](Codegen~/) | Protocol DTO codegen from AsyncAPI spec | `format:check`, `lint`, `typecheck`, `test`, `generate`, `round-trip`, `verify:protocol-dtos` |
 | [`TestProject/`](TestProject/) | Edit Mode test runner driver (`run-tests.ts`) | `typecheck`, `test` |
 | [`IntegrationTests~/`](IntegrationTests~/) | Vitest + Playwright browser-mode harness | `typecheck`, `test`, `setup` (one-time Chromium install) |
 
@@ -140,13 +144,14 @@ replaced with fakes; functions are called directly in Node and their side-effect
 ### 2 — Codegen round-trip (Node.js + `dotnet run`) — `Codegen~/round-trip/`
 
 **What:** the generated `Runtime/Core/Protocol/*.g.cs` DTOs round-trip cleanly through
-`System.Text.Json` — each outgoing event type serialises to the expected wire shape and each
+Newtonsoft.Json — each outgoing event type serialises to the expected wire shape and each
 incoming event type deserialises through the polymorphic converter.
 **How:** the generator re-emits the DTOs **and** a sibling `Codegen~/round-trip/Program.cs`
 that exercises every type; `dotnet run` compiles and runs it.
 **Run:** `pnpm --dir Codegen~ run round-trip`. The companion `pnpm --dir Codegen~ run
 verify:protocol-dtos` regenerates and asserts `git diff --exit-code` to catch drift between
-the AsyncAPI spec and the committed DTOs.
+the AsyncAPI spec and the committed DTOs; `pnpm --dir Codegen~ run test` unit-tests the
+generator's C# preset.
 
 ### 3 — C# Edit Mode tests (Unity Test Runner) — `Tests/Editor/`
 
@@ -163,21 +168,24 @@ stream Unity's log live). Failures are formatted for the VS Code problem matcher
 `/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity` (or override via
 `$UNITY` / `--unity`).
 
-### 4 — WebGL builds (Unity Test Runner via `HostBuild`) — `TestProject/build-*.sh`
+### 4 — Player builds (`HostBuild` via `-executeMethod`) — `TestProject/build-*.sh`
 
-**What:** that the C# + jslib code actually compiles into a working WebGL artifact via IL2CPP.
+**What:** that the C# + jslib code actually compiles into a working IL2CPP player.
 **How:** [`Editor/HostBuild.cs`](Editor/HostBuild.cs) constructs an empty scene with one of
 the smoke MonoBehaviours, runs `BuildPipeline.BuildPlayer`, and exits with the build result.
-Two entry points produce two artifacts under separate dirs so each browser test can run
-against its own build:
+Each entry point writes to its own directory so each browser test can run against its own
+build:
 
 | Script | Sample | Output |
 |---|---|---|
 | `bash TestProject/build-webgl.sh` | `Samples/BridgeSmokeTest/` (primitives) | `TestProject/Build/WebGL/` |
 | `bash TestProject/build-webgl-conversation.sh` | `Samples/ConversationSmokeTest/` | `TestProject/Build/WebGLConversationSmoke/` |
+| `bash TestProject/build-webgl-conversation-spatial.sh` | `Samples/ConversationSmokeTest/` (spatial) | `TestProject/Build/WebGLConversationSpatialSmoke/` |
+| `bash TestProject/build-standalone.sh` | `Samples/StandaloneSmokeTest/` | `TestProject/Build/Standalone/` |
 
-IL2CPP compilation is the bottleneck — expect each build to take several minutes. Both must
-exist for the browser tests below to run.
+IL2CPP compilation is the bottleneck — expect each build to take several minutes. The three
+WebGL builds must exist for the browser tests below to run. The standalone smoke is run by
+hand; see [`Samples/StandaloneSmokeTest/README.md`](Samples/StandaloneSmokeTest/README.md).
 
 ### 5 — Browser integration tests (Vitest + Playwright) — `IntegrationTests~/`
 
@@ -191,11 +199,15 @@ exist for the browser tests below to run.
   Playwright's `page.on('websocket')` to lock the on-wire protocol shape (handshake,
   `user_message` payload, `conversation_initiation_metadata` / `agent_response` / `audio`
   frame sequence).
+- The **spatial smoke** drives the spatial conversation build and asserts the Web Audio sink
+  mirrors the supplied `AudioSource`.
+- The **conversation shape** test statically inspects the conversation build's emitted
+  framework JS.
 
 **How:** [`IntegrationTests~/src/playwright-harness.ts`](IntegrationTests~/src/playwright-harness.ts)
 exposes a shared `runWebGLSmoke(opts)` helper — both test files declare pass / fail / skip
 matchers and let the helper resolve a typed outcome from the console + page-error streams.
-**Run:** `pnpm --dir IntegrationTests~ run test`. Requires both WebGL builds to exist on
+**Run:** `pnpm --dir IntegrationTests~ run test`. Requires the WebGL builds to exist on
 disk (a missing build surfaces an explicit error from the harness, not a confusing browser
 404).
 
@@ -225,6 +237,7 @@ pnpm --dir Codegen~ run format:check
 pnpm --dir Codegen~ run lint
 pnpm --dir Codegen~ run typecheck
 pnpm --dir Codegen~ run generate
+pnpm --dir Codegen~ run test
 pnpm --dir Codegen~ run round-trip
 pnpm --dir Codegen~ run verify:protocol-dtos
 
@@ -232,6 +245,7 @@ pnpm --dir TestProject run typecheck
 pnpm --dir TestProject run test
 bash TestProject/build-webgl.sh                # only when WebGL surface changed
 bash TestProject/build-webgl-conversation.sh   # only when WebGL or Conversation changed
+bash TestProject/build-webgl-conversation-spatial.sh   # only when WebGL audio output changed
 
 pnpm --dir IntegrationTests~ run typecheck
 pnpm --dir IntegrationTests~ run test
@@ -248,15 +262,25 @@ immediately visible.
   internal abstractions (`IConnection` / `IInputController` / `IOutputController`); platform
   asmdefs ship the implementations.
 - WebGL-specific C# lives under `Runtime/WebGL/` in `ElevenLabs.Agents.WebGL`, scoped to
-  `WebGL` + `Editor` platforms. Native C# (Phase 7) will live under `Runtime/Native/` in an
-  asmdef with no platform restriction and `excludePlatforms=WebGL`.
-- **Platform selection happens at runtime via a static delegate, not at compile time with
-  `#if`.** `Conversation.StartSessionAsync` calls a `internal static Func<ConversationOptions,
-  Awaitable<Conversation>>? SessionFactory` registered by each platform's launcher (see
-  [`Runtime/WebGL/Bridged/BridgedSessionLauncher.cs`](Runtime/WebGL/Bridged/BridgedSessionLauncher.cs)
-  for the WebGL registration via `[RuntimeInitializeOnLoadMethod]` and the Editor mirror via
-  `[InitializeOnLoadMethod]`). This pattern is what lets Core stay platform-free without
-  taking a build-time reference on either platform asmdef; each asmdef's `includePlatforms`
-  guarantees at most one launcher is included per build, so "last write wins" is harmless.
+  `WebGL` + `Editor` platforms. Native C# lives under `Runtime/Native/` in
+  `ElevenLabs.Agents.Native` (`excludePlatforms=WebGL`).
+- **Core never references a platform asmdef.** `Conversation.StartSessionAsync` calls an
+  `internal static Func<ConversationOptions, Awaitable<Conversation>>? SessionFactory` that
+  each platform's launcher assigns on load:
+  [`BridgedSessionLauncher.cs`](Runtime/WebGL/Bridged/BridgedSessionLauncher.cs) and
+  [`NativeSessionLauncher.cs`](Runtime/Native/NativeSessionLauncher.cs). Both asmdefs compile
+  in the Editor, so each launcher's registration is wrapped in `#if UNITY_WEBGL` /
+  `#if !UNITY_WEBGL` to make exactly one of them assign the factory for the active build
+  target.
 - `.jslib` files must be placed under `Plugins/WebGL/` for Unity's build pipeline to pick
   them up.
+
+## Submitting changes
+
+- For anything beyond a small fix, open an [issue](https://github.com/elevenlabs/unity/issues/new/choose) first so the approach can be agreed before you invest in it.
+- Branch from `main`, run the verification layers your change touches (see [Running the full verification suite](#running-the-full-verification-suite)), and fill in the pull request template.
+- Add an entry under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md) for user-facing changes, and call out any public API change in the PR description.
+- CI runs the lint lane (formatters, linters, typechecks, JS unit tests, generated-artefact drift) on every PR. The Unity lanes (Edit Mode tests, WebGL builds, browser integration tests) run with Unity license secrets, so on PRs from forks they wait until a maintainer has reviewed the changes and approved the run.
+- Report security vulnerabilities privately per [`SECURITY.md`](.github/SECURITY.md), not in issues or PRs.
+
+By contributing you agree that your contributions are licensed under the repository's [MIT license](LICENSE).

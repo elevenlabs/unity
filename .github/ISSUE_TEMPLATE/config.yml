@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/elevenlabs/unity/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue. See SECURITY.md.
+  - name: ElevenAgents documentation
+    url: https://elevenlabs.io/docs/eleven-agents/overview
+    about: Agent configuration, voices, tools, and platform questions.
+  - name: Ask a question (Discord)
+    url: https://discord.com/invite/elevenlabs
+    about: General questions and community help.
