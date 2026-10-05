@@ -123,12 +123,17 @@ Unity **6000.3.6f1** (Unity 6 LTS) is installed locally at
 project lives at `TestProject/` at the repo root (non-tilde name — Unity
 batchmode rejects `~`-suffixed project paths).
 
-Open via Unity Hub (point it at `TestProject/`) or headless:
+Drive Unity through the [`unity` CLI](https://docs.unity.com/en-us/unity-cli)
+(on `PATH`; `unity --help`, `unity doctor` to check it). It resolves the
+editor from `ProjectVersion.txt`, so no hard-coded editor path is needed:
 
 ```bash
-"/Applications/Unity/Hub/Editor/6000.3.6f1/Unity.app/Contents/MacOS/Unity" \
-  -batchmode -nographics -projectPath TestProject -logFile - -quit
+unity open TestProject                              # GUI editor
+unity run TestProject -- -nographics -logFile -     # headless batch run (never pass -batchmode / -quit / -projectPath)
 ```
+
+For the full CLI reference, `unity skill install claude-code` installs
+Unity's own agent skill user-globally.
 
 ### Edit Mode tests
 
@@ -152,19 +157,48 @@ in the VS Code Problems panel.
 > the test runner fires and exits silently with no results. The test runner
 > exits the editor itself once tests finish.
 
-### Driving a live Unity Editor via MCP
+`unity test TestProject --mode EditMode -- -nographics` runs the same suite
+without the problem-matcher summary. It exits `8` when tests fail and `6` when
+the run never produced a verdict (compile error, license, editor already open
+on the project).
 
-When the user has Unity open, [unity-mcp](https://github.com/Unity-Technologies/unity-mcp)
-exposes `Unity_ManageEditor`, `Unity_RunCommand`, `Unity_GetConsoleLogs`,
-`Unity_SceneView_*`, etc. Call `Unity_ManageEditor Action=GetState` first —
-the live editor is often against `/Users/kraenhansen/UnityProjects/Getting Started`,
+### Driving a live Unity Editor
+
+`unity command` drives a running editor through its Pipeline server, which
+needs the `com.unity.pipeline` package in that project. Neither `TestProject`
+nor Getting Started has it committed; add it with
+`unity pipeline install --project-path <project>`.
+
+The live editor is often against `/Users/kraenhansen/UnityProjects/Getting Started`,
 which references this package via `file:` with `testables: ["io.elevenlabs.agents"]`,
-so our runtime + samples + PlayMode tests are reachable from there.
+so our runtime + samples + PlayMode tests are reachable from there. Always pass
+`--project-path`, since otherwise the target follows the shell's cwd:
 
-Caveats: PlayMode audio callbacks (`PCMReaderCallback` etc.) only fire when
-the Unity Editor window is focused — ask the user to focus it before
-measuring. `Unity_GetConsoleLogs` sometimes returns empty;
-`~/Library/Logs/Unity/Editor.log` is the reliable fallback.
+```bash
+GS="/Users/kraenhansen/UnityProjects/Getting Started"
+unity status                                            # GUI editors show state "ready"
+unity command --project-path "$GS" --query console      # discover commands; omit --query for the full catalog
+unity command eval 'return UnityEngine.Application.unityVersion;' --project-path "$GS"
+unity command console --tail 50 --level warn --project-path "$GS"
+unity command run_tests --project-path "$GS"            # tests in the live editor (incl. PlayMode)
+unity command capture_scene_view --save_path shot.png --project-path "$GS"
+```
+
+`unity mcp` serves the same command catalog as MCP tools
+(`unity mcp configure claude-code` registers it); either route works.
+
+Caveats:
+
+- PlayMode audio callbacks (`PCMReaderCallback` etc.) only fire when the
+  Unity Editor window is focused — ask the user to focus it before measuring.
+- A batch-mode editor launched without `-quit` stays resident and serves
+  commands, but `unity status` doesn't list it; probe with
+  `unity list --project-path <project>`. `unity command quit` fails in batch
+  mode; stop it with `unity close <project> --force`.
+- Compile errors put the editor in Safe Mode, where the Pipeline server
+  doesn't load and every command fails to connect. Confirm with
+  `unity pipeline list`, then read the errors from
+  `~/Library/Logs/Unity/Editor.log` (grep for `error CS`).
 
 ## Unity-owned `.meta` files
 

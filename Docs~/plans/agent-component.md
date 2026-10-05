@@ -34,12 +34,12 @@ The design has to serve four personas without forcing the harder ones onto the e
 | **Designer** (no C#) | Drag, drop, wire UnityEvents in the Inspector | Write any code, understand `Awaitable`, know what a transport is |
 | **Scripter** (game logic in C#) | Component reference → `agent.SendUserMessage(...)`; subscribe to typed events | Re-implement lifecycle, single-session policy, subscribe/unsubscribe boilerplate |
 | **Engineer** (full control) | Component as opt-in convenience; low-level `Conversation` still available | Be forced through the component for advanced setups (custom transports, programmatic config, runtime tool composition) |
-| **AI assistant** (via [unity-mcp](https://github.com/Unity-Technologies/unity-mcp)) | Add the component, wire dependencies (AudioSource, colliders), configure providers, run a self-test — all without a human pointing and clicking | Reverse-engineer the component by trial-and-error; fight `[SerializeReference]` ergonomics through `SerializedObject`; parse free-form `Debug.Log` to know what happened |
+| **AI assistant** (via the [`unity` CLI](https://docs.unity.com/en-us/unity-cli) or its `unity mcp` server) | Add the component, wire dependencies (AudioSource, colliders), configure providers, run a self-test — all without a human pointing and clicking | Reverse-engineer the component by trial-and-error; fight `[SerializeReference]` ergonomics through `SerializedObject`; parse free-form `Debug.Log` to know what happened |
 
 Two of these rows are load-bearing:
 
 - **Engineer:** the component is *additive over* `Conversation`, not a replacement. A user who needs full control still writes `Conversation.StartSessionAsync(options)` directly — the new component is one of several ways to use the SDK.
-- **AI assistant:** for users working in Claude Code + unity-mcp this is arguably the *primary* onboarding path, not a fallback. "Add an ElevenLabs agent to my NPC" should scaffold + wire + self-test without the human ever opening the Inspector. See [AI-assisted authoring](#ai-assisted-authoring-via-unity-mcp).
+- **AI assistant:** for users working in Claude Code + the `unity` CLI this is arguably the *primary* onboarding path, not a fallback. "Add an ElevenLabs agent to my NPC" should scaffold + wire + self-test without the human ever opening the Inspector. See [AI-assisted authoring](#ai-assisted-authoring-via-the-unity-cli).
 
 ## What the current TalkingBox tells us
 
@@ -297,9 +297,9 @@ public async Awaitable StartSessionAsync(CancellationToken ct = default)
 
 ---
 
-## AI-assisted authoring via unity-mcp
+## AI-assisted authoring via the Unity CLI
 
-[unity-mcp](https://github.com/Unity-Technologies/unity-mcp) gives an AI assistant the ability to add components, configure their fields, run editor scripts (`Unity_RunCommand`), generate assets (`Unity_AssetGeneration_GenerateAsset`), read the Console (`Unity_GetConsoleLogs`), and capture scene state (`Unity_SceneView_*`). A user in Claude Code can say *"add an ElevenLabs agent to my NPC character with push-to-talk"* and the assistant runs the scaffolding end-to-end. Designing the component with this workflow in mind costs little and makes the AI path durable instead of fragile.
+The [`unity` CLI](https://docs.unity.com/en-us/unity-cli) drives a running Editor through the `com.unity.pipeline` package: an AI assistant can add components (`unity command add_component`), set serialized fields, run editor C# (`eval` / `eval_file`), read the Console (`console`), capture scene state (`capture_scene_view`), and run tests (`run_tests`). `unity mcp` serves the same catalog as MCP tools. A user in Claude Code can say *"add an ElevenLabs agent to my NPC character with push-to-talk"* and the assistant runs the scaffolding end-to-end. Designing the component with this workflow in mind costs little and makes the AI path durable instead of fragile.
 
 ### Concrete design consequences
 
@@ -321,7 +321,7 @@ public sealed record AgentSetupOptions(
     bool            EnforceSingleSession = true);
 ```
 
-`Configure` is the single entry point AI scripts call. It's add-or-find for the component, add-or-find for the `AudioSource`, set-not-replace for the override toggles. Re-running with the same input is a no-op. Re-running with changed input mutates exactly the deltas. Without this, every `Unity_RunCommand` script reinvents the same `GetComponent ?? AddComponent` dance and inevitably leaves orphan state on the second run.
+`Configure` is the single entry point AI scripts call. It's add-or-find for the component, add-or-find for the `AudioSource`, set-not-replace for the override toggles. Re-running with the same input is a no-op. Re-running with changed input mutates exactly the deltas. Without this, every `unity command eval` snippet reinvents the same `GetComponent ?? AddComponent` dance and inevitably leaves orphan state on the second run.
 
 **2. Introspection that round-trips through chat.** A `string DescribeConfiguration()` method (and structured `AgentConfigSnapshot` record behind it) so the assistant can read the component back without parsing serialized YAML:
 
@@ -351,7 +351,7 @@ The hash-not-value rule for the agent ID is deliberate — secrets shouldn't end
 [ElevenLabsAgent:{name}] tool '<name>' invoked params=<json>
 ```
 
-`Unity_GetConsoleLogs` returns these as grep targets. The convention already exists informally (`[ConvSmoke]`, `[TalkingBox:{name}]`); formalising it in the component is one line of code and a sentence in the docs.
+`unity command console` returns these as grep targets. The convention already exists informally (`[ConvSmoke]`, `[TalkingBox:{name}]`); formalising it in the component is one line of code and a sentence in the docs.
 
 **4. Programmatic ergonomics for `[SerializeReference]`.** Polymorphic credential providers are great for human Inspector use but painful via `SerializedObject` — `ManagedReferenceUtility.SetManagedReference` plus type-string lookup is error-prone, and a misspelled type name silently produces a null field. Two mitigations:
 
@@ -375,6 +375,8 @@ public sealed record HealthReport(
 
 Resolves the credential, opens a session, waits for `Connected`, sends a one-token contextual update, ends the session. Reports timings on success, the error on failure. The AI runs this after `Configure` and surfaces the result back to the human — *"agent configured; self-test passed in 312 ms"*. Same method is a `[ContextMenu("Run Self-Test")]` for humans. Same method is the basis for the CI smoke check that already lives in `Samples/ConversationSmokeTest/`.
 
+**6. Register the setup surface as Pipeline commands.** An Editor-assembly wrapper tags `Configure`, `Describe` and `RunSelfTestAsync` with `[CliCommand]` (e.g. `elevenlabs_agent_configure`, `elevenlabs_agent_describe`, `elevenlabs_agent_self_test`), so the assistant calls them by name with a typed parameter schema instead of composing C# for `eval`. They then show up in `unity command` / `unity list` and as `unity mcp` tools, and CI can run them headlessly with `unity run <project> --command <name>`. The wrapper compiles only when `com.unity.pipeline` is present (asmdef `versionDefines`), so the package doesn't take a hard dependency on it.
+
 ### Sample scenes become scaffold scripts
 
 Hand-built `.unity` files for samples are binary YAML — painful to diff, painful to regenerate, painful for the AI to modify. The same samples expressed as scaffold scripts:
@@ -397,19 +399,19 @@ public static class QuickStartScaffold
 }
 ```
 
-…are trivial diffs (one C# file), trivially regenerable (re-run the menu item), AI-mutable via `Unity_RunCommand`, and self-document the recommended setup. Ship the scaffold scripts; let users (or the AI) generate the `.unity` files locally. The `.unity` files themselves stay gitignored under `Samples~/Generated/`.
+…are trivial diffs (one C# file), trivially regenerable (re-run the menu item), AI-mutable via `unity command eval` / `menu`, and self-document the recommended setup. Ship the scaffold scripts; let users (or the AI) generate the `.unity` files locally. The `.unity` files themselves stay gitignored under `Samples~/Generated/`.
 
-Asset generation for those samples — character sprites, sound effects, the talking-box's pulse audio — is `Unity_AssetGeneration_GenerateAsset` territory. Document one example end-to-end (*"have Claude generate a wizard sprite and wire it to the agent"*) rather than pretending the SDK ships pre-baked assets.
+Asset generation for those samples — character sprites, sound effects, the talking-box's pulse audio — sits outside the Pipeline command set; the assistant generates them with an asset-generation tool (e.g. ElevenLabs sound effects) and brings them in with `unity command import_asset`. Document one example end-to-end (*"have Claude generate a wizard sprite and wire it to the agent"*) rather than pretending the SDK ships pre-baked assets.
 
 ### How the AI knows about the component
 
-The setup helpers + introspection + self-test surface above are necessary but not sufficient — an AI assistant first has to *know* this SDK exists, what idioms it uses, and which APIs to call. That's what coding-agent skills are for, and the strategy is its own plan: [`unity-coding-agent-skills.md`](./unity-coding-agent-skills.md). The relevant takeaway here is that one of the planned skills — `elevenlabs:unity-agent-component` — is built *around* the `ElevenLabsAgentSetup.Configure` / `Describe` / `RunSelfTestAsync` API surface this section proposes. Without those primitives the skill body would devolve into "tell the user where to click in the Inspector"; with them, the skill emits ready-to-run `Unity_RunCommand` recipes. The component plan and the skills plan are co-evolving for this reason.
+The setup helpers + introspection + self-test surface above are necessary but not sufficient — an AI assistant first has to *know* this SDK exists, what idioms it uses, and which APIs to call. That's what coding-agent skills are for, and the strategy is its own plan: [`unity-coding-agent-skills.md`](./unity-coding-agent-skills.md). The relevant takeaway here is that one of the planned skills — `elevenlabs:unity-agent-component` — is built *around* the `ElevenLabsAgentSetup.Configure` / `Describe` / `RunSelfTestAsync` API surface this section proposes. Without those primitives the skill body would devolve into "tell the user where to click in the Inspector"; with them, the skill emits ready-to-run `unity command` recipes. The component plan and the skills plan are co-evolving for this reason.
 
 ### The Editor wizard, reframed
 
-The "Editor wizard / setup window" originally deferred in this plan reframes: **the AI assistant is the wizard** for users who work in Claude Code + unity-mcp. The docs guide them with *"tell Claude: 'set up a push-to-talk agent on the player character'"* instead of *"open the wizard, click Next, fill these fields."*
+The "Editor wizard / setup window" originally deferred in this plan reframes: **the AI assistant is the wizard** for users who work in Claude Code + the `unity` CLI. The docs guide them with *"tell Claude: 'set up a push-to-talk agent on the player character'"* instead of *"open the wizard, click Next, fill these fields."*
 
-A native Editor wizard still has a place for users who don't have unity-mcp configured — but it moves from "primary path" to "fallback for non-AI users." That softens the timing: ship the AI-friendly setup APIs in v0.2 alongside the component itself, defer the GUI wizard to v0.3 when there's real user data on which subset of fields actually trip people up.
+A native Editor wizard still has a place for users who don't drive Unity from a coding agent — but it moves from "primary path" to "fallback for non-AI users." That softens the timing: ship the AI-friendly setup APIs in v0.2 alongside the component itself, defer the GUI wizard to v0.3 when there's real user data on which subset of fields actually trip people up.
 
 ---
 
@@ -431,7 +433,7 @@ Each sample ships as a scaffold script per [Sample scenes become scaffold script
 ## What this plan deliberately defers
 
 - **Visual scripting integration** (Unity Visual Scripting / Bolt). UnityEvents already give designers a hook; visual-scripting nodes are polish for whichever version we hear consistent demand at.
-- **Native Editor wizard / setup window.** A right-click `GameObject ▸ ElevenLabs ▸ Agent` menu item ships with the component. A full GUI wizard defers to v0.3 — the [AI-assisted authoring](#ai-assisted-authoring-via-unity-mcp) path covers the same need for unity-mcp users, and a GUI wizard for non-AI users is better designed after real feedback on which fields actually trip people up.
+- **Native Editor wizard / setup window.** A right-click `GameObject ▸ ElevenLabs ▸ Agent` menu item ships with the component. A full GUI wizard defers to v0.3 — the [AI-assisted authoring](#ai-assisted-authoring-via-the-unity-cli) path covers the same need for coding-agent users, and a GUI wizard for non-AI users is better designed after real feedback on which fields actually trip people up.
 - **Persistent / cross-scene sessions.** `DontDestroyOnLoad` on an `ElevenLabsAgent` should Just Work, but stateful persistence (conversation token reuse, transcript replay across scenes) is a separate design.
 - **Component pooling.** 50 NPCs each with an `ElevenLabsAgent` ≠ 50 concurrent sessions — the single-session policy handles that — but "one shared session that swaps between NPCs as the player walks past" is a separate pattern.
 - **ScriptableObject preset templates.** Useful for "all our merchant agents share these overrides"; ship later if users report duplication pain.
