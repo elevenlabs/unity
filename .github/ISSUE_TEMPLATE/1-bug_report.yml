@@ -1,0 +1,79 @@
+name: Bug report
+description: Create a bug report for the ElevenAgents Unity SDK
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug with the **ElevenAgents Unity SDK**. Please fill out the sections below to help us understand and resolve the issue.
+
+        **Never paste an ElevenLabs API key, signed URL, or conversation token** into this issue.
+
+  - type: textarea
+    attributes:
+      label: Description
+      description: |
+        **Describe the bug in detail and provide clear steps to reproduce it.**
+
+        Include information such as:
+        - What you were trying to achieve.
+        - What happened instead.
+        - Any relevant `ConversationOptions` or agent configuration.
+      placeholder: |
+        **Steps to reproduce:**
+        1. ...
+        2. ...
+
+        **Expected behavior:**
+
+        **Actual behavior:**
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Package version
+      description: The `io.elevenlabs.agents` version, or the git commit from `Packages/packages-lock.json`.
+      placeholder: 0.1.0 (or a commit SHA)
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Unity version
+      placeholder: 6000.3.6f1
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Editor (Play Mode)
+        - Standalone (macOS)
+        - Standalone (Windows)
+        - Standalone (Linux)
+        - WebGL
+        - iOS
+        - Android
+        - XR
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Code example
+      description: A minimal snippet (or a link to a small project) that reproduces the problem.
+      render: csharp
+  - type: textarea
+    attributes:
+      label: Logs
+      description: |
+        Relevant output from the Unity Console, `Editor.log` / `Player.log`, or the browser console for WebGL builds.
+      render: text
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Add any other context or screenshots about the problem here.
+      placeholder: |
+        - Related issues:
+        - Possible workaround:
+        - ...

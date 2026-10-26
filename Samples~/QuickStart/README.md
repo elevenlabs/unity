@@ -50,7 +50,8 @@ Assumes the SDK is already installed in a Unity 6.3 LTS project — see the
      [`agents` skill](https://github.com/elevenlabs/skills/tree/main/agents)
      (`npx skills add elevenlabs/skills`). Leave `Signed Url` blank for
      public agents; fill it in for private agents that require a pre-signed
-     URL.
+     URL. Leave `Connection Type` on WebSocket unless you're building for
+     WebGL — WebRTC is only available there.
 
 3. **Open the imported scene** (`QuickStart.unity`) and press Play. The
    scene contains a single GameObject named `QuickStart` carrying the
@@ -63,8 +64,8 @@ nothing else happens, so your project still runs cleanly.
 
 ## Next steps
 
-Once the QuickStart is running, the other samples in this package layer one
-feature each on top of the same pattern: client tools, dynamic variables, and
-a microphone visualizer. The full conversation API surface lives on the
+Once the QuickStart is running, the GettingStarted sample builds on the same
+pattern with trigger-based sessions, dynamic variables, overrides, and spatial
+audio. The full conversation API surface lives on the
 `Conversation` class (`ElevenLabs.Agents`); see the XML documentation comments
 in `Runtime/Core/Conversation.cs` for the complete event and method list.
