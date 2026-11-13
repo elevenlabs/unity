@@ -121,11 +121,11 @@ namespace ElevenLabs.Agents
         /// Fired when the agent invokes a client tool that hasn't been
         /// registered via <see cref="RegisterTool{TParams, TResult}(string, Func{TParams, TResult})"/>.
         /// Mirrors the JS SDK's <c>onUnhandledClientToolCall</c>: while at
-        /// least one subscriber is attached, the SDK suppresses the
-        /// <see cref="ErrorOccurred"/> + automatic <c>client_tool_result</c>
-        /// error response that would otherwise fire and hands the raw call to
-        /// the subscriber to deal with. Detaching all subscribers restores
-        /// the default behaviour.
+        /// least one subscriber is attached, the call is handed to the
+        /// subscriber instead of raising <see cref="ErrorOccurred"/>.
+        /// Either way the agent is sent a <c>client_tool_result</c> error
+        /// with <c>error_type</c> <c>tool_not_found</c> when it expects a
+        /// response, so it doesn't wait on a result that never comes.
         /// </summary>
         public event Action<ClientToolCallArgs>? UnhandledClientToolCall;
 
@@ -622,21 +622,23 @@ namespace ElevenLabs.Agents
             var args = evt.ToArgs();
             if (!_toolHandlers.TryGetValue(args.ToolName, out var dispatcher))
             {
-                // Mirrors BaseConversation.handleClientToolCall's else branch:
-                // when at least one subscriber is attached the SDK hands the
-                // raw call over and stops — no ErrorOccurred, no automatic
-                // tool_result is_error=true response. The agent will hang
-                // unless the subscriber arranges its own follow-up, matching
-                // JS-SDK semantics.
+                // The agent always gets a tool_not_found result, even when a
+                // subscriber is notified: there is no public API for the
+                // subscriber to answer the call itself, so without it the
+                // agent would wait on a result that never comes. The
+                // subscriber replaces ErrorOccurred only. Sent before the
+                // event so a throwing subscriber can't swallow the result.
+                var message = $"No client tool registered with name '{args.ToolName}'.";
+                SendToolErrorIfExpected(args, message, errorType: "tool_not_found");
                 var unhandled = UnhandledClientToolCall;
                 if (unhandled != null)
                 {
                     unhandled.Invoke(args);
-                    return;
                 }
-                var message = $"No client tool registered with name '{args.ToolName}'.";
-                RaiseError(message);
-                SendToolErrorIfExpected(args, message, errorType: "tool_not_found");
+                else
+                {
+                    RaiseError(message);
+                }
                 return;
             }
 

@@ -31,7 +31,7 @@ If you're porting code or following JS docs, here's how the JS SDK's error surfa
 | --- | --- |
 | `SessionConnectionError` thrown from `Conversation.startSession(...)` | Exception thrown from `Conversation.StartSessionAsync(...)` — `BridgeException` on WebGL, transport-layer `System.Net.*` / `System.IO.*` exceptions on native. The `closeCode` / `closeReason` JS fields are folded into the exception message. |
 | `onError(message, context)` callback option | `Conversation.ErrorOccurred` event (`Action<string>`). The JS `context` argument is currently flattened into the message; the planned `ErrorArgs` record surfaces it separately. |
-| `onUnhandledClientToolCall` callback option | `Conversation.UnhandledClientToolCall` event (`Action<ClientToolCallArgs>`). Subscriber attached → SDK suppresses both `ErrorOccurred` and the automatic `client_tool_result is_error=true` send for the unknown tool. |
+| `onUnhandledClientToolCall` callback option | `Conversation.UnhandledClientToolCall` event (`Action<ClientToolCallArgs>`). Subscriber attached → the event fires instead of `ErrorOccurred` for the unknown tool. Unlike the JS SDK, the agent is still sent `client_tool_result is_error=true` (`error_type: tool_not_found`) when it expects a response, since nothing else can answer the call. |
 | Client tool handler returns `{ status: "error", error_type, error }` | Client tool handler throws `ClientToolException(message, errorType: "...")`. Any other thrown exception → `is_error: true` without an `error_type`. |
 | `extractApiErrorMessage` (HTTP upload error parsing helper) | `InvalidOperationException` from `Conversation.UploadFileAsync(...)` — the message carries the HTTP status code and the server's response body. |
 

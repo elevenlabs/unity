@@ -1034,12 +1034,11 @@ namespace ElevenLabs.WebGL.Tests
         // UnhandledClientToolCall (parity row 10) --------------------------
 
         [Test]
-        public void UnhandledClientToolCall_WithSubscriber_SuppressesErrorAndToolResult()
+        public void UnhandledClientToolCall_WithSubscriber_SuppressesErrorAndSendsToolNotFound()
         {
-            // Mirrors BaseConversation.handleClientToolCall's else branch:
-            // when onUnhandledClientToolCall is registered the SDK hands the
-            // raw call to the subscriber and returns, without firing onError
-            // or sending a client_tool_result is_error=true response.
+            // The subscriber replaces ErrorOccurred, but the agent still gets
+            // a client_tool_result is_error=true response, since nothing else
+            // can answer the call.
             var conversation = NewConversation(out var connection, out _, out _);
             ClientToolCallArgs? received = null;
             conversation.UnhandledClientToolCall += args => received = args;
@@ -1060,8 +1059,26 @@ namespace ElevenLabs.WebGL.Tests
             Assert.AreEqual("tc-99", received.ToolCallId);
             Assert.AreEqual(4, received.EventId);
             Assert.AreEqual("weather", (string)received.Parameters["q"]);
-            Assert.AreEqual(0, connection.Sent.Count);
             Assert.IsNull(errorMessage);
+            Assert.AreEqual(1, connection.Sent.Count);
+            var result = (ClientToolResult)connection.Sent[0];
+            Assert.AreEqual("tc-99", result.ToolCallId);
+            Assert.IsTrue(result.IsError);
+            Assert.AreEqual("tool_not_found", result.ErrorType);
+            StringAssert.Contains("missing", result.Result);
+        }
+
+        [Test]
+        public void UnhandledClientToolCall_WithSubscriber_NoResponseExpected_SendsNothing()
+        {
+            var conversation = NewConversation(out var connection, out _, out _);
+            var unhandledCount = 0;
+            conversation.UnhandledClientToolCall += _ => unhandledCount++;
+
+            connection.FireMessage(MakeToolCall(toolName: "missing", expectsResponse: false));
+
+            Assert.AreEqual(1, unhandledCount);
+            Assert.AreEqual(0, connection.Sent.Count);
         }
 
         [Test]

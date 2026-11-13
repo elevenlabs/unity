@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A client tool call with no registered handler now always sends the agent a `client_tool_result` error (`error_type: tool_not_found`) when it expects a response, also while `UnhandledClientToolCall` has subscribers. Previously a subscriber suppressed the result, leaving the agent waiting. Subscribers still replace `ErrorOccurred` for that call.
+
 ## [0.1.0] - 2026-10-27
 
 ### Added
