@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- WebGL: WebRTC sessions that end because the LiveKit connection failed now raise `Disconnected` with `DisconnectionReason.Error` instead of `DisconnectionReason.Agent`. This covers rooms that close for a failure reason such as `SIGNAL_CLOSE`, `CONNECTION_TIMEOUT`, `MEDIA_FAILURE` or `AGENT_ERROR`, and the agent dropping out of the room while LiveKit is reconnecting. The bundled `@elevenlabs/client` is now 1.36.1.
+
 ## [0.1.0] - 2026-10-27
 
 ### Added
