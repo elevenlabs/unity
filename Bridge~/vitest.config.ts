@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts", "build/**/*.test.ts"],
     unstubGlobals: true,
+    server: { deps: { inline: ["@elevenlabs/client"] } },
   },
 });

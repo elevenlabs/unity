@@ -29,12 +29,13 @@
     "@types/node": "^25.9.2",
     "eslint": "^9.0.0",
     "globals": "^17.6.0",
+    "livekit-client": "^2.24.0",
     "prettier": "^3.0.0",
     "rolldown": "^1.1.0",
     "typescript": "^6.0.3",
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@elevenlabs/client": "^1.12.1"
+    "@elevenlabs/client": "^1.36.1"
   }
 }
