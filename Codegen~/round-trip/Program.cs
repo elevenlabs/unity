@@ -26,11 +26,13 @@ static string Roundtrip<T>(T instance) where T : notnull
 // --- IncomingSocketEvent subtypes ---
 Console.WriteLine(Roundtrip(new ConversationInitiationMetadata()));
 Console.WriteLine(Roundtrip(new AgentResponseComplete()));
+Console.WriteLine(Roundtrip(new ContextUsage()));
 Console.WriteLine(Roundtrip(new McpToolCall()));
 Console.WriteLine(Roundtrip(new ClientError()));
 Console.WriteLine(Roundtrip(new GuardrailTriggered()));
 Console.WriteLine(Roundtrip(new UserTranscript()));
 Console.WriteLine(Roundtrip(new AgentResponse()));
+Console.WriteLine(Roundtrip(new QueueStatus()));
 Console.WriteLine(Roundtrip(new AgentResponseCorrection()));
 Console.WriteLine(Roundtrip(new AgentResponseMetadata()));
 Console.WriteLine(Roundtrip(new AudioResponse()));

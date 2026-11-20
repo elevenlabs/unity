@@ -49,6 +49,30 @@ namespace ElevenLabs.Protocol
         public int EventId { get; set; } = 0;
     }
 
+    public class ContextUsage : IncomingSocketEvent
+    {
+        [JsonProperty("context_usage_event")]
+        public ContextUsageEvent ContextUsageEvent { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "context_usage";
+    }
+
+    public class ContextUsageEvent
+    {
+        [JsonProperty("event_id")]
+        public int EventId { get; set; } = 0;
+
+        [JsonProperty("model")]
+        public string Model { get; set; } = "";
+
+        [JsonProperty("context_tokens")]
+        public int ContextTokens { get; set; } = 0;
+
+        [JsonProperty("context_limit_tokens")]
+        public int ContextLimitTokens { get; set; } = 0;
+    }
+
     public class McpToolCall : IncomingSocketEvent
     {
         [JsonProperty("mcp_tool_call")]
@@ -233,6 +257,45 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
+
+        [JsonProperty("response_id")]
+        public string ResponseId { get; set; } = "";
+
+        [JsonProperty("in_response_to_ids")]
+        public IEnumerable<string>? InResponseToIds { get; set; }
+
+        [JsonProperty("response_type")]
+        public string? ResponseType { get; set; }
+
+        [JsonProperty("attachments")]
+        public IEnumerable<AgentResponseEventAttachmentsItem>? Attachments { get; set; }
+    }
+
+    public class AgentResponseEventAttachmentsItem
+    {
+        [JsonProperty("url")]
+        public string Url { get; set; } = "";
+
+        [JsonProperty("name")]
+        public string Name { get; set; } = "";
+
+        [JsonProperty("mime_type")]
+        public string? MimeType { get; set; }
+    }
+
+    public class QueueStatus : IncomingSocketEvent
+    {
+        [JsonProperty("queue_status_event")]
+        public QueueStatusEvent QueueStatusEvent { get; set; } = null!;
+
+        [JsonProperty("type")]
+        public string Type { get; init; } = "queue_status";
+    }
+
+    public class QueueStatusEvent
+    {
+        [JsonProperty("status")]
+        public string Status { get; set; } = "";
     }
 
     public class AgentResponseCorrection : IncomingSocketEvent
@@ -254,6 +317,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
+
+        [JsonProperty("response_id")]
+        public string ResponseId { get; set; } = "";
     }
 
     public class AgentResponseMetadata : IncomingSocketEvent
@@ -359,6 +425,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("event_id")]
         public int EventId { get; set; } = 0;
+
+        [JsonProperty("response_id")]
+        public string ResponseId { get; set; } = "";
     }
 
     public class ClientToolCall : IncomingSocketEvent
@@ -419,6 +488,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("is_called")]
         public bool IsCalled { get; set; } = false;
+
+        [JsonProperty("status")]
+        public string Status { get; set; } = "";
     }
 
     public class AgentToolResponseFullPayload : IncomingSocketEvent
@@ -459,6 +531,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("truncated")]
         public bool? Truncated { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; } = "";
     }
 
     public class AgentToolRequest : IncomingSocketEvent

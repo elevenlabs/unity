@@ -58,8 +58,8 @@ to resolve `$ref`s and [`@asyncapi/modelina`](https://github.com/asyncapi/modeli
 emit the models (same stack the JS SDK's codegen uses). On top of that:
 
 - Preprocessing: rewrite Fern `x-fern-type: literal<"foo">` → JSON Schema
-  `{ type: string, const: foo }`, strip `enum` from string fields (keep them
-  plain `string` instead of generating C# enums), break cycles introduced by
+  `{ type: string, const: foo }`, strip `enum` from string / integer / number
+  fields (keep them plain scalars instead of generating C# enums), break cycles introduced by
   the parser's reference-based inlining of recursive schemas.
 - Custom C# preset: PascalCase property names, `[JsonProperty("…")]`
   attributes, `const` schemas → `init`-only string literals, required reference
@@ -234,12 +234,12 @@ Per Unity's [deprecated browser-interaction reference](https://docs.unity3d.com/
 do not introduce these in `.jslib` files, WebGL page templates, or any JS
 loaded alongside the Unity build:
 
-| Deprecated               | Use instead                            |
-| ------------------------ | -------------------------------------- |
+| Deprecated               | Use instead                                        |
+| ------------------------ | -------------------------------------------------- |
 | `Module.dynCall_*(...)`  | `{{{ makeDynCall('<sig>', '<var>') }}}(...)` macro |
-| `Pointer_stringify(ptr)` | `UTF8ToString(ptr)`                    |
-| `unity.Instance(...)`    | `createUnityInstance(...)`             |
-| `gameInstance`           | `unityInstance`                        |
+| `Pointer_stringify(ptr)` | `UTF8ToString(ptr)`                                |
+| `unity.Instance(...)`    | `createUnityInstance(...)`                         |
+| `gameInstance`           | `unityInstance`                                    |
 
 Enabling Unity's recommended **Use WebAssembly.Table** publishing setting
 removes the legacy `dynCall_*` API entirely, so the modern forms are the

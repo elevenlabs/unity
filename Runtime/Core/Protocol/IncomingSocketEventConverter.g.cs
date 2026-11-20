@@ -53,11 +53,13 @@ namespace ElevenLabs.Protocol
                     serializer
                 ),
                 "agent_response_complete" => obj.ToObject<AgentResponseComplete>(serializer),
+                "context_usage" => obj.ToObject<ContextUsage>(serializer),
                 "mcp_tool_call" => obj.ToObject<McpToolCall>(serializer),
                 "client_error" => obj.ToObject<ClientError>(serializer),
                 "guardrail_triggered" => obj.ToObject<GuardrailTriggered>(serializer),
                 "user_transcript" => obj.ToObject<UserTranscript>(serializer),
                 "agent_response" => obj.ToObject<AgentResponse>(serializer),
+                "queue_status" => obj.ToObject<QueueStatus>(serializer),
                 "agent_response_correction" => obj.ToObject<AgentResponseCorrection>(serializer),
                 "agent_response_metadata" => obj.ToObject<AgentResponseMetadata>(serializer),
                 "audio" => obj.ToObject<AudioResponse>(serializer),
