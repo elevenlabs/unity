@@ -141,7 +141,7 @@ jobs:
         (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository)
       )
     environment: ${{ github.event_name == 'pull_request_target' && 'fork-ci' || '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -195,12 +195,25 @@ jobs:
 
       # No agent credentials here, so the binary runs only the offline stripping probe and exits.
       - name: Run stripping probe
+        shell: bash
         run: |
           binary=TestProject/Build/Standalone/StandaloneSmoke
+          log="$RUNNER_TEMP/player.log"
           sudo chown -R "$(id -u):$(id -g)" TestProject/Build
           chmod +x "$binary"
-          timeout 120 "$binary" -batchmode -nographics -logFile - | tee player.log
-          grep -q "stripping probe ok: outgoing with nested overrides" player.log
+          status=0
+          timeout 120 "$binary" -batchmode -nographics -logFile "$log" || status=$?
+          cat "$log"
+          [ "$status" -eq 0 ]
+          grep -q "stripping probe ok: outgoing with nested overrides" "$log"
+
+      - name: Upload standalone build
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: standalone-stripping-smoke-build
+          path: TestProject/Build/Standalone
+          retention-days: 7
 
   integration-test:
     name: Integration tests (Playwright + Chromium)
