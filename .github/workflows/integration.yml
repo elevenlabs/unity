@@ -132,6 +132,76 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  standalone-stripping-smoke:
+    name: Standalone IL2CPP stripping smoke (Unity 6000.3.6f1)
+    if: >-
+      github.repository == 'elevenlabs/unity' && (
+        github.event_name == 'push' ||
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository)
+      )
+    environment: ${{ github.event_name == 'pull_request_target' && 'fork-ci' || '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          persist-credentials: false
+
+      - name: Free disk space for Unity image
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+
+      - name: Cache Unity Library
+        if: github.event_name != 'pull_request_target'
+        uses: actions/cache@v5
+        with:
+          path: TestProject/Library
+          key: Library-TestProject-StandaloneLinux64-${{ hashFiles('TestProject/Packages/packages-lock.json', 'TestProject/ProjectSettings/ProjectSettings.asset') }}
+          restore-keys: |
+            Library-TestProject-StandaloneLinux64-
+            Library-TestProject-
+
+      - name: Restore Unity Library
+        if: github.event_name == 'pull_request_target'
+        uses: actions/cache/restore@v5
+        with:
+          path: TestProject/Library
+          key: Library-TestProject-StandaloneLinux64-${{ hashFiles('TestProject/Packages/packages-lock.json', 'TestProject/ProjectSettings/ProjectSettings.asset') }}
+          restore-keys: |
+            Library-TestProject-StandaloneLinux64-
+            Library-TestProject-
+
+      - name: Build standalone
+        uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42 # v5.0.0
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          projectPath: TestProject
+          unityVersion: 6000.3.6f1
+          targetPlatform: StandaloneLinux64
+          customImage: unityci/editor:ubuntu-6000.3.6f1-linux-il2cpp-3.2.2
+          buildMethod: ElevenLabs.WebGL.Editor.HostBuild.BuildStandalone
+          allowDirtyBuild: true
+
+      # No agent credentials here, so the binary runs only the offline stripping probe and exits.
+      - name: Run stripping probe
+        run: |
+          binary=TestProject/Build/Standalone/StandaloneSmoke
+          sudo chown -R "$(id -u):$(id -g)" TestProject/Build
+          chmod +x "$binary"
+          timeout 120 "$binary" -batchmode -nographics -logFile - | tee player.log
+          grep -q "stripping probe ok: outgoing with nested overrides" player.log
+
   integration-test:
     name: Integration tests (Playwright + Chromium)
     runs-on: ubuntu-latest

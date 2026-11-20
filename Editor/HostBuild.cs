@@ -71,9 +71,9 @@ namespace ElevenLabs.WebGL.Editor
             );
 
             // IL2CPP + High stripping is the worst-case AOT shape — if the
-            // native link.xml ever drifts from the codegen output, the
-            // smoke surfaces it as a runtime JsonReaderException instead
-            // of a vague consumer-side bug report. Restore the pre-call
+            // native link.xml stops preserving the protocol DTOs, the
+            // smoke's stripping probe fails instead of a vague
+            // consumer-side bug report. Restore the pre-call
             // settings so a developer running this on their workstation
             // doesn't end up with their project silently flipped to IL2CPP.
             ScriptingImplementation previousBackend = PlayerSettings.GetScriptingBackend(hostGroup);

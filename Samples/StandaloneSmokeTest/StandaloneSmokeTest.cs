@@ -66,6 +66,14 @@ namespace ElevenLabs.Native.Samples.StandaloneSmokeTest
 
         private async Awaitable RunSmokeTestAsync()
         {
+            int probeFailures = ProtocolStrippingProbe.Run();
+            if (probeFailures > 0)
+            {
+                Debug.LogError($"[StandaloneSmoke] {probeFailures} stripping probe(s) failed");
+                Quit(1);
+                return;
+            }
+
             // Env vars win over the Resources asset because the embedded
             // TestProject is also the package root (manifest.json:
             // "file:../.."), so Unity sees Assets/Resources/ assets twice
