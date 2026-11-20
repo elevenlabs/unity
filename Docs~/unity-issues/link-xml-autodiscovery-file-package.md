@@ -30,7 +30,7 @@ silently ignored.
 <repo>/
   package.json                           ← UPM manifest (id: io.elevenlabs.agents)
   Runtime/Native/link.xml                ← preserves ElevenLabs.Protocol.* types
-  Runtime/Native/.../*.cs                ← Newtonsoft-reflected DTOs
+  Runtime/Core/Protocol/*.cs             ← Newtonsoft-reflected DTOs (ElevenLabs.Agents.Core)
   TestProject/                           ← embedded host project (developer CWD)
     Assets/
     Packages/
@@ -117,13 +117,15 @@ UnityLinker. See [`Editor/LinkXmlInjector.cs`](../../Editor/LinkXmlInjector.cs).
 With that callback, the standalone smoke runs end-to-end and the
 constructor is preserved.
 
+The link.xml preserves the DTOs with a single
+`<type fullname="ElevenLabs.Protocol.*" preserve="all" />` under
+`<assembly fullname="ElevenLabs.Agents.Core">`. We first ruled the
+wildcard out while this file wasn't reaching UnityLinker at all (the
+bug above), so its failure was misattributed; it works once the file
+is injected.
+
 Other workarounds we considered and rejected:
 
-- **Wildcard `<type fullname="ElevenLabs.Protocol.*" preserve="all" />`.**
-  Not honoured by UnityLinker — also a silent failure (likely a
-  separate bug; the [`com.unity.nuget.newtonsoft-json` package's
-  link.xml](https://github.com/jilleJr/Newtonsoft.Json-for-Unity/blob/master/Src/Newtonsoft.Json-for-Unity/link.xml)
-  lists each type explicitly for the same reason).
 - **Move `link.xml` to the package root** (`<repo>/link.xml`). Would
   collide with the package metadata at the repo root and doesn't
   remove the underlying auto-discovery bug.
@@ -142,8 +144,3 @@ Other workarounds we considered and rejected:
    Even a verbose-mode log of "discovered N link.xml files, passing M
    to UnityLinker" would have collapsed the debugging time on our
    side from hours to minutes.
-3. **Wildcard `<type fullname="Foo.*"/>` support:** the [Mono linker
-   format docs](https://github.com/dotnet/runtime/blob/main/docs/tools/illink/data-formats.md)
-   reference wildcard usage; Unity's UnityLinker silently skips them.
-   Either implement the same wildcard semantics or fail the build
-   when a wildcard fullname is encountered.
