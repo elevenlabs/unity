@@ -1,0 +1,62 @@
+name: Linux headless player segfault repro
+
+on:
+  push:
+    branches: [scratch/linux-headless-segfault-repro]
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Free disk space for Unity image
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/share/powershell
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+
+      - name: Build empty-scene Linux players (Mono + IL2CPP)
+        uses: game-ci/unity-builder@d829bfc901f2347c8fe18898f06712b66916ef42 # v5.0.0
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          projectPath: repro
+          unityVersion: 6000.3.6f1
+          targetPlatform: StandaloneLinux64
+          customImage: unityci/editor:ubuntu-6000.3.6f1-linux-il2cpp-3.2.2
+          buildMethod: ReproBuild.Build
+          allowDirtyBuild: true
+
+      - name: Run players with and without a display
+        shell: bash
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" repro/Build
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+          echo "DISPLAY='${DISPLAY:-}' WAYLAND_DISPLAY='${WAYLAND_DISPLAY:-}'"
+          run() {
+            local name=$1; shift
+            local log="$RUNNER_TEMP/$name.log"
+            local rc=0
+            timeout 60 "$@" -logFile "$log" > /dev/null 2>&1 || rc=$?
+            printf '%-34s rc=%-4s %-28s start=%s segv=%s\n' "$name" "$rc" \
+              "$(grep -o 'window backend: [^ ]*' "$log" | head -1)" \
+              "$(grep -c 'REPRO reached Start' "$log")" "$(grep -c SIGSEGV "$log")"
+          }
+          for backend in mono il2cpp; do
+            bin="repro/Build/$backend/Repro"
+            chmod +x "$bin"
+            run "$backend batchmode+nographics" "$bin" -batchmode -nographics
+            run "$backend batchmode" "$bin" -batchmode
+            run "$backend nographics" "$bin" -nographics
+            run "$backend no flags" "$bin"
+            run "$backend xvfb batchmode+nographics" xvfb-run -a "$bin" -batchmode -nographics
+          done
+          echo "--- full log: mono batchmode+nographics ---"
+          cat "$RUNNER_TEMP/mono batchmode+nographics.log"
