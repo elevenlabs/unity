@@ -1,5 +1,5 @@
-// Factory functions for the five SDK classes the C# side drives via the
-// generic JsObject primitive. Each factory is a closure over the bundled SDK
+// Factory functions for the SDK classes the C# side drives via the generic
+// JsObject primitive, plus the SDK's source-info setter. Each factory is a closure over the bundled SDK
 // class. They're collected here as a plain object so:
 //
 //   * `index.ts` can iterate them and register each with the primitives layer
@@ -28,6 +28,7 @@ import {
   type MediaDeviceInputConfig,
   type WebRTCConnectionConfig,
 } from "@elevenlabs/client/internal/unity";
+import { setSourceInfo, type SourceInfo } from "@elevenlabs/client/internal";
 
 // MediaDeviceOutput is intentionally absent. The WebSocket arm now uses our
 // own `createWebAudioSink` (Bridge~/src/connection/web-audio-sink.ts) so the
@@ -48,4 +49,9 @@ export const connectionFactories: Record<string, (config: unknown) => unknown> =
     createConnection: (config) => createConnection(config as SessionConfig),
     createMediaDeviceInput: (config) =>
       MediaDeviceInput.create(config as MediaDeviceInputConfig),
+    // The SDK reads its module-global source info when a connection is
+    // created, so C# calls this before every connection factory. The values
+    // come from C# (ElevenLabs.Agents.SdkInfo) so the native and WebGL
+    // transports share one version constant.
+    setSourceInfo: (info) => setSourceInfo(info as SourceInfo),
   };

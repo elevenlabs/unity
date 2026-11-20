@@ -157,8 +157,8 @@ namespace ElevenLabs.Native
         // ConversationOptions. Each null / empty container is left unset so
         // Newtonsoft's NullValueHandling.Ignore drops it from the wire payload
         // — matches the omission discipline BridgedSession.BuildSessionConfig
-        // applies on the WebGL path. SourceInfo and ToolMockConfig are
-        // deliberately not populated yet (see v0.1-parity.md #10).
+        // applies on the WebGL path. SourceInfo is the SDK's own identity,
+        // not an application option.
         internal static ConversationInitiationClientData BuildInitiationData(
             ConversationOptions options
         )
@@ -171,6 +171,7 @@ namespace ElevenLabs.Native
                 CustomLlmExtraBody = ToDynamicDictionary(options.CustomLlmExtraBody),
                 DynamicVariables = ToDynamicDictionary(options.DynamicVariables),
                 UserId = string.IsNullOrEmpty(options.UserId) ? null : options.UserId,
+                SourceInfo = SdkInfo.ToSourceInfo(),
             };
         }
 

@@ -148,6 +148,30 @@ namespace ElevenLabs.Native.Tests
         }
 
         [Test]
+        public void BuildInitiationData_IdentifiesAsUnitySdk()
+        {
+            ConversationInitiationClientData data = NativeWebSocketConnection.BuildInitiationData(
+                new ConversationOptions { AgentId = "agent-test" }
+            );
+            Assert.AreEqual("unity_sdk", data.SourceInfo!.Source);
+            Assert.AreEqual(SdkInfo.Version, data.SourceInfo.Version);
+        }
+
+        [Test]
+        public void SdkInfoVersion_MatchesPackageJson()
+        {
+            var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                typeof(Conversation).Assembly
+            );
+            Assert.IsNotNull(package, "Core assembly isn't resolved to a UPM package.");
+            Assert.AreEqual(
+                package!.version,
+                SdkInfo.Version,
+                "Update SdkInfo.Version in Runtime/Core/AssemblyInfo.cs to match package.json."
+            );
+        }
+
+        [Test]
         public void BuildInitiationData_NullUserId_LeavesFieldNull()
         {
             var options = new ConversationOptions { UserId = "" };
@@ -277,6 +301,10 @@ namespace ElevenLabs.Native.Tests
                 StringAssert.Contains("\"user_id\":\"user-A\"", raw);
                 StringAssert.Contains("\"dynamic_variables\"", raw);
                 StringAssert.Contains("\"mood\":\"happy\"", raw);
+                StringAssert.Contains(
+                    $"\"source_info\":{{\"source\":\"unity_sdk\",\"version\":\"{SdkInfo.Version}\"}}",
+                    raw
+                );
             }
             finally
             {

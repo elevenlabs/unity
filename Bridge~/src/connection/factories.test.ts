@@ -65,6 +65,10 @@ vi.mock("@elevenlabs/client/internal/unity", () => {
   };
 });
 
+vi.mock("@elevenlabs/client/internal", () => ({
+  setSourceInfo: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Import the mocked modules so we can access the vi.fn() references.
 // ---------------------------------------------------------------------------
@@ -75,6 +79,7 @@ import {
   createConnection,
   MediaDeviceInput,
 } from "@elevenlabs/client/internal/unity";
+import { setSourceInfo } from "@elevenlabs/client/internal";
 
 // ---------------------------------------------------------------------------
 // Emscripten-global stub helpers (mirrors the e2e.test.ts setup).
@@ -415,6 +420,22 @@ describe("createMediaDeviceInput factory", () => {
     await Promise.resolve();
 
     expect(lastSettleMessage()).toBe("31:ok:false");
+  });
+});
+
+describe("setSourceInfo factory", () => {
+  it("forwards the C#-supplied identity to the SDK's setSourceInfo", async () => {
+    const info = { name: "unity_sdk", version: "0.1.0" };
+    EL_InvokeFactoryAsync(
+      makePtr("setSourceInfo"),
+      makePtr(JSON.stringify([info])),
+      SHAPE_VOID,
+      40,
+    );
+    await Promise.resolve();
+
+    expect(setSourceInfo).toHaveBeenCalledWith(info);
+    expect(lastSettleMessage()).toBe("40:ok:null");
   });
 });
 
