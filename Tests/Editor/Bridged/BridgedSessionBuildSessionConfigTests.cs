@@ -18,6 +18,17 @@ namespace ElevenLabs.WebGL.Bridged.Tests
     public class BridgedSessionBuildSessionConfigTests
     {
         [Test]
+        public void BuildSourceInfo_IdentifiesAsUnitySdk()
+        {
+            // Shape of the JS client's SourceInfo: { name, version }.
+            JObject info = BridgedSession.BuildSourceInfo();
+
+            Assert.AreEqual(2, info.Count);
+            Assert.AreEqual("unity_sdk", info.Value<string>("name"));
+            Assert.AreEqual(SdkInfo.Version, info.Value<string>("version"));
+        }
+
+        [Test]
         public void OmitsDynamicVariables_WhenNull()
         {
             var options = new ConversationOptions

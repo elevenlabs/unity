@@ -95,6 +95,7 @@ namespace ElevenLabs.WebGL.Bridged
                 );
             }
 
+            await JsBridge.InvokeFactoryAsync<object>("setSourceInfo", BuildSourceInfo());
             JObject sessionConfig = BuildSessionConfig(options);
             JsObject connectionHandle = await JsBridge.InvokeFactoryAsync<JsObject>(
                 "createWebRTCConnection",
@@ -126,6 +127,7 @@ namespace ElevenLabs.WebGL.Bridged
             ConversationOptions options
         )
         {
+            await JsBridge.InvokeFactoryAsync<object>("setSourceInfo", BuildSourceInfo());
             JObject sessionConfig = BuildSessionConfig(options);
             JsObject connectionHandle = await JsBridge.InvokeFactoryAsync<JsObject>(
                 "createWebSocketConnection",
@@ -230,6 +232,13 @@ namespace ElevenLabs.WebGL.Bridged
             SetIfPresent(obj, "overrides", BuildOverrides(options.Overrides));
             return obj;
         }
+
+        // Argument for the JS client's setSourceInfo. The client keeps it in a
+        // module global (default `js_sdk` and its own version) and reads it
+        // when a connection is created, for both the initiation event's
+        // source_info and the source / version query parameters.
+        internal static JObject BuildSourceInfo() =>
+            new() { ["name"] = SdkInfo.Source, ["version"] = SdkInfo.Version };
 
         // JS SDK's SessionConfig.overrides shape: top-level keys are
         // camelCase, `agent.prompt` is the wire-shape pass-through object.

@@ -93,26 +93,36 @@ function substituteFernLiterals(node: unknown, visited: WeakSet<object>): void {
 
 substituteFernLiterals(spec, new WeakSet());
 
+const ENUM_STRIPPED_TYPES = new Set(["string", "integer", "number"]);
+
 /**
- * In-place strips `enum:` from every string field in the schema tree so
- * Modelina emits plain `string` properties instead of generating C# enums.
+ * In-place strips `enum:` from every string / integer / number field in the
+ * schema tree so Modelina emits plain `string` / `int` / `double` properties
+ * instead of generating C# enums. Numeric enums matter beyond style: Modelina
+ * emits their value-to-enum helper with a `dynamic` parameter, which trips
+ * Unity's CS0656 (see `sanitizeCSType` in protocol-preset.ts).
  * `visited` is a cycle guard — pass a fresh `WeakSet` at each top-level call.
  */
-function stripStringEnums(node: unknown, visited: WeakSet<object>): void {
+function stripScalarEnums(node: unknown, visited: WeakSet<object>): void {
   if (Array.isArray(node)) {
     if (visited.has(node)) return;
     visited.add(node);
-    for (const item of node) stripStringEnums(item, visited);
+    for (const item of node) stripScalarEnums(item, visited);
     return;
   }
   if (!isObject(node)) return;
   if (visited.has(node)) return;
   visited.add(node);
-  if (node.type === "string" && Array.isArray(node.enum)) delete node.enum;
-  for (const value of Object.values(node)) stripStringEnums(value, visited);
+  if (
+    typeof node.type === "string" &&
+    ENUM_STRIPPED_TYPES.has(node.type) &&
+    Array.isArray(node.enum)
+  )
+    delete node.enum;
+  for (const value of Object.values(node)) stripScalarEnums(value, visited);
 }
 
-stripStringEnums(spec, new WeakSet());
+stripScalarEnums(spec, new WeakSet());
 
 /**
  * Returns a deep clone of `node` with cyclic back-references replaced by `{}`,

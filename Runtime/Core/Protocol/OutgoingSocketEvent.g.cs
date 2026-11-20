@@ -27,11 +27,14 @@ namespace ElevenLabs.Protocol
         public int EventId { get; set; } = 0;
 
         [JsonProperty("score")]
-        public string Score { get; set; } = "";
+        public string? Score { get; set; }
     }
 
     public class UserMessage : OutgoingSocketEvent
     {
+        [JsonProperty("id")]
+        public string? Id { get; set; }
+
         [JsonProperty("type")]
         public string Type { get; init; } = "user_message";
 
@@ -40,6 +43,9 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("user_identifier")]
         public string? UserIdentifier { get; set; }
+
+        [JsonProperty("source_medium")]
+        public string? SourceMedium { get; set; }
     }
 
     public class UserActivity : OutgoingSocketEvent
@@ -58,10 +64,16 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("file")]
         public File? File { get; set; }
+
+        [JsonProperty("files")]
+        public IEnumerable<FilesItem>? Files { get; set; }
     }
 
     public class Text
     {
+        [JsonProperty("id")]
+        public string? Id { get; set; }
+
         [JsonProperty("type")]
         public string Type { get; init; } = "user_message";
 
@@ -70,9 +82,21 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("user_identifier")]
         public string? UserIdentifier { get; set; }
+
+        [JsonProperty("source_medium")]
+        public string? SourceMedium { get; set; }
     }
 
     public class File
+    {
+        [JsonProperty("type")]
+        public string Type { get; init; } = "file_input";
+
+        [JsonProperty("file_id")]
+        public string FileId { get; set; } = "";
+    }
+
+    public class FilesItem
     {
         [JsonProperty("type")]
         public string Type { get; init; } = "file_input";
@@ -155,6 +179,12 @@ namespace ElevenLabs.Protocol
         [JsonProperty("starting_workflow_node_id")]
         public string? StartingWorkflowNodeId { get; set; }
 
+        [JsonProperty("procedure_ids")]
+        public IEnumerable<string>? ProcedureIds { get; set; }
+
+        [JsonProperty("start_procedure_ids")]
+        public IEnumerable<string>? StartProcedureIds { get; set; }
+
         [JsonProperty("dynamic_variables")]
         public Dictionary<string, dynamic>? DynamicVariables { get; set; }
 
@@ -190,18 +220,30 @@ namespace ElevenLabs.Protocol
     {
         [JsonProperty("soft_timeout_config")]
         public ConversationConfigOverrideTurnSoftTimeoutConfig? SoftTimeoutConfig { get; set; }
+
+        [JsonProperty("noisy_environment_message")]
+        public string? NoisyEnvironmentMessage { get; set; }
     }
 
     public class ConversationConfigOverrideTurnSoftTimeoutConfig
     {
         [JsonProperty("message")]
         public string? Message { get; set; }
+
+        [JsonProperty("additional_soft_timeout_messages")]
+        public IEnumerable<string>? AdditionalSoftTimeoutMessages { get; set; }
     }
 
     public class ConversationConfigOverrideTts
     {
+        [JsonProperty("model_id")]
+        public string? ModelId { get; set; }
+
         [JsonProperty("voice_id")]
         public string? VoiceId { get; set; }
+
+        [JsonProperty("supported_voices")]
+        public IEnumerable<ConversationConfigOverrideTtsSupportedVoicesItem>? SupportedVoices { get; set; }
 
         [JsonProperty("stability")]
         public double? Stability { get; set; }
@@ -211,12 +253,63 @@ namespace ElevenLabs.Protocol
 
         [JsonProperty("similarity_boost")]
         public double? SimilarityBoost { get; set; }
+
+        [JsonProperty("clone_strength")]
+        public double? CloneStrength { get; set; }
+
+        [JsonProperty("pronunciation_dictionary_locators")]
+        public IEnumerable<ConversationConfigOverrideTtsPronunciationDictionaryLocatorsItem>? PronunciationDictionaryLocators { get; set; }
+    }
+
+    public class ConversationConfigOverrideTtsSupportedVoicesItem
+    {
+        [JsonProperty("label")]
+        public string Label { get; set; } = "";
+
+        [JsonProperty("voice_id")]
+        public string VoiceId { get; set; } = "";
+
+        [JsonProperty("description")]
+        public string? Description { get; set; }
+
+        [JsonProperty("language")]
+        public string? Language { get; set; }
+
+        [JsonProperty("model_family")]
+        public string? ModelFamily { get; set; }
+
+        [JsonProperty("optimize_streaming_latency")]
+        public int? OptimizeStreamingLatency { get; set; }
+
+        [JsonProperty("stability")]
+        public double? Stability { get; set; }
+
+        [JsonProperty("speed")]
+        public double? Speed { get; set; }
+
+        [JsonProperty("similarity_boost")]
+        public double? SimilarityBoost { get; set; }
+
+        [JsonProperty("clone_strength")]
+        public double? CloneStrength { get; set; }
+    }
+
+    public class ConversationConfigOverrideTtsPronunciationDictionaryLocatorsItem
+    {
+        [JsonProperty("pronunciation_dictionary_id")]
+        public string PronunciationDictionaryId { get; set; } = "";
+
+        [JsonProperty("version_id")]
+        public string VersionId { get; set; } = "";
     }
 
     public class ConversationConfigOverrideConversation
     {
         [JsonProperty("text_only")]
         public bool? TextOnly { get; set; }
+
+        [JsonProperty("max_duration_seconds")]
+        public int? MaxDurationSeconds { get; set; }
     }
 
     public class ConversationConfigOverrideAgent
@@ -242,8 +335,14 @@ namespace ElevenLabs.Protocol
         [JsonProperty("llm")]
         public string? Llm { get; set; }
 
+        [JsonProperty("reasoning_effort")]
+        public string? ReasoningEffort { get; set; }
+
         [JsonProperty("tool_ids")]
         public IEnumerable<string>? ToolIds { get; set; }
+
+        [JsonProperty("tool_ids_strict")]
+        public bool? ToolIdsStrict { get; set; }
 
         [JsonProperty("native_mcp_server_ids")]
         public IEnumerable<string>? NativeMcpServerIds { get; set; }
