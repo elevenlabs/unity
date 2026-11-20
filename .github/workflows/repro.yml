@@ -10,6 +10,7 @@ permissions:
 jobs:
   repro:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,7 +45,7 @@ jobs:
             local name=$1; shift
             local log="$RUNNER_TEMP/$name.log"
             local rc=0
-            timeout 60 "$@" -logFile "$log" > /dev/null 2>&1 || rc=$?
+            timeout -k 10 60 "$@" -logFile "$log" < /dev/null > /dev/null 2>&1 || rc=$?
             printf '%-34s rc=%-4s %-28s start=%s segv=%s\n' "$name" "$rc" \
               "$(grep -o 'window backend: [^ ]*' "$log" | head -1)" \
               "$(grep -c 'REPRO reached Start' "$log")" "$(grep -c SIGSEGV "$log")"
