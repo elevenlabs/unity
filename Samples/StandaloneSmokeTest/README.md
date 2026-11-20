@@ -9,12 +9,13 @@ is verified end-to-end before shipping.
 
 ## What it asserts
 
-- **Build / link survives IL2CPP managed stripping:** the binary produced
-  by `HostBuild.BuildStandalone` runs to `Application.Quit` without a
-  `JsonReaderException` from a stripped `[JsonProperty]` setter. The
-  `link.xml` preserves the `ElevenLabs.Protocol.*` namespace explicitly;
-  this smoke catches regressions in either the preserve directive or the
-  consumer-side `[AlwaysLinkAssembly]` glue.
+- **Build / link survives IL2CPP managed stripping:** before any network
+  traffic, [`ProtocolStrippingProbe`](ProtocolStrippingProbe.cs)
+  deserialises representative incoming events (nested payloads, a nested
+  list) and serialises an outgoing event with nested overrides. Any
+  failure exits 1. This runs without agent credentials, so CI exercises it
+  on every build; it catches regressions in the `link.xml` preserve
+  directive, the `LinkXmlInjector`, or the `[AlwaysLinkAssembly]` glue.
 - **Native transport handshake completes:** the conversation_initiation
   round-trip via Newtonsoft.Json over `IncomingSocketEventConverter`
   populates `Conversation.ConversationId` before the first user message.
@@ -83,8 +84,11 @@ is verified end-to-end before shipping.
 
 ## CI
 
-No automated CI integration ships at v0.1 — the smoke is a manual
-gate before tagging. To wire it into CI later:
+The `standalone-stripping-smoke` job in
+[`integration.yml`](../../.github/workflows/integration.yml) builds the
+smoke for Linux (IL2CPP + High stripping) and runs it without agent
+credentials, so every PR exercises the stripping probe. The live-session
+half stays a manual gate before tagging. To also run it in CI:
 
 1. Materialise `TestProject/Assets/Resources/StandaloneSmokeConfig.asset`
    from a secret (the file is a standard Unity `.asset` YAML — see the
