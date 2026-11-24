@@ -27,6 +27,12 @@ See the "Reporting Unity issues" section of
   — UnityLinker silently drops package-internal `link.xml` files when
   the package is referenced as a local file-path package whose root is
   the embedded host project's parent.
+- [`linux-player-headless-segfault.md`](./linux-player-headless-segfault.md)
+  — Linux standalone players (Mono and IL2CPP) segfault at startup
+  without an X display when started with `-nographics`, and hang
+  ignoring `SIGTERM` without it, despite `-batchmode -nographics`
+  being documented for machines without a GPU. Worked around in CI
+  with `xvfb-run`.
 - [`microphone-no-voice-processing-toggle.md`](./microphone-no-voice-processing-toggle.md)
   — `Microphone.Start` opens the mic device in the OS's default
   capture role on every native platform, explicitly opting out of the
